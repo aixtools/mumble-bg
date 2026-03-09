@@ -45,6 +45,8 @@ Relevant files:
 - `corporation_name` and `alliance_name` are now carried through from cube-core.
 - `corporation_ticker` and `alliance_ticker` remain supported in the contract and default to empty strings when cube-core does not provide them.
 
+This contract update aligns with Cube core behavioral changes introduced in Cube PR #74.
+
 - Membership semantics:
   - `character_id` (PKID) is stable.
   - A pilot can change corporation over time.
