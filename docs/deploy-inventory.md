@@ -18,22 +18,22 @@ Older Docker wiring also exists on the `cube-newmumble-upstream` source branch, 
 `cube/deploy/setup-hetzner.sh` currently owns:
 
 - sudoers entry allowing restart of `cube-mumble-auth`
-- creation of a dedicated `mumble_authenticator` virtualenv
+- creation of a dedicated `authenticator` virtualenv
 - installation of the `cube-mumble-auth` systemd service
 - enabling that service on boot
 
 The current service definition is effectively:
 
-- working directory: `.../mumble_authenticator`
+- working directory: `.../authenticator`
 - env file: `.../.env`
-- exec: `.../mumble_authenticator/venv/bin/python .../mumble_authenticator/authenticator.py`
+- exec: `.../authenticator/venv/bin/python .../authenticator/authenticator.py`
 
 ### GitHub Actions
 
 `cube/.github/workflows/deploy-dev.yml` currently owns:
 
 - rsync of the whole Cube repo to the server
-- installation of `mumble_authenticator` dependencies
+- installation of `authenticator` dependencies
 - restart of `cube-mumble-auth`
 
 This means Cube currently deploys the Mumble backend as part of the Cube app deploy, even though it is logically a separate runtime.

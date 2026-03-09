@@ -7,7 +7,7 @@ User=cube
 Group=cube
 WorkingDirectory=/home/cube/cube-mumble
 EnvironmentFile=/home/cube/.env/cube-mumble
-ExecStart=/home/cube/.venv/cube-mumble/bin/python /home/cube/cube-mumble/mumble_authenticator/authenticator.py
+ExecStart=/home/cube/.venv/cube-mumble/bin/python /home/cube/cube-mumble/authenticator/authenticator.py
 Restart=always
 RestartSec=5
 

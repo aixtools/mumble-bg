@@ -11,7 +11,7 @@ from django.utils.translation import gettext as _
 from django.views.decorators.http import require_POST
 
 from accounts.models import EveCharacter, GroupMembership
-from mumble_authenticator.passwords import build_murmur_password_record
+from authenticator.passwords import build_murmur_password_record
 from modules.corporation.core import _user_is_alliance_leader
 from modules.corporation.models import CorporationSettings
 from .ice_sync import (

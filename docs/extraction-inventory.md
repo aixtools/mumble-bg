@@ -9,7 +9,7 @@ Source snapshot:
 Copied into this repository:
 
 - `modules/mumble/`
-- `mumble_authenticator/`
+- `authenticator/`
 - `templates/mumble/`
 
 These files are copied as a rebuild baseline, not as a final package layout.

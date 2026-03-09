@@ -7,7 +7,7 @@ This repository currently contains a direct code snapshot from `cube` branch `cu
 Copied baseline paths:
 
 - `modules/mumble`
-- `mumble_authenticator`
+- `authenticator`
 - `templates/mumble`
 
 This is not the target architecture. The copied code is here to preserve the current implementation while `cube-mumble` is rebuilt around the newer boundary:

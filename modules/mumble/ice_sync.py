@@ -13,7 +13,7 @@ def _load_slice():
 
     slice_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        'mumble_authenticator',
+        'authenticator',
         'MumbleServer.ice',
     )
     Ice.loadSlice(['-I' + Ice.getSliceDir(), slice_path])

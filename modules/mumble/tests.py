@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import EveCharacter, Group, GroupMembership, UserProfile
-from mumble_authenticator.passwords import (
+from authenticator.passwords import (
     LEGACY_BCRYPT_SHA256,
     MURMUR_PBKDF2_SHA384,
     build_murmur_password_record,

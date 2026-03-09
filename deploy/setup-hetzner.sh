@@ -37,7 +37,7 @@ if [ ! -d "${VENV_DIR}" ]; then
     sudo -u "${APP_USER}" python3 -m venv "${VENV_DIR}"
 fi
 
-sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${APP_DIR}/mumble_authenticator/requirements.txt"
+sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${APP_DIR}/authenticator/requirements.txt"
 
 cat > /etc/sudoers.d/cube-mumble << 'EOF'
 cube ALL=(ALL) NOPASSWD: /bin/systemctl restart cube-mumble-auth, /bin/systemctl status cube-mumble-auth, /bin/systemctl daemon-reload
