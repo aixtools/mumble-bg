@@ -43,6 +43,13 @@ Relevant files:
 
 `character_name` is included for display name construction in mumble. `corporation_ticker` and `alliance_ticker` are part of the contract too and currently default to empty strings until cube-core persists them directly.
 
+- Membership semantics:
+  - `character_id` (PKID) is stable.
+  - A pilot can change corporation over time.
+  - A corporation can change alliance over time.
+  - Therefore `alliance_id` is membership-state, not an immutable identity attribute.
+  - cube-mumble should always treat `alliance_id` as a snapshot from cube-core and refresh it whenever character org state is refreshed.
+
 ## Environment Contracts
 
 - `CUBE_CORE_*` = read-only Cube-core source DB used by the authenticator.

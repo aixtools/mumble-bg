@@ -43,3 +43,9 @@ The intended target is narrower than the copied code:
 - `cube-core` should keep only Cube-side eligibility UI, user/admin actions, and status display
 - `cube-mumble` should own server inventory, account provisioning, per-server identifiers, password application, and runtime state
 - long-lived per-server Mumble auth state should not remain in Cube core
+
+## Org Membership Semantics
+
+- Pilot identity is `character_id`-stable, but corporation and alliance are mutable membership state.
+- A pilot can move between corporations; a corporation can move between alliances.
+- Alliance must therefore be refreshed from the latest character membership snapshot (or equivalent authoritative membership source), not treated as a fixed pilot attribute.

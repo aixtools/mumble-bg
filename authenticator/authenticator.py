@@ -35,7 +35,13 @@ logger = logging.getLogger(__name__)
 
 
 class PilotIdentity:
-    """Read-only cube-core pilot projection consumed by cube-mumble."""
+    """
+    Read-only cube-core pilot projection consumed by cube-mumble.
+
+    Important: PKID does not bind to a fixed alliance.
+    A pilot can only change corporation, and a corporation can change alliance,
+    so alliance_id must be treated as part of the current membership snapshot.
+    """
 
     __slots__ = (
         'character_id',
