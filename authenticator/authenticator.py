@@ -18,8 +18,8 @@ import time
 import logging
 from datetime import datetime, timezone
 from authenticator.database import (
-    BaseAdapterConfig,
-    CubeCoreReadOnlyDatabaseAdapter,
+    DBAdapterObject,
+    CubeCoreDBA,
     CubeDatabaseError,
 )
 
@@ -77,8 +77,8 @@ class PilotIdentity:
         return iter(self.as_dict().items())
 
 
-CORE_DB_ADAPTER = CubeCoreReadOnlyDatabaseAdapter(
-    BaseAdapterConfig(
+CORE_DB_ADAPTER = CubeCoreDBA(
+    DBAdapterObject(
         name=os.environ.get('CUBE_CORE_DATABASE_NAME', 'cube'),
         host=os.environ.get('CUBE_CORE_DATABASE_HOST', 'localhost'),
         user=os.environ.get('CUBE_CORE_DATABASE_USER', 'cube'),

@@ -10,7 +10,7 @@ class CubeDatabaseError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class BaseAdapterConfig:
+class DBAdapterObject:
     name: str
     host: str
     user: str
@@ -18,20 +18,20 @@ class BaseAdapterConfig:
     engine: str = ''
 
 
-class BaseDatabaseAdapter:
+class CubeCoreBaseDBA:
     """Small base used by auth/runtime paths to avoid DB logic in auth handlers."""
 
-    def __init__(self, config: BaseAdapterConfig):
+    def __init__(self, config: DBAdapterObject):
         self._config = config
 
     def connect(self):
         raise NotImplementedError
 
 
-class CubeCoreReadOnlyDatabaseAdapter(BaseDatabaseAdapter):
+class CubeCoreDBA(CubeCoreBaseDBA):
     """Read-only adapter for cube-core source data (prefer SQL-compatible backends)."""
 
-    def __init__(self, config: BaseAdapterConfig):
+    def __init__(self, config: DBAdapterObject):
         super().__init__(config=config)
         self._candidates = self._build_candidates(config.engine)
 
@@ -81,7 +81,7 @@ class CubeCoreReadOnlyDatabaseAdapter(BaseDatabaseAdapter):
         raise CubeDatabaseError('Could not connect to cube-core via postgresql or mysql') from last_error
 
 
-class CubeMmbleAuthDatabaseAdapter(BaseDatabaseAdapter):
+class CubeMmbleAuthDatabaseAdapter(CubeCoreBaseDBA):
     """Read-write adapter for cube-mmble local runtime schema."""
 
     def connect(self):
@@ -118,4 +118,3 @@ class CubeMmbleAuthDatabaseAdapter(BaseDatabaseAdapter):
             user=self._config.user,
             password=self._config.password,
         )
-
