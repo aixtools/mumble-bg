@@ -9,10 +9,10 @@ fi
 
 APP_USER="cube"
 APP_HOME="/home/${APP_USER}"
-APP_DIR="${APP_HOME}/cube-monitor"
-VENV_DIR="${APP_HOME}/.venv/cube-monitor"
+APP_DIR="${APP_HOME}/cube-mumble"
+VENV_DIR="${APP_HOME}/.venv/cube-mumble"
 ENV_DIR="${APP_HOME}/.env"
-ENV_FILE="${ENV_DIR}/cube-monitor"
+ENV_FILE="${ENV_DIR}/cube-mumble"
 SERVICE_NAME="cube-mumble-auth"
 SERVICE_SRC="${APP_DIR}/deploy/systemd/${SERVICE_NAME}.service"
 SERVICE_DEST="/etc/systemd/system/${SERVICE_NAME}.service"

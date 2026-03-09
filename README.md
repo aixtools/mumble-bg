@@ -22,9 +22,9 @@ See [docs/extraction-inventory.md](/home/michael/prj/cube-mumble/docs/extraction
 
 For the current standalone authenticator phase, the default layout is:
 
-- repo checkout: `/home/cube/cube-monitor`
-- virtualenv: `/home/cube/.venv/cube-monitor`
-- environment file: `/home/cube/.env/cube-monitor`
+- repo checkout: `/home/cube/cube-mumble`
+- virtualenv: `/home/cube/.venv/cube-mumble`
+- environment file: `/home/cube/.env/cube-mumble`
 - systemd unit: `cube-mumble-auth.service`
 
 Relevant files:

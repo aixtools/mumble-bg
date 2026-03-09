@@ -8,9 +8,9 @@ This is for the current standalone authenticator phase only.
 
 The workflow in `.github/workflows/deploy-dev.yml`:
 
-- rsyncs this repository to `/home/cube/cube-monitor`
-- writes `/home/cube/.env/cube-monitor`
-- installs Python requirements into `/home/cube/.venv/cube-monitor`
+- rsyncs this repository to `/home/cube/cube-mumble`
+- writes `/home/cube/.env/cube-mumble`
+- installs Python requirements into `/home/cube/.venv/cube-mumble`
 - restarts `cube-mumble-auth`
 
 It does **not** perform the first-time systemd/bootstrap install. That is what `deploy/setup-hetzner.sh` is for.
@@ -20,7 +20,7 @@ It does **not** perform the first-time systemd/bootstrap install. That is what `
 - the target machine already has the `cube` user
 - Murmur / `mumble-server` is already installed and running
 - PostgreSQL is already installed and reachable
-- this repo is deployed as `/home/cube/cube-monitor`
+- this repo is deployed as `/home/cube/cube-mumble`
 
 ## One-Time Server Setup
 
@@ -35,35 +35,35 @@ sudo -u cube gh auth login --hostname github.com --git-protocol https
 Then:
 
 ```bash
-sudo -u cube gh repo clone aixtools/cube-mumble /home/cube/cube-monitor
+sudo -u cube gh repo clone aixtools/cube-mumble /home/cube/cube-mumble
 ```
 
 If the checkout already exists:
 
 ```bash
-sudo -u cube git -C /home/cube/cube-monitor fetch origin
-sudo -u cube git -C /home/cube/cube-monitor switch main
-sudo -u cube git -C /home/cube/cube-monitor pull --ff-only origin main
+sudo -u cube git -C /home/cube/cube-mumble fetch origin
+sudo -u cube git -C /home/cube/cube-mumble switch main
+sudo -u cube git -C /home/cube/cube-mumble pull --ff-only origin main
 ```
 
 2. Create the environment file:
 
 ```bash
 install -d -m 0755 /home/cube/.env
-install -m 0600 /home/cube/cube-monitor/.env.example /home/cube/.env/cube-monitor
+install -m 0600 /home/cube/cube-mumble/.env.example /home/cube/.env/cube-mumble
 ```
 
-Edit `/home/cube/.env/cube-monitor` with the real database values.
+Edit `/home/cube/.env/cube-mumble` with the real database values.
 
 3. Run the one-time setup script as root:
 
 ```bash
-bash /home/cube/cube-monitor/deploy/setup-hetzner.sh
+bash /home/cube/cube-mumble/deploy/setup-hetzner.sh
 ```
 
 This script:
 
-- ensures `/home/cube/.venv/cube-monitor`
+- ensures `/home/cube/.venv/cube-mumble`
 - installs authenticator requirements
 - installs `/etc/systemd/system/cube-mumble-auth.service`
 - installs sudoers for service restart/status
@@ -108,6 +108,6 @@ Once the one-time setup exists:
 
 - push to `main`
 - GitHub Actions deploys the new code
-- the workflow refreshes `/home/cube/cube-monitor`
-- dependencies in `/home/cube/.venv/cube-monitor` are updated
+- the workflow refreshes `/home/cube/cube-mumble`
+- dependencies in `/home/cube/.venv/cube-mumble` are updated
 - `cube-mumble-auth` is restarted

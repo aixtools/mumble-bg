@@ -42,9 +42,9 @@ This means Cube currently deploys the Mumble backend as part of the Cube app dep
 
 The default standalone layout for this repository is:
 
-- repo checkout: `/home/cube/cube-monitor`
-- virtualenv: `/home/cube/.venv/cube-monitor`
-- environment file: `/home/cube/.env/cube-monitor`
+- repo checkout: `/home/cube/cube-mumble`
+- virtualenv: `/home/cube/.venv/cube-mumble`
+- environment file: `/home/cube/.env/cube-mumble`
 - service name: `cube-mumble-auth`
 
 ## What Moves To cube-mumble
@@ -97,7 +97,7 @@ Do not treat the old Docker path as required deployment state.
 
 The current target is:
 
-- rsync checkout to `/home/cube/cube-monitor`
-- install requirements into `/home/cube/.venv/cube-monitor`
+- rsync checkout to `/home/cube/cube-mumble`
+- install requirements into `/home/cube/.venv/cube-mumble`
 - manage the systemd unit from this repository
 - use `deploy/setup-hetzner.sh` once as root, then use the GitHub workflow for routine updates
