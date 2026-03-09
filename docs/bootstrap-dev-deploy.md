@@ -85,14 +85,14 @@ These must be configured in `aixtools/cube-mumble`:
 - `HETZNER_DEV_USER`
 - `CUBE_CORE_DATABASE_NAME`
 - `CUBE_CORE_DATABASE_HOST`
-- `CUBE_CORE_DATABASE_PORT`
 - `CUBE_CORE_DATABASE_USER`
 - `CUBE_CORE_DATABASE_PASSWORD`
+- optional `CUBE_CORE_DATABASE_ENGINE` (`postgresql` or `mysql`, default autodetect)
 - `CUBE_MMBL_AUTH_DATABASE_NAME`
 - `CUBE_MMBL_AUTH_DATABASE_HOST`
-- `CUBE_MMBL_AUTH_DATABASE_PORT`
 - `CUBE_MMBL_AUTH_DATABASE_USER`
 - `CUBE_MMBL_AUTH_DATABASE_PASSWORD`
+- optional `CUBE_MMBL_AUTH_DATABASE_ENGINE` (`postgresql` or `mysql`, default `postgresql`)
 
 ## SSH Key Clarification
 

@@ -26,12 +26,18 @@ MIDDLEWARE = []
 ROOT_URLCONF = 'authenticator.urls'
 WSGI_APPLICATION = 'authenticator.wsgi.application'
 
+DATABASE_ENGINE = (os.environ.get('CUBE_MMBL_AUTH_DATABASE_ENGINE', 'postgresql') or 'postgresql').strip().lower()
+
+if DATABASE_ENGINE.startswith('mysql'):
+    DB_ENGINE = 'django.db.backends.mysql'
+else:
+    DB_ENGINE = 'django.db.backends.postgresql'
+
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
+        'ENGINE': DB_ENGINE,
         'NAME': os.environ.get('CUBE_MMBL_AUTH_DATABASE_NAME', 'CUBE-MMBL-AUTH'),
         'HOST': os.environ.get('CUBE_MMBL_AUTH_DATABASE_HOST', 'localhost'),
-        'PORT': os.environ.get('CUBE_MMBL_AUTH_DATABASE_PORT', '5432'),
         'USER': os.environ.get('CUBE_MMBL_AUTH_DATABASE_USER', 'cube'),
         'PASSWORD': os.environ.get('CUBE_MMBL_AUTH_DATABASE_PASSWORD', ''),
     }
@@ -44,4 +50,3 @@ USE_I18N = True
 USE_TZ = True
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-

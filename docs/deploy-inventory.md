@@ -78,12 +78,12 @@ The extracted authenticator currently expects:
 
 - `CUBE_CORE_DATABASE_NAME`
 - `CUBE_CORE_DATABASE_HOST`
-- `CUBE_CORE_DATABASE_PORT`
 - `CUBE_CORE_DATABASE_USER`
 - `CUBE_CORE_DATABASE_PASSWORD`
+- optional `CUBE_CORE_DATABASE_ENGINE` (`postgresql` or `mysql`, default autodetect)
 - optional `MUMBLE_ICE_SLICE`
 
-That is still the old model where it reads Cube's Mumble tables directly.
+That is still the model where it reads Cube's Mumble tables directly.
 
 The target split model is:
 

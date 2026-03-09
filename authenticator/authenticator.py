@@ -6,8 +6,9 @@ Reads active MumbleServer configs from the database and connects to each
 server's ICE endpoint, registering a scoped CubeAuthenticator per server.
 
 Configuration via environment variables:
-    CUBE_CORE_DATABASE_NAME, CUBE_CORE_DATABASE_HOST, CUBE_CORE_DATABASE_PORT,
-    CUBE_CORE_DATABASE_USER, CUBE_CORE_DATABASE_PASSWORD
+    CUBE_CORE_DATABASE_NAME, CUBE_CORE_DATABASE_HOST,
+    CUBE_CORE_DATABASE_USER, CUBE_CORE_DATABASE_PASSWORD,
+    optional CUBE_CORE_DATABASE_ENGINE (postgresql|mysql, default auto-detect)
     MUMBLE_ICE_SLICE — path to the .ice slice file (default: MumbleServer.ice)
 """
 
@@ -16,7 +17,11 @@ import sys
 import time
 import logging
 from datetime import datetime, timezone
-import psycopg2
+from authenticator.database import (
+    BaseAdapterConfig,
+    CubeCoreReadOnlyDatabaseAdapter,
+    CubeDatabaseError,
+)
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
@@ -72,14 +77,15 @@ class PilotIdentity:
         return iter(self.as_dict().items())
 
 
-# Database config (read-only Cube-core source)
-DB_CONFIG = {
-    'dbname': os.environ.get('CUBE_CORE_DATABASE_NAME', 'cube'),
-    'host': os.environ.get('CUBE_CORE_DATABASE_HOST', 'localhost'),
-    'port': os.environ.get('CUBE_CORE_DATABASE_PORT', '5432'),
-    'user': os.environ.get('CUBE_CORE_DATABASE_USER', 'cube'),
-    'password': os.environ.get('CUBE_CORE_DATABASE_PASSWORD', ''),
-}
+CORE_DB_ADAPTER = CubeCoreReadOnlyDatabaseAdapter(
+    BaseAdapterConfig(
+        name=os.environ.get('CUBE_CORE_DATABASE_NAME', 'cube'),
+        host=os.environ.get('CUBE_CORE_DATABASE_HOST', 'localhost'),
+        user=os.environ.get('CUBE_CORE_DATABASE_USER', 'cube'),
+        password=os.environ.get('CUBE_CORE_DATABASE_PASSWORD', ''),
+        engine=os.environ.get('CUBE_CORE_DATABASE_ENGINE', ''),
+    )
+)
 
 ICE_SLICE = os.environ.get('MUMBLE_ICE_SLICE', 'MumbleServer.ice')
 
@@ -174,7 +180,10 @@ def list_cube_pilot_identities():
 
 
 def get_db_connection():
-    return psycopg2.connect(**DB_CONFIG)
+    try:
+        return CORE_DB_ADAPTER.connect()
+    except Exception as exc:
+        raise CubeDatabaseError('Could not connect to cube-core read DB') from exc
 
 
 def get_active_servers():
