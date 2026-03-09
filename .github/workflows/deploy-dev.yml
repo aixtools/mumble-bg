@@ -1,0 +1,69 @@
+name: Deploy cube-mumble (Dev)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.HETZNER_DEV_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.HETZNER_DEV_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy code via rsync
+        run: |
+          rsync -avz --delete \
+            --exclude '.git/' \
+            --exclude '__pycache__/' \
+            --exclude '*.pyc' \
+            --exclude '.pytest_cache/' \
+            --exclude '.env' \
+            --exclude '.venv/' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            ./ "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}:/home/cube/cube-monitor/"
+
+      - name: Write environment file
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" << 'EOF'
+          mkdir -p /home/cube/.env
+          cat > /home/cube/.env/cube-monitor << 'ENVFILE'
+          DATABASE_NAME=${{ secrets.CUBE_MUMBLE_DEV_DATABASE_NAME }}
+          DATABASE_HOST=${{ secrets.CUBE_MUMBLE_DEV_DATABASE_HOST }}
+          DATABASE_PORT=${{ secrets.CUBE_MUMBLE_DEV_DATABASE_PORT }}
+          DATABASE_USER=${{ secrets.CUBE_MUMBLE_DEV_DATABASE_USER }}
+          DATABASE_PASSWORD=${{ secrets.CUBE_MUMBLE_DEV_DATABASE_PASSWORD }}
+          MUMBLE_ICE_SLICE=/home/cube/cube-monitor/mumble_authenticator/MumbleServer.ice
+          ENVFILE
+          chmod 600 /home/cube/.env/cube-monitor
+          EOF
+
+      - name: Install runtime dependencies
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" << 'EOF'
+          mkdir -p /home/cube/.venv
+          if [ ! -d /home/cube/.venv/cube-monitor ]; then
+            python3 -m venv /home/cube/.venv/cube-monitor
+          fi
+          /home/cube/.venv/cube-monitor/bin/pip install --quiet -r /home/cube/cube-monitor/mumble_authenticator/requirements.txt
+          EOF
+
+      - name: Restart service
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" \
+            "sudo systemctl restart cube-mumble-auth"
+
+      - name: Health check
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" \
+            "systemctl is-active cube-mumble-auth"

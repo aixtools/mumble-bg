@@ -17,3 +17,20 @@ This is not the target architecture. The copied code is here to preserve the cur
 - `PKID` is the stable Cube-side identity key
 
 See [docs/extraction-inventory.md](/home/michael/prj/cube-mumble/docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
+
+## Standalone Deploy Defaults
+
+For the current standalone authenticator phase, the default layout is:
+
+- repo checkout: `/home/cube/cube-monitor`
+- virtualenv: `/home/cube/.venv/cube-monitor`
+- environment file: `/home/cube/.env/cube-monitor`
+- systemd unit: `cube-mumble-auth.service`
+
+Relevant files:
+
+- [deploy/setup-hetzner.sh](/home/michael/prj/cube-mumble/deploy/setup-hetzner.sh)
+- [deploy/systemd/cube-mumble-auth.service](/home/michael/prj/cube-mumble/deploy/systemd/cube-mumble-auth.service)
+- [.github/workflows/deploy-dev.yml](/home/michael/prj/cube-mumble/.github/workflows/deploy-dev.yml)
+
+`deploy/setup-hetzner.sh` is the one-time root install path. The GitHub workflow is for ordinary code updates after that setup exists.

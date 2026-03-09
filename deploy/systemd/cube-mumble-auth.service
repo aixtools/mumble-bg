@@ -1,0 +1,15 @@
+[Unit]
+Description=Cube Mumble ICE Authenticator
+After=network.target postgresql.service mumble-server.service
+
+[Service]
+User=cube
+Group=cube
+WorkingDirectory=/home/cube/cube-monitor
+EnvironmentFile=/home/cube/.env/cube-monitor
+ExecStart=/home/cube/.venv/cube-monitor/bin/python /home/cube/cube-monitor/mumble_authenticator/authenticator.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
