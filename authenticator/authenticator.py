@@ -48,6 +48,8 @@ class PilotIdentity:
         'character_name',
         'corporation_id',
         'alliance_id',
+        'corporation_name',
+        'alliance_name',
         'corporation_ticker',
         'alliance_ticker',
     )
@@ -58,6 +60,8 @@ class PilotIdentity:
         character_name,
         corporation_id,
         alliance_id,
+        corporation_name='',
+        alliance_name='',
         corporation_ticker='',
         alliance_ticker='',
     ):
@@ -65,6 +69,8 @@ class PilotIdentity:
         self.character_name = character_name or ''
         self.corporation_id = int(corporation_id) if corporation_id is not None else None
         self.alliance_id = int(alliance_id) if alliance_id is not None else None
+        self.corporation_name = (corporation_name or '').strip()
+        self.alliance_name = (alliance_name or '').strip()
         self.corporation_ticker = corporation_ticker or ''
         self.alliance_ticker = alliance_ticker or ''
 
@@ -75,6 +81,8 @@ class PilotIdentity:
             'character_name': self.character_name,
             'corporation_id': self.corporation_id,
             'alliance_id': self.alliance_id,
+            'corporation_name': self.corporation_name,
+            'alliance_name': self.alliance_name,
             'corporation_ticker': self.corporation_ticker,
             'alliance_ticker': self.alliance_ticker,
         }
@@ -141,6 +149,8 @@ PILOT_IDENTITY_QUERY = """
         ec.character_name,
         ec.corporation_id,
         ec.alliance_id,
+        COALESCE(ec.corporation_name, '') AS corporation_name,
+        COALESCE(ec.alliance_name, '') AS alliance_name,
         '' AS corporation_ticker,
         '' AS alliance_ticker
     FROM accounts_evecharacter ec
@@ -178,8 +188,10 @@ def list_cube_pilot_identities():
             character_name=row[1],
             corporation_id=row[2],
             alliance_id=row[3],
-            corporation_ticker=row[4] or '',
-            alliance_ticker=row[5] or '',
+            corporation_name=row[4] or '',
+            alliance_name=row[5] or '',
+            corporation_ticker=row[6] or '',
+            alliance_ticker=row[7] or '',
         )
         for row in rows
     ]

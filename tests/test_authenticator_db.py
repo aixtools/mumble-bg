@@ -59,7 +59,7 @@ def test_get_db_connection_wraps_errors():
 def test_list_cube_pilot_identities_loads_from_query(monkeypatch):
     def fake_connection():
         return _Conn([
-            (1234, "Pilot One", 77, 88, "", ""),
+            (1234, "Pilot One", 77, 88, "Corp Name", "Alliance Name", "", ""),
         ])
 
     monkeypatch.setattr(authenticator, "get_db_connection", fake_connection)
@@ -69,3 +69,7 @@ def test_list_cube_pilot_identities_loads_from_query(monkeypatch):
     identity = identities[0]
     assert identity.character_id == 1234
     assert identity.character_name == "Pilot One"
+    assert identity.corporation_id == 77
+    assert identity.alliance_id == 88
+    assert identity.corporation_name == "Corp Name"
+    assert identity.alliance_name == "Alliance Name"

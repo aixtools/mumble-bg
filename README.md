@@ -38,10 +38,12 @@ Relevant files:
 
 ## Read-only Pilot Contract
 
-- `authenticator.PilotIdentity(character_id, character_name, corporation_id, alliance_id, corporation_ticker, alliance_ticker)`
+- `authenticator.PilotIdentity(character_id, character_name, corporation_id, alliance_id, corporation_name, alliance_name, corporation_ticker, alliance_ticker)`
 - `authenticator.list_cube_pilot_identities() -> list[PilotIdentity]`
 
-`character_name` is included for display name construction in mumble. `corporation_ticker` and `alliance_ticker` are part of the contract too and currently default to empty strings until cube-core persists them directly.
+- `character_name` is used for display naming in Mumble.
+- `corporation_name` and `alliance_name` are now carried through from cube-core.
+- `corporation_ticker` and `alliance_ticker` remain supported in the contract and default to empty strings when cube-core does not provide them.
 
 - Membership semantics:
   - `character_id` (PKID) is stable.
