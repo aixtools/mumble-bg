@@ -81,7 +81,7 @@ class CubeCoreDBA(CubeCoreBaseDBA):
         raise CubeDatabaseError('Could not connect to cube-core via postgresql or mysql') from last_error
 
 
-class CubeMmbleAuthDatabaseAdapter(CubeCoreBaseDBA):
+class CubeMbllDBA(CubeCoreBaseDBA):
     """Read-write adapter for cube-mmble local runtime schema."""
 
     def connect(self):
