@@ -73,3 +73,30 @@ def test_list_cube_pilot_identities_loads_from_query(monkeypatch):
     assert identity.alliance_id == 88
     assert identity.corporation_name == "Corp Name"
     assert identity.alliance_name == "Alliance Name"
+
+
+def test_list_cube_pilot_identities_normalizes_optional_identity_fields(monkeypatch):
+    def fake_connection():
+        return _Conn([
+            (1234, "Pilot One", None, None, None, None, None, None),
+        ])
+
+    monkeypatch.setattr(authenticator, "get_db_connection", fake_connection)
+
+    identities = authenticator.list_cube_pilot_identities()
+    identity = identities[0]
+    assert identity.corporation_id is None
+    assert identity.alliance_id is None
+    assert identity.corporation_name == ""
+    assert identity.alliance_name == ""
+    assert identity.corporation_ticker == ""
+    assert identity.alliance_ticker == ""
+
+
+def test_list_cube_pilot_identities_returns_empty_on_query_error(monkeypatch):
+    def failing_connection():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(authenticator, "get_db_connection", failing_connection)
+
+    assert authenticator.list_cube_pilot_identities() == []
