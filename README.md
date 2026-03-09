@@ -32,5 +32,6 @@ Relevant files:
 - [deploy/setup-hetzner.sh](/home/michael/prj/cube-mumble/deploy/setup-hetzner.sh)
 - [deploy/systemd/cube-mumble-auth.service](/home/michael/prj/cube-mumble/deploy/systemd/cube-mumble-auth.service)
 - [.github/workflows/deploy-dev.yml](/home/michael/prj/cube-mumble/.github/workflows/deploy-dev.yml)
+- [docs/bootstrap-dev-deploy.md](/home/michael/prj/cube-mumble/docs/bootstrap-dev-deploy.md)
 
 `deploy/setup-hetzner.sh` is the one-time root install path. The GitHub workflow is for ordinary code updates after that setup exists.
