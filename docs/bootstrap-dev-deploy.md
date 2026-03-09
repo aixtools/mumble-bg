@@ -26,10 +26,16 @@ It does **not** perform the first-time systemd/bootstrap install. That is what `
 
 Run these steps on the target host once.
 
-1. Check out the repository:
+1. Check out the repository using HTTPS credentials available to `gh`:
 
 ```bash
-sudo -u cube git clone https://github.com/aixtools/cube-mumble.git /home/cube/cube-monitor
+sudo -u cube gh auth login --hostname github.com --git-protocol https
+```
+
+Then:
+
+```bash
+sudo -u cube gh repo clone aixtools/cube-mumble /home/cube/cube-monitor
 ```
 
 If the checkout already exists:
