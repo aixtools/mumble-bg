@@ -17,17 +17,17 @@ import sys
 import time
 import logging
 from datetime import datetime, timezone
-from authenticator.database import (
-    DBAdapterObject,
-    CubeCoreDBA,
-    CubeDatabaseError,
-)
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from authenticator.database import (
+    DBAdapterObject,
+    CubeCoreDBA,
+    CubeDatabaseError,
+)
 from authenticator.passwords import LEGACY_BCRYPT_SHA256, verify_murmur_password
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
