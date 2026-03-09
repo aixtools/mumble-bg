@@ -27,6 +27,50 @@ from authenticator.passwords import LEGACY_BCRYPT_SHA256, verify_murmur_password
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
+
+class PilotIdentity:
+    """Read-only cube-core pilot projection consumed by cube-mumble."""
+
+    __slots__ = (
+        'character_id',
+        'character_name',
+        'corporation_id',
+        'alliance_id',
+        'corporation_ticker',
+        'alliance_ticker',
+    )
+
+    def __init__(
+        self,
+        character_id,
+        character_name,
+        corporation_id,
+        alliance_id,
+        corporation_ticker='',
+        alliance_ticker='',
+    ):
+        self.character_id = int(character_id) if character_id is not None else None
+        self.character_name = character_name or ''
+        self.corporation_id = int(corporation_id) if corporation_id is not None else None
+        self.alliance_id = int(alliance_id) if alliance_id is not None else None
+        self.corporation_ticker = corporation_ticker or ''
+        self.alliance_ticker = alliance_ticker or ''
+
+    def as_dict(self):
+        """Return a plain-object payload for downstream adapters."""
+        return {
+            'character_id': self.character_id,
+            'character_name': self.character_name,
+            'corporation_id': self.corporation_id,
+            'alliance_id': self.alliance_id,
+            'corporation_ticker': self.corporation_ticker,
+            'alliance_ticker': self.alliance_ticker,
+        }
+
+    def __iter__(self):
+        return iter(self.as_dict().items())
+
+
 # Database config
 DB_CONFIG = {
     'dbname': os.environ.get('DATABASE_NAME', 'cube'),
@@ -77,6 +121,55 @@ ID_TO_NAME_QUERY = """
       )
       AND mu.is_active = true
 """
+
+PILOT_IDENTITY_QUERY = """
+    SELECT
+        ec.character_id,
+        ec.character_name,
+        ec.corporation_id,
+        ec.alliance_id,
+        '' AS corporation_ticker,
+        '' AS alliance_ticker
+    FROM accounts_evecharacter ec
+    WHERE ec.pending_delete = false
+      AND ec.is_main = true
+"""
+
+MUMBLE_PILOT_IDENTITY_SOURCE = "cube-core/monitor adapter contract"
+
+
+def list_cube_pilot_identities():
+    """
+    Return read-only pilot identities from cube-core for cube-mumble orchestration.
+
+    Returns a list of PilotIdentity objects.
+    """
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(PILOT_IDENTITY_QUERY)
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception(
+            'Database error fetching pilot identities for source=%s',
+            MUMBLE_PILOT_IDENTITY_SOURCE,
+        )
+        return []
+
+    return [
+        PilotIdentity(
+            character_id=row[0],
+            character_name=row[1],
+            corporation_id=row[2],
+            alliance_id=row[3],
+            corporation_ticker=row[4] or '',
+            alliance_ticker=row[5] or '',
+        )
+        for row in rows
+    ]
 
 
 def get_db_connection():

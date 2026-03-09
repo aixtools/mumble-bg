@@ -35,3 +35,10 @@ Relevant files:
 - [docs/bootstrap-dev-deploy.md](/home/michael/prj/cube-mumble/docs/bootstrap-dev-deploy.md)
 
 `deploy/setup-hetzner.sh` is the one-time root install path. The GitHub workflow is for ordinary code updates after that setup exists.
+
+## Read-only Pilot Contract
+
+- `authenticator.PilotIdentity(character_id, character_name, corporation_id, alliance_id, corporation_ticker, alliance_ticker)`
+- `authenticator.list_cube_pilot_identities() -> list[PilotIdentity]`
+
+`character_name` is included for display name construction in mumble. `corporation_ticker` and `alliance_ticker` are part of the contract too and currently default to empty strings until cube-core persists them directly.
