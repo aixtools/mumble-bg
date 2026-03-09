@@ -1,0 +1,9 @@
+"""Minimal WSGI stub for Django manage commands."""
+
+import os
+from django.core.wsgi import get_wsgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'authenticator.django_settings')
+
+application = get_wsgi_application()
+

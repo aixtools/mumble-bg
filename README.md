@@ -42,3 +42,14 @@ Relevant files:
 - `authenticator.list_cube_pilot_identities() -> list[PilotIdentity]`
 
 `character_name` is included for display name construction in mumble. `corporation_ticker` and `alliance_ticker` are part of the contract too and currently default to empty strings until cube-core persists them directly.
+
+## Environment Contracts
+
+- `CUBE_CORE_*` = read-only Cube-core source DB used by the authenticator.
+- `CUBE_MMBL_AUTH_*` = cube-mumble-owned DB used for local migrations and runtime tables.
+
+```bash
+python manage.py migrate
+```
+
+uses `CUBE_MMBL_AUTH_*` and keeps local schema independent of cube-core.
