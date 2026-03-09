@@ -76,19 +76,20 @@ It should stop deploying or supervising `cube-mumble` runtime processes.
 
 The extracted authenticator currently expects:
 
-- `DATABASE_NAME`
-- `DATABASE_HOST`
-- `DATABASE_PORT`
-- `DATABASE_USER`
-- `DATABASE_PASSWORD`
+- `CUBE_CORE_DATABASE_NAME`
+- `CUBE_CORE_DATABASE_HOST`
+- `CUBE_CORE_DATABASE_PORT`
+- `CUBE_CORE_DATABASE_USER`
+- `CUBE_CORE_DATABASE_PASSWORD`
 - optional `MUMBLE_ICE_SLICE`
 
 That is still the old model where it reads Cube's Mumble tables directly.
 
-The intended target model is different:
+The target split model is:
 
 - `cube-mumble` should use its own runtime/private DB
-- `cube-mumble` should get read-only credentials for the Cube DB
+- `cube-mumble` should get read-only credentials for the Cube DB using `CUBE_CORE_*`
+- the owned schema in this repo should use `CUBE_MMBL_AUTH_*`
 - any writeback or command channel should be explicit and not rely on Cube deploying the service
 
 ## What Not To Carry Forward
