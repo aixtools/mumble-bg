@@ -69,6 +69,15 @@ This script:
 - installs sudoers for service restart/status
 - enables and restarts the service
 
+If the host still has old `cube-mumble-auth` or broken `cube-monitor-auth` state, reset it first:
+
+```bash
+bash /home/cube/cube-monitor/deploy/undeploy-hetzner.sh
+bash /home/cube/cube-monitor/deploy/setup-hetzner.sh
+```
+
+`deploy/undeploy-hetzner.sh` removes both legacy and current auth systemd units, removes the matching sudoers files, and deletes `/home/cube/.venv/cube-monitor`. It intentionally keeps the repo checkout and `/home/cube/.env/cube-monitor`.
+
 4. Verify the service:
 
 ```bash
