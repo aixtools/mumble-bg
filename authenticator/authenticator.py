@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 class PilotIdentity:
     """
-    Read-only cube-core pilot projection consumed by cube-mumble.
+    Read-only cube-core pilot projection consumed by cube-monitor.
 
     Important: PKID does not bind to a fixed alliance.
     A pilot can only change corporation, and a corporation can change alliance,
@@ -163,7 +163,7 @@ MUMBLE_PILOT_IDENTITY_SOURCE = "cube-core/monitor adapter contract"
 
 def list_cube_pilot_identities():
     """
-    Return read-only pilot identities from cube-core for cube-mumble orchestration.
+    Return read-only pilot identities from cube-core for cube-monitor orchestration.
 
     Returns a list of PilotIdentity objects.
     """
@@ -468,7 +468,7 @@ def main():
             logger.error('No authenticators were registered. Exiting.')
             sys.exit(1)
 
-        logger.info('Cube Mumble authenticator running (%d server(s)). Press Ctrl+C to stop.', registered)
+        logger.info('Cube Monitor authenticator running (%d server(s)). Press Ctrl+C to stop.', registered)
         communicator.waitForShutdown()
 
 

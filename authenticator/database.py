@@ -1,4 +1,4 @@
-"""Database adapters for cube-mumble runtime and cube-core read access."""
+"""Database adapters for cube-monitor runtime and cube-core read access."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 
 class CubeDatabaseError(RuntimeError):
-    """Raised when a cube-mumble database adapter cannot connect."""
+    """Raised when a cube-monitor database adapter cannot connect."""
 
 
 @dataclass(frozen=True)
@@ -82,7 +82,7 @@ class CubeCoreDBA(CubeCoreBaseDBA):
 
 
 class CubeMbllDBA(CubeCoreBaseDBA):
-    """Read-write adapter for cube-mmble local runtime schema."""
+    """Read-write adapter for cube-monitor local runtime schema."""
 
     def connect(self):
         requested = (self._config.engine or '').strip().lower()

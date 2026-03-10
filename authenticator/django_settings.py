@@ -1,9 +1,9 @@
 """
-Minimal Django settings for cube-mumble-owned tables.
+Minimal Django settings for cube-monitor-owned tables.
 
 The runtime auth daemon still reads Cube-core via SQL directly.
 This settings module is for `manage.py migrate` and local ownership of
-cube-mumble runtime schema in `CUBE_MMBL_AUTH_*`.
+cube-monitor runtime schema in `CUBE_MMBL_AUTH_*`.
 """
 
 import os
@@ -11,7 +11,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-SECRET_KEY = 'cube-mumble-dev'
+SECRET_KEY = 'cube-monitor-dev'
 DEBUG = True
 ALLOWED_HOSTS = ['*']
 

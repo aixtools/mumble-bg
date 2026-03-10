@@ -7,7 +7,7 @@ class Command(BaseCommand):
     help = 'Run Murmur Pulse to track Mumble connect, disconnect, and activity state'
 
     def add_arguments(self, parser):
-        parser.add_argument('--server-id', type=int, help='Only track one Cube MumbleServer row')
+        parser.add_argument('--server-id', type=int, help='Only track one Cube Monitor MumbleServer row')
         parser.add_argument(
             '--poll-interval',
             type=int,

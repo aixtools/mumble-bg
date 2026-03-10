@@ -1,6 +1,6 @@
 # Deploy And Workflow Inventory
 
-This repository was bootstrapped from the in-tree Cube Mumble implementation. The first standalone deploy defaults now live here, but Cube still carries the legacy deploy wiring that should be removed later.
+This repository was bootstrapped from the in-tree Cube Monitor implementation. The first standalone deploy defaults now live here, but Cube still carries the legacy deploy wiring that should be removed later.
 
 ## Where The Current Deploy Logic Lives
 
@@ -17,9 +17,9 @@ Older Docker wiring also exists on the `cube-newmumble-upstream` source branch, 
 
 `cube/deploy/setup-hetzner.sh` currently owns:
 
-- sudoers entry allowing restart of `cube-mumble-auth`
+- sudoers entry allowing restart of `cube-monitor-auth`
 - creation of a dedicated `authenticator` virtualenv
-- installation of the `cube-mumble-auth` systemd service
+- installation of the `cube-monitor-auth` systemd service
 - enabling that service on boot
 
 The current service definition is effectively:
@@ -34,7 +34,7 @@ The current service definition is effectively:
 
 - rsync of the whole Cube repo to the server
 - installation of `authenticator` dependencies
-- restart of `cube-mumble-auth`
+- restart of `cube-monitor-auth`
 
 This means Cube currently deploys the Mumble backend as part of the Cube app deploy, even though it is logically a separate runtime.
 
@@ -42,14 +42,14 @@ This means Cube currently deploys the Mumble backend as part of the Cube app dep
 
 The default standalone layout for this repository is:
 
-- repo checkout: `/home/cube/cube-mumble`
-- virtualenv: `/home/cube/.venv/cube-mumble`
-- environment file: `/home/cube/.env/cube-mumble`
-- service name: `cube-mumble-auth`
+- repo checkout: `/home/cube/cube-monitor`
+- virtualenv: `/home/cube/.venv/cube-monitor`
+- environment file: `/home/cube/.env/cube-monitor`
+- service name: `cube-monitor-auth`
 
-## What Moves To cube-mumble
+## What Moves To cube-monitor
 
-When `cube-mumble` becomes the real standalone project, it should own:
+When `cube-monitor` becomes the real standalone project, it should own:
 
 - its own deploy scripts under `deploy/`
 - its own GitHub Actions workflows under `.github/workflows/`
@@ -70,7 +70,7 @@ That future deploy should manage at least:
 - Cube DB schema and migrations
 - Cube-side UI and admin policy inputs
 
-It should stop deploying or supervising `cube-mumble` runtime processes.
+It should stop deploying or supervising `cube-monitor` runtime processes.
 
 ## Environment / Secret Contract
 
@@ -87,8 +87,8 @@ That is still the model where it reads Cube's Mumble tables directly.
 
 The target split model is:
 
-- `cube-mumble` should use its own runtime/private DB
-- `cube-mumble` should get read-only credentials for the Cube DB using `CUBE_CORE_*`
+- `cube-monitor` should use its own runtime/private DB
+- `cube-monitor` should get read-only credentials for the Cube DB using `CUBE_CORE_*`
 - the owned schema in this repo should use `CUBE_MMBL_AUTH_*`
 - any writeback or command channel should be explicit and not rely on Cube deploying the service
 
@@ -98,7 +98,7 @@ Do not treat the old Docker path as required deployment state.
 
 The current target is:
 
-- rsync checkout to `/home/cube/cube-mumble`
-- install requirements into `/home/cube/.venv/cube-mumble`
+- rsync checkout to `/home/cube/cube-monitor`
+- install requirements into `/home/cube/.venv/cube-monitor`
 - manage the systemd unit from this repository
 - use `deploy/setup-hetzner.sh` once as root, then use the GitHub workflow for routine updates

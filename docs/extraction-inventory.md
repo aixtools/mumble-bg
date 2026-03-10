@@ -41,7 +41,7 @@ The copied snapshot includes:
 The intended target is narrower than the copied code:
 
 - `cube-core` should keep only Cube-side eligibility UI, user/admin actions, and status display
-- `cube-mumble` should own server inventory, account provisioning, per-server identifiers, password application, and runtime state
+- `cube-monitor` should own server inventory, account provisioning, per-server identifiers, password application, and runtime state
 - long-lived per-server Mumble auth state should not remain in Cube core
 
 ## Org Membership Semantics
