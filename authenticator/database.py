@@ -41,44 +41,72 @@ class CubeCoreDBA(CubeCoreBaseDBA):
             return [requested]
         return ['postgresql', 'mysql']
 
-    def _connect_postgresql(self):
+    def _candidate_hosts(self):
+        requested = (self._config.host or '').strip() or '127.0.0.1'
+        if requested.lower() == 'localhost':
+            # Prefer TCP loopback first; localhost can trigger socket semantics
+            # that differ between PostgreSQL and MySQL clients.
+            return ['127.0.0.1', 'localhost']
+        return [requested]
+
+    def _connect_postgresql(self, host: str):
         import psycopg2
 
         return psycopg2.connect(
             dbname=self._config.name,
-            host=self._config.host,
+            host=host,
             port='5432',
             user=self._config.user,
             password=self._config.password,
         )
 
-    def _connect_mysql(self):
+    def _connect_mysql(self, host: str):
         try:
-            import mysql.connector
-        except Exception as exc:  # pragma: no cover - runtime dependency optional until needed
-            raise CubeDatabaseError(
-                'mysql connector is not installed for cube-core mysql fallback'
-            ) from exc
+            import MySQLdb
+        except Exception:
+            try:
+                import mysql.connector
+            except Exception as exc:  # pragma: no cover - runtime dependency optional until needed
+                raise CubeDatabaseError(
+                    'mysql client is not installed for cube-core mysql fallback'
+                ) from exc
 
-        return mysql.connector.connect(
-            host=self._config.host,
-            port='3306',
-            database=self._config.name,
+            return mysql.connector.connect(
+                host=host,
+                port='3306',
+                database=self._config.name,
+                user=self._config.user,
+                password=self._config.password,
+            )
+
+        return MySQLdb.connect(
+            host=host,
+            port=3306,
+            db=self._config.name,
             user=self._config.user,
-            password=self._config.password,
+            passwd=self._config.password,
         )
 
     def connect(self):
-        last_error = None
+        errors = []
         for engine in self._candidates:
-            try:
-                if engine == 'mysql':
-                    return self._connect_mysql()
-                return self._connect_postgresql()
-            except Exception as exc:  # pragma: no cover - defensive runtime fallback
-                last_error = exc
-                continue
-        raise CubeDatabaseError('Could not connect to cube-core via postgresql or mysql') from last_error
+            for host in self._candidate_hosts():
+                try:
+                    if engine == 'mysql':
+                        return self._connect_mysql(host)
+                    return self._connect_postgresql(host)
+                except Exception as exc:  # pragma: no cover - defensive runtime fallback
+                    errors.append((engine, host, exc))
+                    continue
+        if not errors:
+            raise CubeDatabaseError('Could not connect to cube-core via postgresql or mysql')
+        attempted = '; '.join(
+            f'{engine}@{host}: {exc}'
+            for engine, host, exc in errors
+        )
+        raise CubeDatabaseError(
+            f'Could not connect to cube-core via postgresql or mysql. Attempts: {attempted}'
+        ) from errors[-1][2]
 
 
 class CubeMbllDBA(CubeCoreBaseDBA):
@@ -105,16 +133,27 @@ class CubeMbllDBA(CubeCoreBaseDBA):
 
     def _connect_mysql(self):
         try:
-            import mysql.connector
-        except Exception as exc:  # pragma: no cover - runtime dependency optional until needed
-            raise CubeDatabaseError(
-                'mysql connector is not installed for CUBE_MMBL_AUTH_DATABASE_ENGINE=mysql'
-            ) from exc
+            import MySQLdb
+        except Exception:
+            try:
+                import mysql.connector
+            except Exception as exc:  # pragma: no cover - runtime dependency optional until needed
+                raise CubeDatabaseError(
+                    'mysql client is not installed for CUBE_MMBL_AUTH_DATABASE_ENGINE=mysql'
+                ) from exc
 
-        return mysql.connector.connect(
+            return mysql.connector.connect(
+                host=self._config.host,
+                port='3306',
+                database=self._config.name,
+                user=self._config.user,
+                password=self._config.password,
+            )
+
+        return MySQLdb.connect(
             host=self._config.host,
-            port='3306',
-            database=self._config.name,
+            port=3306,
+            db=self._config.name,
             user=self._config.user,
-            password=self._config.password,
+            passwd=self._config.password,
         )
