@@ -9,11 +9,11 @@ fi
 
 APP_USER="cube"
 APP_HOME="/home/${APP_USER}"
-APP_DIR="${APP_HOME}/cube-mumble"
-VENV_DIR="${APP_HOME}/.venv/cube-mumble"
+APP_DIR="${APP_HOME}/cube-monitor"
+VENV_DIR="${APP_HOME}/.venv/cube-monitor"
 ENV_DIR="${APP_HOME}/.env"
-ENV_FILE="${ENV_DIR}/cube-mumble"
-SERVICE_NAME="cube-mumble-auth"
+ENV_FILE="${ENV_DIR}/cube-monitor"
+SERVICE_NAME="cube-monitor-auth"
 SERVICE_SRC="${APP_DIR}/deploy/systemd/${SERVICE_NAME}.service"
 SERVICE_DEST="/etc/systemd/system/${SERVICE_NAME}.service"
 
@@ -39,10 +39,10 @@ fi
 
 sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${APP_DIR}/authenticator/requirements.txt"
 
-cat > /etc/sudoers.d/cube-mumble << 'EOF'
-cube ALL=(ALL) NOPASSWD: /bin/systemctl restart cube-mumble-auth, /bin/systemctl status cube-mumble-auth, /bin/systemctl daemon-reload
+cat > /etc/sudoers.d/cube-monitor << 'EOF'
+cube ALL=(ALL) NOPASSWD: /bin/systemctl restart cube-monitor-auth, /bin/systemctl status cube-monitor-auth, /bin/systemctl daemon-reload
 EOF
-chmod 440 /etc/sudoers.d/cube-mumble
+chmod 440 /etc/sudoers.d/cube-monitor
 
 sudo install -D -m 0644 "${SERVICE_SRC}" "${SERVICE_DEST}"
 systemctl daemon-reload

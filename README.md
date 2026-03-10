@@ -1,4 +1,4 @@
-# cube-mumble
+# cube-monitor
 
 Initial extraction snapshot for rebuilding Cube's Mumble integration as a standalone project.
 
@@ -8,31 +8,32 @@ Copied baseline paths:
 
 - `modules/mumble`
 - `authenticator`
-- `templates/mumble`
 
-This is not the target architecture. The copied code is here to preserve the current implementation while `cube-mumble` is rebuilt around the newer boundary:
+The original Cube-facing Django/UI files have now been split back out into the sibling repository `../cube-mumble`.
 
-- `cube-core` owns Cube-side UI and policy inputs
-- `cube-mumble` owns Mumble server inventory, ICE interactions, and per-server state
+This is not the target architecture. The copied code is here to preserve the current implementation while `cube-monitor` is rebuilt around the newer boundary:
+
+- `cube-core` and `cube-mumble` own Cube-side UI and policy inputs
+- `cube-monitor` owns Mumble server inventory, ICE interactions, and per-server state
 - `PKID` is the stable Cube-side identity key
 
-See [docs/extraction-inventory.md](/home/michael/prj/cube-mumble/docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
+See [docs/extraction-inventory.md](/home/michael/prj/cube-monitor/docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
 
 ## Standalone Deploy Defaults
 
 For the current standalone authenticator phase, the default layout is:
 
-- repo checkout: `/home/cube/cube-mumble`
-- virtualenv: `/home/cube/.venv/cube-mumble`
-- environment file: `/home/cube/.env/cube-mumble`
-- systemd unit: `cube-mumble-auth.service`
+- repo checkout: `/home/cube/cube-monitor`
+- virtualenv: `/home/cube/.venv/cube-monitor`
+- environment file: `/home/cube/.env/cube-monitor`
+- systemd unit: `cube-monitor-auth.service`
 
 Relevant files:
 
-- [deploy/setup-hetzner.sh](/home/michael/prj/cube-mumble/deploy/setup-hetzner.sh)
-- [deploy/systemd/cube-mumble-auth.service](/home/michael/prj/cube-mumble/deploy/systemd/cube-mumble-auth.service)
-- [.github/workflows/deploy-dev.yml](/home/michael/prj/cube-mumble/.github/workflows/deploy-dev.yml)
-- [docs/bootstrap-dev-deploy.md](/home/michael/prj/cube-mumble/docs/bootstrap-dev-deploy.md)
+- [deploy/setup-hetzner.sh](/home/michael/prj/cube-monitor/deploy/setup-hetzner.sh)
+- [deploy/systemd/cube-monitor-auth.service](/home/michael/prj/cube-monitor/deploy/systemd/cube-monitor-auth.service)
+- [.github/workflows/deploy-dev.yml](/home/michael/prj/cube-monitor/.github/workflows/deploy-dev.yml)
+- [docs/bootstrap-dev-deploy.md](/home/michael/prj/cube-monitor/docs/bootstrap-dev-deploy.md)
 
 `deploy/setup-hetzner.sh` is the one-time root install path. The GitHub workflow is for ordinary code updates after that setup exists.
 
@@ -52,12 +53,12 @@ This contract update aligns with Cube core behavioral changes introduced in Cube
   - A pilot can change corporation over time.
   - A corporation can change alliance over time.
   - Therefore `alliance_id` is membership-state, not an immutable identity attribute.
-  - cube-mumble should always treat `alliance_id` as a snapshot from cube-core and refresh it whenever character org state is refreshed.
+  - cube-monitor should always treat `alliance_id` as a snapshot from cube-core and refresh it whenever character org state is refreshed.
 
 ## Environment Contracts
 
 - `CUBE_CORE_*` = read-only Cube-core source DB used by the authenticator.
-- `CUBE_MMBL_AUTH_*` = cube-mumble-owned DB used for local migrations and runtime tables.
+- `CUBE_MMBL_AUTH_*` = cube-monitor-owned DB used for local migrations and runtime tables.
 
 ```bash
 python manage.py migrate

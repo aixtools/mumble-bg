@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage utility for local cube-mumble Django-managed tables."""
+"""Manage utility for local cube-monitor Django-managed tables."""
 
 import os
 import sys
@@ -20,4 +20,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
