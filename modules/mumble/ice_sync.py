@@ -16,7 +16,7 @@ def _load_slice():
         'authenticator',
         'MumbleServer.ice',
     )
-    Ice.loadSlice(['-I' + Ice.getSliceDir(), slice_path])
+    Ice.loadSlice(f"-I{Ice.getSliceDir()} {slice_path}")
     try:
         import MumbleServer
         return MumbleServer

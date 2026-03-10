@@ -31,6 +31,7 @@ For the current standalone authenticator phase, the default layout is:
 Relevant files:
 
 - [deploy/setup-hetzner.sh](/home/michael/prj/cube-monitor/deploy/setup-hetzner.sh)
+- [deploy/undeploy-hetzner.sh](/home/michael/prj/cube-monitor/deploy/undeploy-hetzner.sh)
 - [deploy/systemd/cube-monitor-auth.service](/home/michael/prj/cube-monitor/deploy/systemd/cube-monitor-auth.service)
 - [.github/workflows/deploy-dev.yml](/home/michael/prj/cube-monitor/.github/workflows/deploy-dev.yml)
 - [docs/bootstrap-dev-deploy.md](/home/michael/prj/cube-monitor/docs/bootstrap-dev-deploy.md)

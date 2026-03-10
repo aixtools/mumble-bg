@@ -360,7 +360,7 @@ def _load_slice():
     if not os.path.exists(slice_path):
         slice_path = ICE_SLICE  # fall back to raw path / cwd
 
-    Ice.loadSlice(['-I' + Ice.getSliceDir(), slice_path])
+    Ice.loadSlice(f"-I{Ice.getSliceDir()} {slice_path}")
 
     # Newer Mumble uses module MumbleServer, older uses Murmur
     try:
@@ -382,7 +382,7 @@ def main():
     try:
         M = _load_slice()
     except Exception:
-        logger.error('Failed to load ICE slice definition from %s', ICE_SLICE)
+        logger.exception('Failed to load ICE slice definition from %s', ICE_SLICE)
         sys.exit(1)
 
     RETRY_INTERVAL = 30
