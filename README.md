@@ -8,11 +8,12 @@ Copied baseline paths:
 
 - `modules/mumble`
 - `authenticator`
-- `templates/mumble`
+
+The original Cube-facing Django/UI files have now been split back out into the sibling repository `../cube-mumble`.
 
 This is not the target architecture. The copied code is here to preserve the current implementation while `cube-monitor` is rebuilt around the newer boundary:
 
-- `cube-core` owns Cube-side UI and policy inputs
+- `cube-core` and `cube-mumble` own Cube-side UI and policy inputs
 - `cube-monitor` owns Mumble server inventory, ICE interactions, and per-server state
 - `PKID` is the stable Cube-side identity key
 

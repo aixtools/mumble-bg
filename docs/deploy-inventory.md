@@ -72,6 +72,8 @@ That future deploy should manage at least:
 
 It should stop deploying or supervising `cube-monitor` runtime processes.
 
+The extracted Cube-facing Django code now lives in the sibling repository `../cube-mumble` rather than in this repo.
+
 ## Environment / Secret Contract
 
 The extracted authenticator currently expects:

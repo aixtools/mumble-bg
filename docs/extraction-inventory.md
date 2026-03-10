@@ -10,9 +10,10 @@ Copied into this repository:
 
 - `modules/mumble/`
 - `authenticator/`
-- `templates/mumble/`
 
 These files are copied as a rebuild baseline, not as a final package layout.
+
+The original Cube-facing Django/UI paths have since been split out into the sibling repository `../cube-mumble`.
 
 ## Cube-Core Touchpoints Still In Cube
 
@@ -27,20 +28,27 @@ The following Cube-core paths still reference the in-tree Mumble implementation 
 
 ## Current Ownership In The Snapshot
 
-The copied snapshot includes:
+The retained standalone snapshot now includes:
 
-- the Django `mumble` app
-- Mumble admin and profile UI
+- the Django `mumble` runtime models and migrations
 - ICE synchronization logic
 - Murmur pulse runtime
 - the standalone authenticator
 - Murmur ICE slice data
 
+The following Cube-coupled pieces were removed from this repo and moved to `../cube-mumble`:
+
+- Mumble admin and profile UI
+- Cube sidebar integration
+- Celery tasks for Cube-driven group/display-name refresh
+- the display-name backfill management command
+- the legacy Django test module for those flows
+
 ## Rebuild Direction
 
 The intended target is narrower than the copied code:
 
-- `cube-core` should keep only Cube-side eligibility UI, user/admin actions, and status display
+- `cube-core` and `cube-mumble` should keep Cube-side eligibility UI, user/admin actions, and status display
 - `cube-monitor` should own server inventory, account provisioning, per-server identifiers, password application, and runtime state
 - long-lived per-server Mumble auth state should not remain in Cube core
 
