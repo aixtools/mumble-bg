@@ -22,6 +22,9 @@ The locked boundary rules are documented in [docs/system-boundary.md](/home/mich
 The bg-owned Django app and model naming choices are documented in
 [docs/bg-state.md](/home/michael/prj/mumble-bg/docs/bg-state.md).
 
+The explicit fg/bg control path is documented in
+[docs/mumble-control.md](/home/michael/prj/mumble-bg/docs/mumble-control.md).
+
 See [docs/extraction-inventory.md](/home/michael/prj/mumble-bg/docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
 
 ## Standalone Deploy Defaults

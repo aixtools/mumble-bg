@@ -26,6 +26,9 @@ These constraints are locked:
 - Data collected by runtime daemons in this repo may be surfaced to the UI layer
   only through explicit interfaces/messages.
 
+The current fg/bg control contract is documented in
+[docs/mumble-control.md](/home/michael/prj/mumble-bg/docs/mumble-control.md).
+
 ## Murmur Contract
 
 The shared Murmur configuration is split into two structured JSON secrets:
