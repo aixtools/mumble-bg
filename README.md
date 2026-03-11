@@ -17,6 +17,8 @@ This is not the target architecture. The copied code is here to preserve the cur
 - `cube-monitor` owns Mumble server inventory, ICE interactions, and per-server state
 - `PKID` is the stable Cube-side identity key
 
+The locked boundary rules are documented in [docs/system-boundary.md](/home/michael/prj/cube-monitor/docs/system-boundary.md).
+
 See [docs/extraction-inventory.md](/home/michael/prj/cube-monitor/docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
 
 ## Standalone Deploy Defaults
@@ -66,3 +68,10 @@ python manage.py migrate
 ```
 
 uses `CUBE_MMBL_AUTH_*` and keeps local schema independent of cube-core.
+
+## Release Cleanup Note
+
+Before the first real release, remove historical references to the old table names
+`mumble_mumbleserver`, `mumble_mumbleuser`, and `mumble_mumblesession` from
+handoff notes and transition docs. The fresh-start owned schema in this repo now
+uses `mumble_server`, `mumble_user`, and `mumble_session`.

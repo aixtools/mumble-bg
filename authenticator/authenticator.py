@@ -105,7 +105,13 @@ ICE_SLICE = os.environ.get('MUMBLE_ICE_SLICE', 'MumbleServer.ice')
 
 SERVERS_QUERY = """
     SELECT id, ice_host, ice_port, ice_secret, virtual_server_id
-    FROM mumble_mumbleserver
+    FROM mumble_server
+    WHERE is_active = true
+"""
+
+LEGACY_SERVERS_QUERY = """
+    SELECT id, ice_host, ice_port, ice_secret, 1 AS virtual_server_id
+    FROM mumble_server
     WHERE is_active = true
 """
 
@@ -120,13 +126,13 @@ AUTH_QUERY = """
         mu.certhash,
         mu.groups,
         mu.display_name
-    FROM mumble_mumbleuser mu
+    FROM mumble_user mu
     WHERE LOWER(mu.username) = LOWER(%s) AND mu.is_active = true AND mu.server_id = %s
 """
 
 NAME_TO_ID_QUERY = """
     SELECT COALESCE(mu.mumble_userid, mu.id)
-    FROM mumble_mumbleuser mu
+    FROM mumble_user mu
     WHERE LOWER(mu.username) = LOWER(%s)
       AND mu.is_active = true
       AND mu.server_id = %s
@@ -134,7 +140,7 @@ NAME_TO_ID_QUERY = """
 
 ID_TO_NAME_QUERY = """
     SELECT mu.username
-    FROM mumble_mumbleuser mu
+    FROM mumble_user mu
     WHERE mu.server_id = %s
       AND (
         mu.mumble_userid = %s
@@ -209,10 +215,30 @@ def get_active_servers():
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(SERVERS_QUERY)
+            try:
+                cur.execute(SERVERS_QUERY)
+            except Exception as exc:
+                if not _is_missing_virtual_server_id_column(exc):
+                    raise
+                logger.warning(
+                    'mumble_server.virtual_server_id is missing; '
+                    'falling back to legacy compatibility mode with default virtual_server_id=1'
+                )
+                cur.execute(LEGACY_SERVERS_QUERY)
             return cur.fetchall()
     finally:
         conn.close()
+
+
+def _is_missing_virtual_server_id_column(exc):
+    message = str(exc).lower()
+    if 'virtual_server_id' not in message:
+        return False
+    return (
+        'does not exist' in message
+        or 'unknown column' in message
+        or getattr(exc, 'pgcode', None) == '42703'
+    )
 
 
 def select_target_servers(booted_servers, virtual_server_id):
@@ -331,7 +357,7 @@ def id_to_name(user_id, server_id):
 
 
 UPDATE_CONNECTION_QUERY = """
-    UPDATE mumble_mumbleuser
+    UPDATE mumble_user
     SET certhash = %s, last_authenticated = %s, updated_at = %s
     WHERE id = %s
 """
