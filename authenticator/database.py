@@ -1,4 +1,4 @@
-"""Database adapters for cube-monitor runtime and cube-core read access."""
+"""Database adapters for mumble-bg runtime and cube-core read access."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 
 class CubeDatabaseError(RuntimeError):
-    """Raised when a cube-monitor database adapter cannot connect."""
+    """Raised when a mumble-bg database adapter cannot connect."""
 
 
 @dataclass(frozen=True)
@@ -109,8 +109,8 @@ class CubeCoreDBA(CubeCoreBaseDBA):
         ) from errors[-1][2]
 
 
-class CubeMbllDBA(CubeCoreBaseDBA):
-    """Read-write adapter for cube-monitor local runtime schema."""
+class MmblBgDBA(CubeCoreBaseDBA):
+    """Read-write adapter for mumble-bg local runtime schema."""
 
     def connect(self):
         requested = (self._config.engine or '').strip().lower()
@@ -118,7 +118,7 @@ class CubeMbllDBA(CubeCoreBaseDBA):
             return self._connect_mysql()
         if requested in {'', 'postgresql', 'postgres'}:
             return self._connect_postgresql()
-        raise CubeDatabaseError(f'Unsupported CUBE_MMBL_AUTH_DATABASE_ENGINE={requested}')
+        raise CubeDatabaseError(f'Unsupported MMBL_BG_DATABASE_ENGINE={requested}')
 
     def _connect_postgresql(self):
         import psycopg2
@@ -139,7 +139,7 @@ class CubeMbllDBA(CubeCoreBaseDBA):
                 import mysql.connector
             except Exception as exc:  # pragma: no cover - runtime dependency optional until needed
                 raise CubeDatabaseError(
-                    'mysql client is not installed for CUBE_MMBL_AUTH_DATABASE_ENGINE=mysql'
+                    'mysql client is not installed for MMBL_BG_DATABASE_ENGINE=mysql'
                 ) from exc
 
             return mysql.connector.connect(
@@ -157,3 +157,6 @@ class CubeMbllDBA(CubeCoreBaseDBA):
             user=self._config.user,
             passwd=self._config.password,
         )
+
+
+CubeMbllDBA = MmblBgDBA

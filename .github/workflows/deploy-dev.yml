@@ -1,4 +1,4 @@
-name: Deploy cube-monitor (Dev)
+name: Deploy mumble-bg (Dev)
 
 on:
   push:
@@ -31,44 +31,44 @@ jobs:
             --exclude '.env' \
             --exclude '.venv/' \
             -e "ssh -i ~/.ssh/deploy_key" \
-            ./ "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}:/home/cube/cube-monitor/"
+            ./ "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}:/home/cube/mumble-bg/"
 
       - name: Write environment file
         run: |
           ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" << 'EOF'
           mkdir -p /home/cube/.env
-          cat > /home/cube/.env/cube-monitor << 'ENVFILE'
+          cat > /home/cube/.env/mumble-bg << 'ENVFILE'
           CUBE_CORE_DATABASE_NAME=${{ secrets.CUBE_CORE_DATABASE_NAME }}
           CUBE_CORE_DATABASE_HOST=${{ secrets.CUBE_CORE_DATABASE_HOST }}
           CUBE_CORE_DATABASE_USER=${{ secrets.CUBE_CORE_DATABASE_USER }}
           CUBE_CORE_DATABASE_PASSWORD=${{ secrets.CUBE_CORE_DATABASE_PASSWORD }}
           CUBE_CORE_DATABASE_ENGINE=${{ secrets.CUBE_CORE_DATABASE_ENGINE }}
-          CUBE_MMBL_AUTH_DATABASE_NAME=${{ secrets.CUBE_MMBL_AUTH_DATABASE_NAME }}
-          CUBE_MMBL_AUTH_DATABASE_HOST=${{ secrets.CUBE_MMBL_AUTH_DATABASE_HOST }}
-          CUBE_MMBL_AUTH_DATABASE_USER=${{ secrets.CUBE_MMBL_AUTH_DATABASE_USER }}
-          CUBE_MMBL_AUTH_DATABASE_PASSWORD=${{ secrets.CUBE_MMBL_AUTH_DATABASE_PASSWORD }}
-          CUBE_MMBL_AUTH_DATABASE_ENGINE=${{ secrets.CUBE_MMBL_AUTH_DATABASE_ENGINE }}
-          MUMBLE_ICE_SLICE=/home/cube/cube-monitor/authenticator/MumbleServer.ice
+          MMBL_BG_DATABASE_NAME=${{ secrets.MMBL_BG_DATABASE_NAME }}
+          MMBL_BG_DATABASE_HOST=${{ secrets.MMBL_BG_DATABASE_HOST }}
+          MMBL_BG_DATABASE_USER=${{ secrets.MMBL_BG_DATABASE_USER }}
+          MMBL_BG_DATABASE_PASSWORD=${{ secrets.MMBL_BG_DATABASE_PASSWORD }}
+          MMBL_BG_DATABASE_ENGINE=${{ secrets.MMBL_BG_DATABASE_ENGINE }}
+          MUMBLE_ICE_SLICE=/home/cube/mumble-bg/bg/authd/MumbleServer.ice
           ENVFILE
-          chmod 600 /home/cube/.env/cube-monitor
+          chmod 600 /home/cube/.env/mumble-bg
           EOF
 
       - name: Install runtime dependencies
         run: |
           ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" << 'EOF'
           mkdir -p /home/cube/.venv
-            if [ ! -d /home/cube/.venv/cube-monitor ]; then
-            python3 -m venv /home/cube/.venv/cube-monitor
+          if [ ! -d /home/cube/.venv/mumble-bg ]; then
+            python3 -m venv /home/cube/.venv/mumble-bg
           fi
-          /home/cube/.venv/cube-monitor/bin/pip install --quiet -r /home/cube/cube-monitor/authenticator/requirements.txt
+          /home/cube/.venv/mumble-bg/bin/pip install --quiet -r /home/cube/mumble-bg/authenticator/requirements.txt
           EOF
 
       - name: Restart service
         run: |
           ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" \
-            "sudo systemctl restart cube-monitor-auth"
+            "sudo systemctl restart mumble-bg-auth"
 
       - name: Health check
         run: |
           ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" \
-            "systemctl is-active cube-monitor-auth"
+            "systemctl is-active mumble-bg-auth"

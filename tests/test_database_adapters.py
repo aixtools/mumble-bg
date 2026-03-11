@@ -6,8 +6,8 @@ import pytest
 from authenticator.database import (
     CubeCoreDBA,
     CubeDatabaseError,
-    CubeMbllDBA,
     DBAdapterObject,
+    MmblBgDBA,
 )
 
 
@@ -75,18 +75,18 @@ def test_core_dba_raises_when_no_connector_and_autodetect_needed(monkeypatch):
 
 def test_mbll_dba_supports_explicit_postgresql_and_mysql(monkeypatch):
     config = DBAdapterObject(name="mumble", host="localhost", user="u", password="p", engine="postgresql")
-    adapter = CubeMbllDBA(config)
+    adapter = MmblBgDBA(config)
     monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(connect=lambda **kwargs: "ok-psql"))
     assert adapter.connect() == "ok-psql"
 
     config_mysql = DBAdapterObject(name="mumble", host="localhost", user="u", password="p", engine="mysql")
-    adapter_mysql = CubeMbllDBA(config_mysql)
+    adapter_mysql = MmblBgDBA(config_mysql)
     monkeypatch.setitem(sys.modules, "MySQLdb", SimpleNamespace(connect=lambda **kwargs: "ok-mysql"))
     assert adapter_mysql.connect() == "ok-mysql"
 
 
 def test_mbll_dba_invalid_engine():
     config = DBAdapterObject(name="mumble", host="localhost", user="u", password="p", engine="sqlite")
-    adapter = CubeMbllDBA(config)
+    adapter = MmblBgDBA(config)
     with pytest.raises(CubeDatabaseError):
         adapter.connect()

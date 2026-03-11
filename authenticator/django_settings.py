@@ -1,9 +1,9 @@
 """
-Minimal Django settings for cube-monitor-owned tables.
+Minimal Django settings for mumble-bg-owned tables.
 
 The runtime auth daemon still reads Cube-core via SQL directly.
 This settings module is for `manage.py migrate` and local ownership of
-cube-monitor runtime schema in `CUBE_MMBL_AUTH_*`.
+mumble-bg runtime schema in `MMBL_BG_*`.
 """
 
 import os
@@ -11,7 +11,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-SECRET_KEY = 'cube-monitor-dev'
+SECRET_KEY = 'mumble-bg-dev'
 DEBUG = True
 ALLOWED_HOSTS = ['*']
 
@@ -26,7 +26,20 @@ MIDDLEWARE = []
 ROOT_URLCONF = 'authenticator.urls'
 WSGI_APPLICATION = 'authenticator.wsgi.application'
 
-DATABASE_ENGINE = (os.environ.get('CUBE_MMBL_AUTH_DATABASE_ENGINE', 'postgresql') or 'postgresql').strip().lower()
+
+def _env(*names, default=''):
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return default
+
+
+DATABASE_ENGINE = _env(
+    'MMBL_BG_DATABASE_ENGINE',
+    'CUBE_MMBL_AUTH_DATABASE_ENGINE',
+    default='postgresql',
+).strip().lower()
 
 if DATABASE_ENGINE.startswith('mysql'):
     DB_ENGINE = 'django.db.backends.mysql'
@@ -36,10 +49,10 @@ else:
 DATABASES = {
     'default': {
         'ENGINE': DB_ENGINE,
-        'NAME': os.environ.get('CUBE_MMBL_AUTH_DATABASE_NAME', 'CUBE-MMBL-AUTH'),
-        'HOST': os.environ.get('CUBE_MMBL_AUTH_DATABASE_HOST', 'localhost'),
-        'USER': os.environ.get('CUBE_MMBL_AUTH_DATABASE_USER', 'cube'),
-        'PASSWORD': os.environ.get('CUBE_MMBL_AUTH_DATABASE_PASSWORD', ''),
+        'NAME': _env('MMBL_BG_DATABASE_NAME', 'CUBE_MMBL_AUTH_DATABASE_NAME', default='MMBL_BG'),
+        'HOST': _env('MMBL_BG_DATABASE_HOST', 'CUBE_MMBL_AUTH_DATABASE_HOST', default='localhost'),
+        'USER': _env('MMBL_BG_DATABASE_USER', 'CUBE_MMBL_AUTH_DATABASE_USER', default='cube'),
+        'PASSWORD': _env('MMBL_BG_DATABASE_PASSWORD', 'CUBE_MMBL_AUTH_DATABASE_PASSWORD', default=''),
     }
 }
 

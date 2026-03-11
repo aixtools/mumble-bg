@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from authenticator import authenticator
+from bg.authd import main as authenticator
 from authenticator.database import CubeDatabaseError
 
 
