@@ -18,7 +18,7 @@ class MumbleServer(models.Model):
     display_order = models.PositiveIntegerField(default=0, help_text='Ordering on the profile page (lower = first)')
 
     class Meta:
-        db_table = 'mumble_mumbleserver'
+        db_table = 'mumble_server'
         ordering = ['display_order', 'name']
 
     def __str__(self):
@@ -72,7 +72,7 @@ class MumbleUser(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'mumble_mumbleuser'
+        db_table = 'mumble_user'
         permissions = [
             ('manage_mumble_admin', 'Can manage Mumble admin grants'),
         ]
@@ -128,7 +128,7 @@ class MumbleSession(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'mumble_mumblesession'
+        db_table = 'mumble_session'
         ordering = ['-connected_at', '-id']
         permissions = [
             ('view_mumble_presence', 'Can view current Mumble presence'),
@@ -142,8 +142,8 @@ class MumbleSession(models.Model):
             ),
         ]
         indexes = [
-            models.Index(fields=['server', 'is_active']),
-            models.Index(fields=['mumble_user', 'is_active']),
+            models.Index(fields=['server', 'is_active'], name='mumble_sess_server__0310c1_idx'),
+            models.Index(fields=['mumble_user', 'is_active'], name='mumble_sess_mumble__5be72e_idx'),
         ]
 
     def __str__(self):

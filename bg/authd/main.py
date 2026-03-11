@@ -19,7 +19,7 @@ import logging
 from datetime import datetime, timezone
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 class PilotIdentity:
     """
-    Read-only cube-core pilot projection consumed by cube-monitor.
+    Read-only cube-core pilot projection consumed by mumble-bg.
 
     Important: PKID does not bind to a fixed alliance.
     A pilot can only change corporation, and a corporation can change alliance,
@@ -105,7 +105,13 @@ ICE_SLICE = os.environ.get('MUMBLE_ICE_SLICE', 'MumbleServer.ice')
 
 SERVERS_QUERY = """
     SELECT id, ice_host, ice_port, ice_secret, virtual_server_id
-    FROM mumble_mumbleserver
+    FROM mumble_server
+    WHERE is_active = true
+"""
+
+LEGACY_SERVERS_QUERY = """
+    SELECT id, ice_host, ice_port, ice_secret, 1 AS virtual_server_id
+    FROM mumble_server
     WHERE is_active = true
 """
 
@@ -120,13 +126,13 @@ AUTH_QUERY = """
         mu.certhash,
         mu.groups,
         mu.display_name
-    FROM mumble_mumbleuser mu
+    FROM mumble_user mu
     WHERE LOWER(mu.username) = LOWER(%s) AND mu.is_active = true AND mu.server_id = %s
 """
 
 NAME_TO_ID_QUERY = """
     SELECT COALESCE(mu.mumble_userid, mu.id)
-    FROM mumble_mumbleuser mu
+    FROM mumble_user mu
     WHERE LOWER(mu.username) = LOWER(%s)
       AND mu.is_active = true
       AND mu.server_id = %s
@@ -134,7 +140,7 @@ NAME_TO_ID_QUERY = """
 
 ID_TO_NAME_QUERY = """
     SELECT mu.username
-    FROM mumble_mumbleuser mu
+    FROM mumble_user mu
     WHERE mu.server_id = %s
       AND (
         mu.mumble_userid = %s
@@ -158,12 +164,12 @@ PILOT_IDENTITY_QUERY = """
       AND ec.is_main = true
 """
 
-MUMBLE_PILOT_IDENTITY_SOURCE = "cube-core/monitor adapter contract"
+MUMBLE_PILOT_IDENTITY_SOURCE = "cube-core/mumble-bg adapter contract"
 
 
 def list_cube_pilot_identities():
     """
-    Return read-only pilot identities from cube-core for cube-monitor orchestration.
+    Return read-only pilot identities from cube-core for mumble-bg orchestration.
 
     Returns a list of PilotIdentity objects.
     """
@@ -209,10 +215,30 @@ def get_active_servers():
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(SERVERS_QUERY)
+            try:
+                cur.execute(SERVERS_QUERY)
+            except Exception as exc:
+                if not _is_missing_virtual_server_id_column(exc):
+                    raise
+                logger.warning(
+                    'mumble_server.virtual_server_id is missing; '
+                    'falling back to legacy compatibility mode with default virtual_server_id=1'
+                )
+                cur.execute(LEGACY_SERVERS_QUERY)
             return cur.fetchall()
     finally:
         conn.close()
+
+
+def _is_missing_virtual_server_id_column(exc):
+    message = str(exc).lower()
+    if 'virtual_server_id' not in message:
+        return False
+    return (
+        'does not exist' in message
+        or 'unknown column' in message
+        or getattr(exc, 'pgcode', None) == '42703'
+    )
 
 
 def select_target_servers(booted_servers, virtual_server_id):
@@ -331,7 +357,7 @@ def id_to_name(user_id, server_id):
 
 
 UPDATE_CONNECTION_QUERY = """
-    UPDATE mumble_mumbleuser
+    UPDATE mumble_user
     SET certhash = %s, last_authenticated = %s, updated_at = %s
     WHERE id = %s
 """
@@ -468,7 +494,7 @@ def main():
             logger.error('No authenticators were registered. Exiting.')
             sys.exit(1)
 
-        logger.info('Cube Monitor authenticator running (%d server(s)). Press Ctrl+C to stop.', registered)
+        logger.info('mumble-bg authd running (%d server(s)). Press Ctrl+C to stop.', registered)
         communicator.waitForShutdown()
 
 

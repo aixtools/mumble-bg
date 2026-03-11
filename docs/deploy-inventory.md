@@ -1,6 +1,6 @@
 # Deploy And Workflow Inventory
 
-This repository was bootstrapped from the in-tree Cube Monitor implementation. The first standalone deploy defaults now live here, but Cube still carries the legacy deploy wiring that should be removed later.
+This repository was bootstrapped from the in-tree Mumble background implementation. The first standalone deploy defaults now live here, but Cube still carries the legacy deploy wiring that should be removed later.
 
 ## Where The Current Deploy Logic Lives
 
@@ -17,16 +17,16 @@ Older Docker wiring also exists on the `cube-newmumble-upstream` source branch, 
 
 `cube/deploy/setup-hetzner.sh` currently owns:
 
-- sudoers entry allowing restart of `cube-monitor-auth`
+- sudoers entry allowing restart of `mumble-bg-auth`
 - creation of a dedicated `authenticator` virtualenv
-- installation of the `cube-monitor-auth` systemd service
+- installation of the `mumble-bg-auth` systemd service
 - enabling that service on boot
 
 The current service definition is effectively:
 
 - working directory: `.../authenticator`
 - env file: `.../.env`
-- exec: `.../authenticator/venv/bin/python .../authenticator/authenticator.py`
+- exec: `.../.venv/mumble-bg/bin/python -m bg.authd`
 
 ### GitHub Actions
 
@@ -34,7 +34,7 @@ The current service definition is effectively:
 
 - rsync of the whole Cube repo to the server
 - installation of `authenticator` dependencies
-- restart of `cube-monitor-auth`
+- restart of `mumble-bg-auth`
 
 This means Cube currently deploys the Mumble backend as part of the Cube app deploy, even though it is logically a separate runtime.
 
@@ -42,14 +42,14 @@ This means Cube currently deploys the Mumble backend as part of the Cube app dep
 
 The default standalone layout for this repository is:
 
-- repo checkout: `/home/cube/cube-monitor`
-- virtualenv: `/home/cube/.venv/cube-monitor`
-- environment file: `/home/cube/.env/cube-monitor`
-- service name: `cube-monitor-auth`
+- repo checkout: `/home/cube/mumble-bg`
+- virtualenv: `/home/cube/.venv/mumble-bg`
+- environment file: `/home/cube/.env/mumble-bg`
+- service name: `mumble-bg-auth`
 
-## What Moves To cube-monitor
+## What Moves To mumble-bg
 
-When `cube-monitor` becomes the real standalone project, it should own:
+When `mumble-bg` becomes the real standalone project, it should own:
 
 - its own deploy scripts under `deploy/`
 - its own GitHub Actions workflows under `.github/workflows/`
@@ -70,9 +70,9 @@ That future deploy should manage at least:
 - Cube DB schema and migrations
 - Cube-side UI and admin policy inputs
 
-It should stop deploying or supervising `cube-monitor` runtime processes.
+It should stop deploying or supervising `mumble-bg` runtime processes.
 
-The extracted Cube-facing Django code now lives in the sibling repository `../cube-mumble` rather than in this repo.
+The extracted Cube-facing Django code now lives in the sibling repository `../mumble-fg` rather than in this repo.
 
 ## Environment / Secret Contract
 
@@ -89,9 +89,9 @@ That is still the model where it reads Cube's Mumble tables directly.
 
 The target split model is:
 
-- `cube-monitor` should use its own runtime/private DB
-- `cube-monitor` should get read-only credentials for the Cube DB using `CUBE_CORE_*`
-- the owned schema in this repo should use `CUBE_MMBL_AUTH_*`
+- `mumble-bg` should use its own runtime/private DB
+- `mumble-bg` should get read-only credentials for the Cube DB using `CUBE_CORE_*`
+- the owned schema in this repo should use `MMBL_BG_*`
 - any writeback or command channel should be explicit and not rely on Cube deploying the service
 
 ## What Not To Carry Forward
@@ -100,7 +100,7 @@ Do not treat the old Docker path as required deployment state.
 
 The current target is:
 
-- rsync checkout to `/home/cube/cube-monitor`
-- install requirements into `/home/cube/.venv/cube-monitor`
+- rsync checkout to `/home/cube/mumble-bg`
+- install requirements into `/home/cube/.venv/mumble-bg`
 - manage the systemd unit from this repository
 - use `deploy/setup-hetzner.sh` once as root, then use the GitHub workflow for routine updates

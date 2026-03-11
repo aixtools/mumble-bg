@@ -1,14 +1,16 @@
 from types import SimpleNamespace
 
-from authenticator import authenticator
+from bg.authd import main as authenticator
 from authenticator.database import CubeDatabaseError
 
 
 class _Cursor:
     def __init__(self, rows):
         self._rows = rows
+        self.executed = []
 
     def execute(self, *_args, **_kwargs):
+        self.executed.append(_args[0] if _args else None)
         return None
 
     def fetchall(self):
@@ -28,9 +30,10 @@ class _Conn:
     def __init__(self, rows):
         self._rows = rows
         self.closed = False
+        self.cursor_obj = _Cursor(self._rows)
 
     def cursor(self):
-        return _Cursor(self._rows)
+        return self.cursor_obj
 
     def close(self):
         self.closed = True
@@ -100,3 +103,54 @@ def test_list_cube_pilot_identities_returns_empty_on_query_error(monkeypatch):
     monkeypatch.setattr(authenticator, "get_db_connection", failing_connection)
 
     assert authenticator.list_cube_pilot_identities() == []
+
+
+def test_get_active_servers_uses_primary_query(monkeypatch):
+    conn = _Conn([
+        (1, "127.0.0.1", 6502, "secret", 7),
+    ])
+
+    monkeypatch.setattr(authenticator, "get_db_connection", lambda: conn)
+
+    servers = authenticator.get_active_servers()
+
+    assert servers == [(1, "127.0.0.1", 6502, "secret", 7)]
+    assert conn.cursor_obj.executed == [authenticator.SERVERS_QUERY]
+    assert conn.closed is True
+
+
+def test_get_active_servers_falls_back_when_virtual_server_id_column_is_missing(monkeypatch):
+    class MissingVirtualServerId(Exception):
+        pgcode = "42703"
+
+    class _LegacyCursor(_Cursor):
+        def __init__(self, rows):
+            super().__init__(rows)
+            self.calls = 0
+
+        def execute(self, query, *_args, **_kwargs):
+            self.executed.append(query)
+            self.calls += 1
+            if self.calls == 1:
+                raise MissingVirtualServerId('column "virtual_server_id" does not exist')
+            return None
+
+    class _LegacyConn(_Conn):
+        def __init__(self, rows):
+            super().__init__(rows)
+            self.cursor_obj = _LegacyCursor(self._rows)
+
+    conn = _LegacyConn([
+        (1, "127.0.0.1", 6502, "secret", 1),
+    ])
+
+    monkeypatch.setattr(authenticator, "get_db_connection", lambda: conn)
+
+    servers = authenticator.get_active_servers()
+
+    assert servers == [(1, "127.0.0.1", 6502, "secret", 1)]
+    assert conn.cursor_obj.executed == [
+        authenticator.SERVERS_QUERY,
+        authenticator.LEGACY_SERVERS_QUERY,
+    ]
+    assert conn.closed is True

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage utility for local cube-monitor Django-managed tables."""
+"""Manage utility for local mumble-bg Django-managed tables."""
 
 import os
 import sys

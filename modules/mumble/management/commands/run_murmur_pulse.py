@@ -1,13 +1,14 @@
 from django.core.management.base import BaseCommand, CommandError
 
-from modules.mumble.pulse import MurmurPulseError, MurmurPulseService
+from bg.pulse.main import run_service
+from modules.mumble.pulse import MurmurPulseError
 
 
 class Command(BaseCommand):
     help = 'Run Murmur Pulse to track Mumble connect, disconnect, and activity state'
 
     def add_arguments(self, parser):
-        parser.add_argument('--server-id', type=int, help='Only track one Cube Monitor MumbleServer row')
+        parser.add_argument('--server-id', type=int, help='Only track one mumble-bg MumbleServer row')
         parser.add_argument(
             '--poll-interval',
             type=int,
@@ -26,12 +27,10 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        service = MurmurPulseService(
-            callback_endpoint=options['callback_endpoint'],
-            server_id=options.get('server_id'),
-        )
         try:
-            service.run(
+            run_service(
+                server_id=options.get('server_id'),
+                callback_endpoint=options['callback_endpoint'],
                 once=options['once'],
                 poll_interval=options['poll_interval'],
             )

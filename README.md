@@ -1,4 +1,4 @@
-# cube-monitor
+# mumble-bg
 
 Initial extraction snapshot for rebuilding Cube's Mumble integration as a standalone project.
 
@@ -9,32 +9,34 @@ Copied baseline paths:
 - `modules/mumble`
 - `authenticator`
 
-The original Cube-facing Django/UI files have now been split back out into the sibling repository `../cube-mumble`.
+The original Cube-facing Django/UI files have now been split back out into the sibling repository `../mumble-fg`.
 
-This is not the target architecture. The copied code is here to preserve the current implementation while `cube-monitor` is rebuilt around the newer boundary:
+This is not the target architecture. The copied code is here to preserve the current implementation while `mumble-bg` is rebuilt around the newer boundary:
 
-- `cube-core` and `cube-mumble` own Cube-side UI and policy inputs
-- `cube-monitor` owns Mumble server inventory, ICE interactions, and per-server state
+- `cube-core` and `mumble-fg` own Cube-side UI and policy inputs
+- `mumble-bg` owns Mumble background services, ICE interactions, and per-server state
 - `PKID` is the stable Cube-side identity key
 
-See [docs/extraction-inventory.md](/home/michael/prj/cube-monitor/docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
+The locked boundary rules are documented in [docs/system-boundary.md](/home/michael/prj/mumble-bg/docs/system-boundary.md).
+
+See [docs/extraction-inventory.md](/home/michael/prj/mumble-bg/docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
 
 ## Standalone Deploy Defaults
 
-For the current standalone authenticator phase, the default layout is:
+For the current standalone background-service phase, the default layout is:
 
-- repo checkout: `/home/cube/cube-monitor`
-- virtualenv: `/home/cube/.venv/cube-monitor`
-- environment file: `/home/cube/.env/cube-monitor`
-- systemd unit: `cube-monitor-auth.service`
+- repo checkout: `/home/cube/mumble-bg`
+- virtualenv: `/home/cube/.venv/mumble-bg`
+- environment file: `/home/cube/.env/mumble-bg`
+- systemd unit: `mumble-bg-auth.service`
 
 Relevant files:
 
-- [deploy/setup-hetzner.sh](/home/michael/prj/cube-monitor/deploy/setup-hetzner.sh)
-- [deploy/undeploy-hetzner.sh](/home/michael/prj/cube-monitor/deploy/undeploy-hetzner.sh)
-- [deploy/systemd/cube-monitor-auth.service](/home/michael/prj/cube-monitor/deploy/systemd/cube-monitor-auth.service)
-- [.github/workflows/deploy-dev.yml](/home/michael/prj/cube-monitor/.github/workflows/deploy-dev.yml)
-- [docs/bootstrap-dev-deploy.md](/home/michael/prj/cube-monitor/docs/bootstrap-dev-deploy.md)
+- [deploy/setup-hetzner.sh](/home/michael/prj/mumble-bg/deploy/setup-hetzner.sh)
+- [deploy/undeploy-hetzner.sh](/home/michael/prj/mumble-bg/deploy/undeploy-hetzner.sh)
+- [deploy/systemd/mumble-bg-auth.service](/home/michael/prj/mumble-bg/deploy/systemd/mumble-bg-auth.service)
+- [.github/workflows/deploy-dev.yml](/home/michael/prj/mumble-bg/.github/workflows/deploy-dev.yml)
+- [docs/bootstrap-dev-deploy.md](/home/michael/prj/mumble-bg/docs/bootstrap-dev-deploy.md)
 
 `deploy/setup-hetzner.sh` is the one-time root install path. The GitHub workflow is for ordinary code updates after that setup exists.
 
@@ -54,15 +56,22 @@ This contract update aligns with Cube core behavioral changes introduced in Cube
   - A pilot can change corporation over time.
   - A corporation can change alliance over time.
   - Therefore `alliance_id` is membership-state, not an immutable identity attribute.
-  - cube-monitor should always treat `alliance_id` as a snapshot from cube-core and refresh it whenever character org state is refreshed.
+  - mumble-bg should always treat `alliance_id` as a snapshot from cube-core and refresh it whenever character org state is refreshed.
 
 ## Environment Contracts
 
-- `CUBE_CORE_*` = read-only Cube-core source DB used by the authenticator.
-- `CUBE_MMBL_AUTH_*` = cube-monitor-owned DB used for local migrations and runtime tables.
+- `CUBE_CORE_*` = read-only Cube-core source DB used by the background services.
+- `MMBL_BG_*` = mumble-bg-owned DB used for local migrations and runtime tables.
 
 ```bash
 python manage.py migrate
 ```
 
-uses `CUBE_MMBL_AUTH_*` and keeps local schema independent of cube-core.
+uses `MMBL_BG_*` and keeps local schema independent of cube-core.
+
+## Release Cleanup Note
+
+Before the first real release, remove historical references to the old table names
+`mumble_mumbleserver`, `mumble_mumbleuser`, and `mumble_mumblesession` from
+handoff notes and transition docs. The fresh-start owned schema in this repo now
+uses `mumble_server`, `mumble_user`, and `mumble_session`.

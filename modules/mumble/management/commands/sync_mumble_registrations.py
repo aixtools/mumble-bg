@@ -6,10 +6,10 @@ from modules.mumble.models import MumbleUser
 
 
 class Command(BaseCommand):
-    help = 'Backfill or adopt Murmur registrations for Cube Monitor users'
+    help = 'Backfill or adopt Murmur registrations for mumble-bg users'
 
     def add_arguments(self, parser):
-        parser.add_argument('--server-id', type=int, help='Only sync one Cube Monitor MumbleServer row')
+        parser.add_argument('--server-id', type=int, help='Only sync one mumble-bg MumbleServer row')
         parser.add_argument('--user-id', type=int, help='Only sync one Django user')
         parser.add_argument('--only-missing-ids', action='store_true', help='Only sync rows missing mumble_userid')
         parser.add_argument('--dry-run', action='store_true', help='Report intended changes without mutating Murmur or Cube')

@@ -1,17 +1,18 @@
 """
-Minimal Django settings for cube-monitor-owned tables.
+Minimal Django settings for mumble-bg-owned tables.
 
 The runtime auth daemon still reads Cube-core via SQL directly.
 This settings module is for `manage.py migrate` and local ownership of
-cube-monitor runtime schema in `CUBE_MMBL_AUTH_*`.
+mumble-bg runtime schema in `MMBL_BG_*`.
 """
 
 import os
+import socket
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-SECRET_KEY = 'cube-monitor-dev'
+SECRET_KEY = 'mumble-bg-dev'
 DEBUG = True
 ALLOWED_HOSTS = ['*']
 
@@ -26,7 +27,33 @@ MIDDLEWARE = []
 ROOT_URLCONF = 'authenticator.urls'
 WSGI_APPLICATION = 'authenticator.wsgi.application'
 
-DATABASE_ENGINE = (os.environ.get('CUBE_MMBL_AUTH_DATABASE_ENGINE', 'postgresql') or 'postgresql').strip().lower()
+
+def _candidate_hosts(host):
+    requested = (host or '').strip() or '127.0.0.1'
+    if requested.lower() == 'localhost':
+        return ['127.0.0.1', 'localhost']
+    return [requested]
+
+
+def _port_open(host, port):
+    try:
+        with socket.create_connection((host, port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
+def _detect_database_engine(host):
+    for candidate in _candidate_hosts(host):
+        if _port_open(candidate, 5432):
+            return 'postgresql'
+        if _port_open(candidate, 3306):
+            return 'mysql'
+    return 'postgresql'
+
+
+DATABASE_HOST = os.environ.get('MMBL_BG_DATABASE_HOST', 'localhost')
+DATABASE_ENGINE = _detect_database_engine(DATABASE_HOST)
 
 if DATABASE_ENGINE.startswith('mysql'):
     DB_ENGINE = 'django.db.backends.mysql'
@@ -36,10 +63,10 @@ else:
 DATABASES = {
     'default': {
         'ENGINE': DB_ENGINE,
-        'NAME': os.environ.get('CUBE_MMBL_AUTH_DATABASE_NAME', 'CUBE-MMBL-AUTH'),
-        'HOST': os.environ.get('CUBE_MMBL_AUTH_DATABASE_HOST', 'localhost'),
-        'USER': os.environ.get('CUBE_MMBL_AUTH_DATABASE_USER', 'cube'),
-        'PASSWORD': os.environ.get('CUBE_MMBL_AUTH_DATABASE_PASSWORD', ''),
+        'NAME': os.environ.get('MMBL_BG_DATABASE_NAME', 'MMBL_BG'),
+        'HOST': DATABASE_HOST,
+        'USER': os.environ.get('MMBL_BG_DATABASE_USER', 'cube'),
+        'PASSWORD': os.environ.get('MMBL_BG_DATABASE_PASSWORD', ''),
     }
 }
 

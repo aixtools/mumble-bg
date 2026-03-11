@@ -11,10 +11,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="${APP_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 APP_USER="${APP_USER:-cube}"
 APP_HOME="${APP_HOME:-$(getent passwd "${APP_USER}" | cut -d: -f6)}"
-VENV_DIR="${VENV_DIR:-${APP_HOME}/.venv/cube-monitor}"
+VENV_DIR="${VENV_DIR:-${APP_HOME}/.venv/mumble-bg}"
 ENV_DIR="${ENV_DIR:-${APP_HOME}/.env}"
-ENV_FILE="${ENV_FILE:-${ENV_DIR}/cube-monitor}"
-SERVICE_NAME="cube-monitor-auth"
+ENV_FILE="${ENV_FILE:-${ENV_DIR}/mumble-bg}"
+SERVICE_NAME="mumble-bg-auth"
 SERVICE_DEST="/etc/systemd/system/${SERVICE_NAME}.service"
 
 if [ ! -d "${APP_DIR}" ]; then
@@ -27,7 +27,7 @@ if [ -z "${APP_HOME}" ]; then
     exit 1
 fi
 
-if ! sudo -u "${APP_USER}" test -r "${APP_DIR}/authenticator/authenticator.py"; then
+if ! sudo -u "${APP_USER}" test -r "${APP_DIR}/bg/authd/main.py"; then
     echo "User ${APP_USER} cannot read ${APP_DIR}. Adjust permissions or set APP_DIR/APP_USER."
     exit 1
 fi
@@ -49,14 +49,14 @@ fi
 
 sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${APP_DIR}/authenticator/requirements.txt"
 
-cat > /etc/sudoers.d/cube-monitor << 'EOF'
-cube ALL=(ALL) NOPASSWD: /bin/systemctl restart cube-monitor-auth, /bin/systemctl status cube-monitor-auth, /bin/systemctl daemon-reload
+cat > /etc/sudoers.d/mumble-bg << 'EOF'
+cube ALL=(ALL) NOPASSWD: /bin/systemctl restart mumble-bg-auth, /bin/systemctl status mumble-bg-auth, /bin/systemctl daemon-reload
 EOF
-chmod 440 /etc/sudoers.d/cube-monitor
+chmod 440 /etc/sudoers.d/mumble-bg
 
 cat > "${SERVICE_DEST}" <<EOF
 [Unit]
-Description=Cube Monitor ICE Authenticator
+Description=mumble-bg ICE authenticator
 After=network.target postgresql.service mumble-server.service
 
 [Service]
@@ -64,7 +64,7 @@ User=${APP_USER}
 Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${ENV_FILE}
-ExecStart=${VENV_DIR}/bin/python ${APP_DIR}/authenticator/authenticator.py
+ExecStart=${VENV_DIR}/bin/python -m bg.authd
 Restart=always
 RestartSec=5
 

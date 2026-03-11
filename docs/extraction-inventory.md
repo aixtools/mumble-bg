@@ -13,7 +13,7 @@ Copied into this repository:
 
 These files are copied as a rebuild baseline, not as a final package layout.
 
-The original Cube-facing Django/UI paths have since been split out into the sibling repository `../cube-mumble`.
+The original Cube-facing Django/UI paths have since been split out into the sibling repository `../mumble-fg`.
 
 ## Cube-Core Touchpoints Still In Cube
 
@@ -36,7 +36,7 @@ The retained standalone snapshot now includes:
 - the standalone authenticator
 - Murmur ICE slice data
 
-The following Cube-coupled pieces were removed from this repo and moved to `../cube-mumble`:
+The following Cube-coupled pieces were removed from this repo and moved to `../mumble-fg`:
 
 - Mumble admin and profile UI
 - Cube sidebar integration
@@ -48,8 +48,8 @@ The following Cube-coupled pieces were removed from this repo and moved to `../c
 
 The intended target is narrower than the copied code:
 
-- `cube-core` and `cube-mumble` should keep Cube-side eligibility UI, user/admin actions, and status display
-- `cube-monitor` should own server inventory, account provisioning, per-server identifiers, password application, and runtime state
+- `cube-core` and `mumble-fg` should keep Cube-side eligibility UI, user/admin actions, and status display
+- `mumble-bg` should own server inventory, account provisioning, per-server identifiers, password application, and runtime state
 - long-lived per-server Mumble auth state should not remain in Cube core
 
 ## Org Membership Semantics

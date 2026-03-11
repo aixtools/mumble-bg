@@ -1,0 +1,1 @@
+"""Mumble authentication daemon package."""

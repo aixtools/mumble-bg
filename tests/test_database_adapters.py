@@ -6,8 +6,8 @@ import pytest
 from authenticator.database import (
     CubeCoreDBA,
     CubeDatabaseError,
-    CubeMbllDBA,
     DBAdapterObject,
+    MmblBgDBA,
 )
 
 
@@ -29,7 +29,7 @@ def test_core_dba_prefers_postgresql_when_requested(monkeypatch):
 
     conn = adapter.connect()
     assert conn is not None
-    assert called == [("cube", "localhost", "5432", "u", "p")]
+    assert called == [("cube", "127.0.0.1", "5432", "u", "p")]
 
 
 def test_core_dba_autodetect_falls_back_to_postgresql(monkeypatch):
@@ -42,20 +42,12 @@ def test_core_dba_autodetect_falls_back_to_postgresql(monkeypatch):
     def fake_connect_raise(**kwargs):
         raise PsyException("postgres down")
 
-    def fake_mysql_connect(*, host=None, port=None, database=None, user=None, password=None):
+    def fake_mysql_connect(*, host=None, port=None, db=None, user=None, passwd=None):
         return object()
 
-    class FakeMysqlConnector:
-        connect = staticmethod(fake_mysql_connect)
-
     psycopg2 = SimpleNamespace(connect=fake_connect_raise)
-    mysql = ModuleType("mysql")
-    mysql.connector = SimpleNamespace(connect=fake_mysql_connect)
-    mysql_connector = ModuleType("mysql.connector")
-    mysql_connector.connect = fake_mysql_connect
     monkeypatch.setitem(sys.modules, "psycopg2", psycopg2)
-    monkeypatch.setitem(sys.modules, "mysql", mysql)
-    monkeypatch.setitem(sys.modules, "mysql.connector", mysql_connector)
+    monkeypatch.setitem(sys.modules, "MySQLdb", SimpleNamespace(connect=fake_mysql_connect))
 
     conn = adapter.connect()
     assert conn is not None
@@ -68,36 +60,33 @@ def test_core_dba_raises_when_no_connector_and_autodetect_needed(monkeypatch):
     def fake_connect_raise(**kwargs):
         raise Exception("psyc down")
 
-    missing_mysql_connector = ModuleType("mysql.connector")
-    missing_mysql_connector.connect = lambda **kwargs: (_ for _ in ()).throw(CubeDatabaseError("no mysql"))
     psycopg2 = SimpleNamespace(connect=fake_connect_raise)
     monkeypatch.setitem(sys.modules, "psycopg2", psycopg2)
+    if "MySQLdb" in sys.modules:
+        del sys.modules["MySQLdb"]
     monkeypatch.setitem(sys.modules, "mysql", ModuleType("mysql"))
-    monkeypatch.setitem(sys.modules, "mysql.connector", missing_mysql_connector)
+    monkeypatch.setitem(sys.modules, "mysql.connector", ModuleType("mysql.connector"))
 
-    with pytest.raises(CubeDatabaseError):
+    with pytest.raises(CubeDatabaseError) as exc_info:
         adapter.connect()
+    assert "postgresql@127.0.0.1" in str(exc_info.value)
+    assert "mysql@127.0.0.1" in str(exc_info.value)
 
 
 def test_mbll_dba_supports_explicit_postgresql_and_mysql(monkeypatch):
     config = DBAdapterObject(name="mumble", host="localhost", user="u", password="p", engine="postgresql")
-    adapter = CubeMbllDBA(config)
+    adapter = MmblBgDBA(config)
     monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(connect=lambda **kwargs: "ok-psql"))
     assert adapter.connect() == "ok-psql"
 
     config_mysql = DBAdapterObject(name="mumble", host="localhost", user="u", password="p", engine="mysql")
-    adapter_mysql = CubeMbllDBA(config_mysql)
-    mysql = ModuleType("mysql")
-    mysql.connector = SimpleNamespace(connect=lambda **kwargs: "ok-mysql")
-    mysql_connector = ModuleType("mysql.connector")
-    mysql_connector.connect = lambda **kwargs: "ok-mysql"
-    monkeypatch.setitem(sys.modules, "mysql", mysql)
-    monkeypatch.setitem(sys.modules, "mysql.connector", mysql_connector)
+    adapter_mysql = MmblBgDBA(config_mysql)
+    monkeypatch.setitem(sys.modules, "MySQLdb", SimpleNamespace(connect=lambda **kwargs: "ok-mysql"))
     assert adapter_mysql.connect() == "ok-mysql"
 
 
 def test_mbll_dba_invalid_engine():
     config = DBAdapterObject(name="mumble", host="localhost", user="u", password="p", engine="sqlite")
-    adapter = CubeMbllDBA(config)
+    adapter = MmblBgDBA(config)
     with pytest.raises(CubeDatabaseError):
         adapter.connect()
