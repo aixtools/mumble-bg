@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand, CommandError
 
 from bg.pulse.main import run_service
-from modules.mumble.pulse import MurmurPulseError
+from bg.pulse.service import MurmurPulseError
 
 
 class Command(BaseCommand):

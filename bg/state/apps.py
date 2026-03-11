@@ -1,6 +1,7 @@
 from django.apps import AppConfig
 
 
-class MumbleConfig(AppConfig):
+class StateConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'modules.mumble'
+    name = 'bg.state'
+    label = 'mumble'

@@ -4,8 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import os
 
-from modules.mumble.pulse import MurmurPulseError, MurmurPulseService
+
+def _load_service():
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bg.settings')
+    import django
+
+    django.setup()
+
+    from bg.pulse.service import MurmurPulseError, MurmurPulseService
+
+    return MurmurPulseError, MurmurPulseService
 
 
 def build_parser():
@@ -33,6 +43,7 @@ def build_parser():
 
 
 def run_service(*, server_id=None, poll_interval=30, callback_endpoint='tcp -h 0.0.0.0', once=False):
+    _, MurmurPulseService = _load_service()
     service = MurmurPulseService(
         callback_endpoint=callback_endpoint,
         server_id=server_id,
@@ -46,6 +57,7 @@ def run_service(*, server_id=None, poll_interval=30, callback_endpoint='tcp -h 0
 def main(argv=None):
     parser = build_parser()
     options = parser.parse_args(argv)
+    MurmurPulseError, _ = _load_service()
     try:
         run_service(
             server_id=options.server_id,

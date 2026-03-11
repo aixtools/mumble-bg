@@ -1,4 +1,4 @@
-from bg.authd import main as authd
+from bg.authd import service as authd
 from bg.db import PilotDBError
 
 

@@ -9,8 +9,8 @@ import time
 from django.db import transaction
 from django.utils import timezone
 
-from modules.mumble.ice_sync import _load_slice
-from modules.mumble.models import MumbleServer, MumbleSession, MumbleUser
+from bg.state.ice_sync import _load_slice
+from bg.state.models import MumbleServer, MumbleSession, MumbleUser
 
 logger = logging.getLogger(__name__)
 
