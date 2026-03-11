@@ -47,7 +47,6 @@ jobs:
           MMBL_BG_DATABASE_HOST=${{ secrets.MMBL_BG_DATABASE_HOST }}
           MMBL_BG_DATABASE_USER=${{ secrets.MMBL_BG_DATABASE_USER }}
           MMBL_BG_DATABASE_PASSWORD=${{ secrets.MMBL_BG_DATABASE_PASSWORD }}
-          MMBL_BG_DATABASE_ENGINE=${{ secrets.MMBL_BG_DATABASE_ENGINE }}
           MUMBLE_ICE_SLICE=/home/cube/mumble-bg/bg/authd/MumbleServer.ice
           ENVFILE
           chmod 600 /home/cube/.env/mumble-bg

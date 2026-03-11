@@ -14,8 +14,8 @@ These constraints are locked:
 
 - `eveo_core` is authoritative and read-only from the perspective of this repo.
 - This repo owns its private runtime/auth database and its daemon state.
-- The UI/admin integration layer (`cube_mumble` now, later possibly
-  `eveo_mumble`) mediates operator actions and presentation across systems.
+- The UI/admin integration layer (`mumble-fg`) mediates operator actions and
+  presentation across systems.
 
 ## Allowed Cross-System Flow
 

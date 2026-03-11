@@ -7,6 +7,7 @@ mumble-bg runtime schema in `MMBL_BG_*`.
 """
 
 import os
+import socket
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -27,19 +28,32 @@ ROOT_URLCONF = 'authenticator.urls'
 WSGI_APPLICATION = 'authenticator.wsgi.application'
 
 
-def _env(*names, default=''):
-    for name in names:
-        value = os.environ.get(name)
-        if value:
-            return value
-    return default
+def _candidate_hosts(host):
+    requested = (host or '').strip() or '127.0.0.1'
+    if requested.lower() == 'localhost':
+        return ['127.0.0.1', 'localhost']
+    return [requested]
 
 
-DATABASE_ENGINE = _env(
-    'MMBL_BG_DATABASE_ENGINE',
-    'CUBE_MMBL_AUTH_DATABASE_ENGINE',
-    default='postgresql',
-).strip().lower()
+def _port_open(host, port):
+    try:
+        with socket.create_connection((host, port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
+def _detect_database_engine(host):
+    for candidate in _candidate_hosts(host):
+        if _port_open(candidate, 5432):
+            return 'postgresql'
+        if _port_open(candidate, 3306):
+            return 'mysql'
+    return 'postgresql'
+
+
+DATABASE_HOST = os.environ.get('MMBL_BG_DATABASE_HOST', 'localhost')
+DATABASE_ENGINE = _detect_database_engine(DATABASE_HOST)
 
 if DATABASE_ENGINE.startswith('mysql'):
     DB_ENGINE = 'django.db.backends.mysql'
@@ -49,10 +63,10 @@ else:
 DATABASES = {
     'default': {
         'ENGINE': DB_ENGINE,
-        'NAME': _env('MMBL_BG_DATABASE_NAME', 'CUBE_MMBL_AUTH_DATABASE_NAME', default='MMBL_BG'),
-        'HOST': _env('MMBL_BG_DATABASE_HOST', 'CUBE_MMBL_AUTH_DATABASE_HOST', default='localhost'),
-        'USER': _env('MMBL_BG_DATABASE_USER', 'CUBE_MMBL_AUTH_DATABASE_USER', default='cube'),
-        'PASSWORD': _env('MMBL_BG_DATABASE_PASSWORD', 'CUBE_MMBL_AUTH_DATABASE_PASSWORD', default=''),
+        'NAME': os.environ.get('MMBL_BG_DATABASE_NAME', 'MMBL_BG'),
+        'HOST': DATABASE_HOST,
+        'USER': os.environ.get('MMBL_BG_DATABASE_USER', 'cube'),
+        'PASSWORD': os.environ.get('MMBL_BG_DATABASE_PASSWORD', ''),
     }
 }
 

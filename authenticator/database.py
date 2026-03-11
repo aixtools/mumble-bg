@@ -118,7 +118,7 @@ class MmblBgDBA(CubeCoreBaseDBA):
             return self._connect_mysql()
         if requested in {'', 'postgresql', 'postgres'}:
             return self._connect_postgresql()
-        raise CubeDatabaseError(f'Unsupported MMBL_BG_DATABASE_ENGINE={requested}')
+        raise CubeDatabaseError(f'Unsupported mumble-bg database engine={requested}')
 
     def _connect_postgresql(self):
         import psycopg2
@@ -139,7 +139,7 @@ class MmblBgDBA(CubeCoreBaseDBA):
                 import mysql.connector
             except Exception as exc:  # pragma: no cover - runtime dependency optional until needed
                 raise CubeDatabaseError(
-                    'mysql client is not installed for MMBL_BG_DATABASE_ENGINE=mysql'
+                    'mysql client is not installed for the mumble-bg mysql backend'
                 ) from exc
 
             return mysql.connector.connect(
@@ -157,6 +157,3 @@ class MmblBgDBA(CubeCoreBaseDBA):
             user=self._config.user,
             passwd=self._config.password,
         )
-
-
-CubeMbllDBA = MmblBgDBA
