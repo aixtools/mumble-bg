@@ -19,6 +19,12 @@ This is not the target architecture. The copied code is here to preserve the cur
 
 The locked boundary rules are documented in [docs/system-boundary.md](/home/michael/prj/mumble-bg/docs/system-boundary.md).
 
+The bg-owned Django app and model naming choices are documented in
+[docs/bg-state.md](/home/michael/prj/mumble-bg/docs/bg-state.md).
+
+The explicit fg/bg control path is documented in
+[docs/mumble-control.md](/home/michael/prj/mumble-bg/docs/mumble-control.md).
+
 See [docs/extraction-inventory.md](/home/michael/prj/mumble-bg/docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
 
 ## Standalone Deploy Defaults
@@ -42,8 +48,8 @@ Relevant files:
 
 ## Read-only Pilot Contract
 
-- `bg.authd.main.PilotIdentity(character_id, character_name, corporation_id, alliance_id, corporation_name, alliance_name, corporation_ticker, alliance_ticker)`
-- `bg.authd.main.list_pilot_identities() -> list[PilotIdentity]`
+- `bg.authd.service.PilotIdentity(character_id, character_name, corporation_id, alliance_id, corporation_name, alliance_name, corporation_ticker, alliance_ticker)`
+- `bg.authd.service.list_pilot_identities() -> list[PilotIdentity]`
 
 - `character_name` is used for display naming in Mumble.
 - `corporation_name` and `alliance_name` are now carried through from the pilot source.

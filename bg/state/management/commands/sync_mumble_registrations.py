@@ -1,8 +1,8 @@
 from django.core.management.base import BaseCommand
 
 from bg.passwords import LEGACY_BCRYPT_SHA256
-from modules.mumble.ice_sync import MumbleSyncError, sync_mumble_registration
-from modules.mumble.models import MumbleUser
+from bg.pilot.registrations import MumbleSyncError, sync_mumble_registration
+from bg.state.models import MumbleUser
 
 
 class Command(BaseCommand):

@@ -9,8 +9,8 @@ import time
 from django.db import transaction
 from django.utils import timezone
 
-from modules.mumble.ice_sync import _load_slice
-from modules.mumble.models import MumbleServer, MumbleSession, MumbleUser
+from bg.ice import load_ice_module
+from bg.state.models import MumbleServer, MumbleSession, MumbleUser
 
 logger = logging.getLogger(__name__)
 
@@ -563,7 +563,10 @@ class MurmurPulseService:
         if not server_configs:
             raise MurmurPulseError('No active MumbleServer rows matched for Murmur Pulse')
 
-        M = _load_slice()
+        try:
+            M = load_ice_module()
+        except RuntimeError as exc:
+            raise MurmurPulseError(str(exc)) from exc
         endpoints = self._group_endpoints(server_configs)
 
         with Ice.initialize(['--Ice.Default.EncodingVersion=1.0']) as communicator:
