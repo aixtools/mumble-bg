@@ -47,7 +47,7 @@ if [ ! -d "${VENV_DIR}" ]; then
     sudo -u "${APP_USER}" python3 -m venv "${VENV_DIR}"
 fi
 
-sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${APP_DIR}/authenticator/requirements.txt"
+sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${APP_DIR}/requirements.txt"
 
 cat > /etc/sudoers.d/mumble-bg << 'EOF'
 cube ALL=(ALL) NOPASSWD: /bin/systemctl restart mumble-bg-auth, /bin/systemctl status mumble-bg-auth, /bin/systemctl daemon-reload

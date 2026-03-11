@@ -2,7 +2,7 @@
 
 This document covers the initial one-time setup for deploying `mumble-bg` from GitHub Actions to the dev host.
 
-This is for the current standalone authenticator phase only.
+This is for the current standalone background-service phase only.
 
 ## What The Workflow Does
 
@@ -64,7 +64,7 @@ bash /home/cube/mumble-bg/deploy/setup-hetzner.sh
 This script:
 
 - ensures `/home/cube/.venv/mumble-bg`
-- installs authenticator requirements
+- installs background-service requirements
 - installs `/etc/systemd/system/mumble-bg-auth.service`
 - installs sudoers for service restart/status
 - enables and restarts the service

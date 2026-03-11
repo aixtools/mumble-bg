@@ -7,7 +7,7 @@ This repository currently contains a direct code snapshot from `cube` branch `cu
 Copied baseline paths:
 
 - `modules/mumble`
-- `authenticator`
+- the old `authenticator/` package, now rehomed under `bg/`
 
 The original Cube-facing Django/UI files have now been split back out into the sibling repository `../mumble-fg`.
 
@@ -42,8 +42,8 @@ Relevant files:
 
 ## Read-only Pilot Contract
 
-- `authenticator.PilotIdentity(character_id, character_name, corporation_id, alliance_id, corporation_name, alliance_name, corporation_ticker, alliance_ticker)`
-- `authenticator.list_cube_pilot_identities() -> list[PilotIdentity]`
+- `bg.authd.main.PilotIdentity(character_id, character_name, corporation_id, alliance_id, corporation_name, alliance_name, corporation_ticker, alliance_ticker)`
+- `bg.authd.main.list_cube_pilot_identities() -> list[PilotIdentity]`
 
 - `character_name` is used for display naming in Mumble.
 - `corporation_name` and `alliance_name` are now carried through from cube-core.

@@ -1,7 +1,5 @@
-from types import SimpleNamespace
-
-from bg.authd import main as authenticator
-from authenticator.database import CubeDatabaseError
+from bg.authd import main as authd
+from bg.db import CubeDatabaseError
 
 
 class _Cursor:
@@ -47,16 +45,16 @@ def test_get_db_connection_wraps_errors():
         def connect(self):
             raise RuntimeError("bad")
 
-    original = authenticator.CORE_DB_ADAPTER
+    original = authd.BG_DB_ADAPTER
     try:
-        authenticator.CORE_DB_ADAPTER = _BadAdapter()
+        authd.BG_DB_ADAPTER = _BadAdapter()
         try:
-            authenticator.get_db_connection()
+            authd.get_db_connection()
             raise AssertionError("expected CubeDatabaseError")
         except CubeDatabaseError:
             pass
     finally:
-        authenticator.CORE_DB_ADAPTER = original
+        authd.BG_DB_ADAPTER = original
 
 
 def test_list_cube_pilot_identities_loads_from_query(monkeypatch):
@@ -65,9 +63,9 @@ def test_list_cube_pilot_identities_loads_from_query(monkeypatch):
             (1234, "Pilot One", 77, 88, "Corp Name", "Alliance Name", "", ""),
         ])
 
-    monkeypatch.setattr(authenticator, "get_db_connection", fake_connection)
+    monkeypatch.setattr(authd, "get_core_db_connection", fake_connection)
 
-    identities = authenticator.list_cube_pilot_identities()
+    identities = authd.list_cube_pilot_identities()
     assert identities
     identity = identities[0]
     assert identity.character_id == 1234
@@ -84,9 +82,9 @@ def test_list_cube_pilot_identities_normalizes_optional_identity_fields(monkeypa
             (1234, "Pilot One", None, None, None, None, None, None),
         ])
 
-    monkeypatch.setattr(authenticator, "get_db_connection", fake_connection)
+    monkeypatch.setattr(authd, "get_core_db_connection", fake_connection)
 
-    identities = authenticator.list_cube_pilot_identities()
+    identities = authd.list_cube_pilot_identities()
     identity = identities[0]
     assert identity.corporation_id is None
     assert identity.alliance_id is None
@@ -100,9 +98,9 @@ def test_list_cube_pilot_identities_returns_empty_on_query_error(monkeypatch):
     def failing_connection():
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(authenticator, "get_db_connection", failing_connection)
+    monkeypatch.setattr(authd, "get_core_db_connection", failing_connection)
 
-    assert authenticator.list_cube_pilot_identities() == []
+    assert authd.list_cube_pilot_identities() == []
 
 
 def test_get_active_servers_uses_primary_query(monkeypatch):
@@ -110,12 +108,12 @@ def test_get_active_servers_uses_primary_query(monkeypatch):
         (1, "127.0.0.1", 6502, "secret", 7),
     ])
 
-    monkeypatch.setattr(authenticator, "get_db_connection", lambda: conn)
+    monkeypatch.setattr(authd, "get_db_connection", lambda: conn)
 
-    servers = authenticator.get_active_servers()
+    servers = authd.get_active_servers()
 
     assert servers == [(1, "127.0.0.1", 6502, "secret", 7)]
-    assert conn.cursor_obj.executed == [authenticator.SERVERS_QUERY]
+    assert conn.cursor_obj.executed == [authd.SERVERS_QUERY]
     assert conn.closed is True
 
 
@@ -144,13 +142,13 @@ def test_get_active_servers_falls_back_when_virtual_server_id_column_is_missing(
         (1, "127.0.0.1", 6502, "secret", 1),
     ])
 
-    monkeypatch.setattr(authenticator, "get_db_connection", lambda: conn)
+    monkeypatch.setattr(authd, "get_db_connection", lambda: conn)
 
-    servers = authenticator.get_active_servers()
+    servers = authd.get_active_servers()
 
     assert servers == [(1, "127.0.0.1", 6502, "secret", 1)]
     assert conn.cursor_obj.executed == [
-        authenticator.SERVERS_QUERY,
-        authenticator.LEGACY_SERVERS_QUERY,
+        authd.SERVERS_QUERY,
+        authd.LEGACY_SERVERS_QUERY,
     ]
     assert conn.closed is True

@@ -112,26 +112,55 @@ class CubeCoreDBA(CubeCoreBaseDBA):
 class MmblBgDBA(CubeCoreBaseDBA):
     """Read-write adapter for mumble-bg local runtime schema."""
 
+    def _candidate_hosts(self):
+        requested = (self._config.host or '').strip() or '127.0.0.1'
+        if requested.lower() == 'localhost':
+            return ['127.0.0.1', 'localhost']
+        return [requested]
+
     def connect(self):
         requested = (self._config.engine or '').strip().lower()
         if requested == 'mysql':
-            return self._connect_mysql()
-        if requested in {'', 'postgresql', 'postgres'}:
-            return self._connect_postgresql()
-        raise CubeDatabaseError(f'Unsupported mumble-bg database engine={requested}')
+            candidates = ['mysql']
+        elif requested in {'postgresql', 'postgres'}:
+            candidates = ['postgresql']
+        elif requested == '':
+            candidates = ['postgresql', 'mysql']
+        else:
+            raise CubeDatabaseError(f'Unsupported mumble-bg database engine={requested}')
 
-    def _connect_postgresql(self):
+        errors = []
+        for engine in candidates:
+            for host in self._candidate_hosts():
+                try:
+                    if engine == 'mysql':
+                        return self._connect_mysql(host)
+                    return self._connect_postgresql(host)
+                except Exception as exc:  # pragma: no cover - defensive runtime fallback
+                    errors.append((engine, host, exc))
+                    continue
+        if not errors:
+            raise CubeDatabaseError('Could not connect to mumble-bg via postgresql or mysql')
+        attempted = '; '.join(
+            f'{engine}@{host}: {exc}'
+            for engine, host, exc in errors
+        )
+        raise CubeDatabaseError(
+            f'Could not connect to mumble-bg via postgresql or mysql. Attempts: {attempted}'
+        ) from errors[-1][2]
+
+    def _connect_postgresql(self, host: str):
         import psycopg2
 
         return psycopg2.connect(
             dbname=self._config.name,
-            host=self._config.host,
+            host=host,
             port='5432',
             user=self._config.user,
             password=self._config.password,
         )
 
-    def _connect_mysql(self):
+    def _connect_mysql(self, host: str):
         try:
             import MySQLdb
         except Exception:
@@ -143,7 +172,7 @@ class MmblBgDBA(CubeCoreBaseDBA):
                 ) from exc
 
             return mysql.connector.connect(
-                host=self._config.host,
+                host=host,
                 port='3306',
                 database=self._config.name,
                 user=self._config.user,
@@ -151,7 +180,7 @@ class MmblBgDBA(CubeCoreBaseDBA):
             )
 
         return MySQLdb.connect(
-            host=self._config.host,
+            host=host,
             port=3306,
             db=self._config.name,
             user=self._config.user,

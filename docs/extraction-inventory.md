@@ -9,7 +9,7 @@ Source snapshot:
 Copied into this repository:
 
 - `modules/mumble/`
-- `authenticator/`
+- the old `authenticator/` package, now rehomed under `bg/`
 
 These files are copied as a rebuild baseline, not as a final package layout.
 

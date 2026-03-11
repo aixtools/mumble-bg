@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from authenticator.database import (
+from bg.db import (
     CubeCoreDBA,
     CubeDatabaseError,
     DBAdapterObject,
@@ -83,6 +83,26 @@ def test_mbll_dba_supports_explicit_postgresql_and_mysql(monkeypatch):
     adapter_mysql = MmblBgDBA(config_mysql)
     monkeypatch.setitem(sys.modules, "MySQLdb", SimpleNamespace(connect=lambda **kwargs: "ok-mysql"))
     assert adapter_mysql.connect() == "ok-mysql"
+
+
+def test_mbll_dba_autodetect_falls_back_to_mysql(monkeypatch):
+    config = DBAdapterObject(name="mumble", host="localhost", user="u", password="p", engine="")
+    adapter = MmblBgDBA(config)
+
+    class PsyException(Exception):
+        pass
+
+    def fake_connect_raise(**kwargs):
+        raise PsyException("postgres down")
+
+    def fake_mysql_connect(*, host=None, port=None, db=None, user=None, passwd=None):
+        return object()
+
+    monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(connect=fake_connect_raise))
+    monkeypatch.setitem(sys.modules, "MySQLdb", SimpleNamespace(connect=fake_mysql_connect))
+
+    conn = adapter.connect()
+    assert conn is not None
 
 
 def test_mbll_dba_invalid_engine():

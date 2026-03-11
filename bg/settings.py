@@ -24,8 +24,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = []
 
-ROOT_URLCONF = 'authenticator.urls'
-WSGI_APPLICATION = 'authenticator.wsgi.application'
+ROOT_URLCONF = 'bg.urls'
+WSGI_APPLICATION = 'bg.wsgi.application'
 
 
 def _candidate_hosts(host):

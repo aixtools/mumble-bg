@@ -23,12 +23,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from authenticator.database import (
+from bg.db import (
     DBAdapterObject,
     CubeCoreDBA,
     CubeDatabaseError,
+    MmblBgDBA,
 )
-from authenticator.passwords import LEGACY_BCRYPT_SHA256, verify_murmur_password
+from bg.passwords import LEGACY_BCRYPT_SHA256, verify_murmur_password
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -98,6 +99,16 @@ CORE_DB_ADAPTER = CubeCoreDBA(
         user=os.environ.get('CUBE_CORE_DATABASE_USER', 'cube'),
         password=os.environ.get('CUBE_CORE_DATABASE_PASSWORD', ''),
         engine=os.environ.get('CUBE_CORE_DATABASE_ENGINE', ''),
+    )
+)
+
+BG_DB_ADAPTER = MmblBgDBA(
+    DBAdapterObject(
+        name=os.environ.get('MMBL_BG_DATABASE_NAME', 'mumble'),
+        host=os.environ.get('MMBL_BG_DATABASE_HOST', 'localhost'),
+        user=os.environ.get('MMBL_BG_DATABASE_USER', 'cube'),
+        password=os.environ.get('MMBL_BG_DATABASE_PASSWORD', ''),
+        engine='',
     )
 )
 
@@ -174,7 +185,7 @@ def list_cube_pilot_identities():
     Returns a list of PilotIdentity objects.
     """
     try:
-        conn = get_db_connection()
+        conn = get_core_db_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(PILOT_IDENTITY_QUERY)
@@ -203,11 +214,18 @@ def list_cube_pilot_identities():
     ]
 
 
-def get_db_connection():
+def get_core_db_connection():
     try:
         return CORE_DB_ADAPTER.connect()
     except Exception as exc:
         raise CubeDatabaseError('Could not connect to cube-core read DB') from exc
+
+
+def get_db_connection():
+    try:
+        return BG_DB_ADAPTER.connect()
+    except Exception as exc:
+        raise CubeDatabaseError('Could not connect to mumble-bg DB') from exc
 
 
 def get_active_servers():
