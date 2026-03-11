@@ -142,7 +142,7 @@ sudo -u "${APP_USER}" env \
     "${VENV_DIR}/bin/python" "${APP_DIR}/manage.py" migrate --noinput
 
 cat > /etc/sudoers.d/mumble-bg << 'EOF'
-cube ALL=(ALL) NOPASSWD: /bin/systemctl restart mumble-bg-auth, /bin/systemctl status mumble-bg-auth, /bin/systemctl daemon-reload
+cube ALL=(ALL) NOPASSWD: /bin/systemctl restart mumble-bg-auth, /bin/systemctl status mumble-bg-auth, /bin/systemctl daemon-reload, /bin/bash /home/cube/mumble-bg/deploy/create-db.sh *
 EOF
 chmod 440 /etc/sudoers.d/mumble-bg
 

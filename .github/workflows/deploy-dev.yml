@@ -49,6 +49,7 @@ jobs:
       - name: Install runtime dependencies
         run: |
           ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" << 'EOF'
+          set -euo pipefail
           mkdir -p /home/cube/.venv
           if [ ! -d /home/cube/.venv/mumble-bg ]; then
             python3 -m venv /home/cube/.venv/mumble-bg
@@ -57,6 +58,68 @@ jobs:
           set -a
           source /home/cube/.env/mumble-bg
           set +a
+
+          json_field() {
+            local env_var="$1"
+            local object_key="$2"
+            local field="$3"
+            python3 - "$env_var" "$object_key" "$field" <<'PY'
+import json
+import os
+import sys
+
+env_var = sys.argv[1]
+object_key = sys.argv[2]
+field = sys.argv[3]
+raw = os.environ.get(env_var, '').strip()
+if not raw:
+    raise SystemExit(f"{env_var} is not set")
+
+payload = json.loads(raw)
+if not isinstance(payload, dict):
+    raise SystemExit(f"{env_var} must be a JSON object")
+
+payload = payload.get(object_key)
+if payload is None:
+    raise SystemExit(f"{env_var} is missing required object: {object_key}")
+if not isinstance(payload, dict):
+    raise SystemExit(f"{env_var}.{object_key} must be a JSON object")
+
+value = payload.get(field, '')
+if value is None:
+    value = ''
+print(value)
+PY
+          }
+
+          BG_DATABASE_NAME="$(json_field DATABASES bg database)"
+          BG_DATABASE_HOST="$(json_field DATABASES bg host)"
+          BG_DATABASE_USER="$(json_field DATABASES bg username)"
+          BG_DATABASE_PASSWORD="$(json_field DATABASES bg password)"
+
+          case "${BG_DATABASE_HOST}" in
+            127.0.0.1|localhost)
+              if [ "$(id -u)" -eq 0 ]; then
+                bash /home/cube/mumble-bg/deploy/create-db.sh \
+                  --engine "${BG_ENGINE:-postgres}" \
+                  --user "${BG_DATABASE_USER}" \
+                  --db "${BG_DATABASE_NAME}" \
+                  --host "${BG_DATABASE_HOST}" \
+                  --pw "${BG_DATABASE_PASSWORD}"
+              elif sudo -n true 2>/dev/null; then
+                sudo -n bash /home/cube/mumble-bg/deploy/create-db.sh \
+                  --engine "${BG_ENGINE:-postgres}" \
+                  --user "${BG_DATABASE_USER}" \
+                  --db "${BG_DATABASE_NAME}" \
+                  --host "${BG_DATABASE_HOST}" \
+                  --pw "${BG_DATABASE_PASSWORD}"
+              else
+                echo "ERROR: local bg database bootstrap requires root or passwordless sudo"
+                exit 1
+              fi
+              ;;
+          esac
+
           /home/cube/.venv/mumble-bg/bin/python /home/cube/mumble-bg/manage.py migrate --noinput
           EOF
 
