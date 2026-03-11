@@ -10,7 +10,9 @@ The workflow in `.github/workflows/deploy-dev.yml`:
 
 - rsyncs this repository to `/home/cube/mumble-bg`
 - writes `/home/cube/.env/mumble-bg`
+- bootstraps `DATABASES.bg` via `deploy/create-db.sh` when the bg DB host is local
 - installs Python requirements into `/home/cube/.venv/mumble-bg`
+- runs `manage.py migrate`
 - restarts `mumble-bg-auth`
 
 It does **not** perform the first-time systemd/bootstrap install. That is what `deploy/setup-hetzner.sh` is for.
@@ -73,7 +75,7 @@ This script:
 - installs background-service requirements
 - runs `manage.py migrate` for the `mumble-bg` schema
 - installs `/etc/systemd/system/mumble-bg-auth.service`
-- installs sudoers for service restart/status
+- installs sudoers for service restart/status and local bg DB bootstrap
 - enables and restarts the service
 
 Database bootstrap behavior:
