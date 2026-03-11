@@ -106,16 +106,13 @@ PY
                   --db "${BG_DATABASE_NAME}" \
                   --host "${BG_DATABASE_HOST}" \
                   --pw "${BG_DATABASE_PASSWORD}"
-              elif sudo -n true 2>/dev/null; then
+              else
                 sudo -n bash /home/cube/mumble-bg/deploy/create-db.sh \
                   --engine "${BG_ENGINE:-postgres}" \
                   --user "${BG_DATABASE_USER}" \
                   --db "${BG_DATABASE_NAME}" \
                   --host "${BG_DATABASE_HOST}" \
                   --pw "${BG_DATABASE_PASSWORD}"
-              else
-                echo "ERROR: local bg database bootstrap requires root or passwordless sudo"
-                exit 1
               fi
               ;;
           esac
@@ -131,4 +128,4 @@ PY
       - name: Health check
         run: |
           ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" \
-            "systemctl is-active mumble-bg-auth"
+            "sudo systemctl is-active mumble-bg-auth"
