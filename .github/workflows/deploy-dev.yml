@@ -64,32 +64,32 @@ jobs:
             local object_key="$2"
             local field="$3"
             python3 - "$env_var" "$object_key" "$field" <<'PY'
-import json
-import os
-import sys
+            import json
+            import os
+            import sys
 
-env_var = sys.argv[1]
-object_key = sys.argv[2]
-field = sys.argv[3]
-raw = os.environ.get(env_var, '').strip()
-if not raw:
-    raise SystemExit(f"{env_var} is not set")
+            env_var = sys.argv[1]
+            object_key = sys.argv[2]
+            field = sys.argv[3]
+            raw = os.environ.get(env_var, '').strip()
+            if not raw:
+                raise SystemExit(f"{env_var} is not set")
 
-payload = json.loads(raw)
-if not isinstance(payload, dict):
-    raise SystemExit(f"{env_var} must be a JSON object")
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                raise SystemExit(f"{env_var} must be a JSON object")
 
-payload = payload.get(object_key)
-if payload is None:
-    raise SystemExit(f"{env_var} is missing required object: {object_key}")
-if not isinstance(payload, dict):
-    raise SystemExit(f"{env_var}.{object_key} must be a JSON object")
+            payload = payload.get(object_key)
+            if payload is None:
+                raise SystemExit(f"{env_var} is missing required object: {object_key}")
+            if not isinstance(payload, dict):
+                raise SystemExit(f"{env_var}.{object_key} must be a JSON object")
 
-value = payload.get(field, '')
-if value is None:
-    value = ''
-print(value)
-PY
+            value = payload.get(field, '')
+            if value is None:
+                value = ''
+            print(value)
+            PY
           }
 
           BG_DATABASE_NAME="$(json_field DATABASES bg database)"
