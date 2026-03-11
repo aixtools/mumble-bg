@@ -393,6 +393,25 @@ def update_connection_info(cube_row_id, certhash):
         logger.exception('Failed to update connection info for cube_row_id=%s', cube_row_id)
 
 
+def wait_for_server_configs(retry_interval=30):
+    """
+    Wait until mumble-fg or another provisioning path creates active bg server configs.
+
+    This keeps authd non-fatal while bg runtime tables exist but have not yet been
+    populated with the server inventory it needs to attach to Murmur over ICE.
+    """
+    server_configs = get_active_servers()
+    while not server_configs:
+        logger.info(
+            'No active MumbleServer configs found; waiting for mumble-fg or provisioning '
+            'to populate mumble_server. Retrying in %ds...',
+            retry_interval,
+        )
+        time.sleep(retry_interval)
+        server_configs = get_active_servers()
+    return server_configs
+
+
 def main():
     """Start the ICE authenticator daemon."""
     try:
@@ -407,12 +426,7 @@ def main():
         logger.exception('Failed to load bundled ICE slice definition')
         sys.exit(1)
 
-    RETRY_INTERVAL = 30
-    server_configs = get_active_servers()
-    while not server_configs:
-        logger.warning('No active MumbleServer configs found in database. Retrying in %ds...', RETRY_INTERVAL)
-        time.sleep(RETRY_INTERVAL)
-        server_configs = get_active_servers()
+    server_configs = wait_for_server_configs(retry_interval=30)
 
     with Ice.initialize(['--Ice.ImplicitContext=Shared', '--Ice.Default.EncodingVersion=1.0']) as communicator:
         adapter = communicator.createObjectAdapterWithEndpoints(
