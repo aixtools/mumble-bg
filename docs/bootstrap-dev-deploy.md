@@ -55,6 +55,11 @@ install -m 0600 /home/cube/mumble-bg/.env.example /home/cube/.env/mumble-bg
 
 Edit `/home/cube/.env/mumble-bg` with the real database values.
 
+If you need to create a fresh local database/user first, use:
+
+- [docs/database-bootstrap.md](/home/michael/prj/mumble-bg/docs/database-bootstrap.md)
+- [deploy/create-db.sh](/home/michael/prj/mumble-bg/deploy/create-db.sh)
+
 3. Run the one-time setup script as root:
 
 ```bash
@@ -101,6 +106,7 @@ These must be configured in `aixtools/mumble-bg`:
 - `MMBL_BG_DATABASE_HOST`
 - `MMBL_BG_DATABASE_USER`
 - `MMBL_BG_DATABASE_PASSWORD`
+- optional provisioning-only `MMBL_BG_DATABASE_ENGINE` for `deploy/create-db.sh`
 
 ## SSH Key Clarification
 
