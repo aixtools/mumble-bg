@@ -43,9 +43,56 @@ if [ ! -f "${ENV_FILE}" ]; then
     exit 1
 fi
 
+set -a
+source "${ENV_FILE}"
+set +a
+
+BG_ENGINE="${BG_ENGINE:-postgres}"
+
+case "${BG_ENGINE}" in
+    postgres|postgresql|psql|'')
+        BG_ENGINE="postgres"
+        ;;
+    mysql|maria|mariadb)
+        BG_ENGINE="mysql"
+        ;;
+    *)
+        echo "Unsupported BG_ENGINE=${BG_ENGINE}"
+        exit 1
+        ;;
+esac
+
+case "${BG_ENGINE}" in
+    postgres)
+        apt-get install -y -qq postgresql-client
+        ;;
+    mysql)
+        apt-get install -y -qq default-mysql-client
+        ;;
+esac
+
 if [ ! -d "${VENV_DIR}" ]; then
     sudo -u "${APP_USER}" python3 -m venv "${VENV_DIR}"
 fi
+
+if [ -z "${MMBL_BG_DATABASE_NAME:-}" ] || [ -z "${MMBL_BG_DATABASE_HOST:-}" ] || [ -z "${MMBL_BG_DATABASE_USER:-}" ] || [ -z "${MMBL_BG_DATABASE_PASSWORD:-}" ]; then
+    echo "Expected MMBL_BG_DATABASE_NAME, MMBL_BG_DATABASE_HOST, MMBL_BG_DATABASE_USER, and MMBL_BG_DATABASE_PASSWORD in ${ENV_FILE}"
+    exit 1
+fi
+
+case "${MMBL_BG_DATABASE_HOST}" in
+    127.0.0.1|localhost)
+        bash "${APP_DIR}/deploy/create-db.sh" \
+            --engine "${BG_ENGINE}" \
+            --user "${MMBL_BG_DATABASE_USER}" \
+            --db "${MMBL_BG_DATABASE_NAME}" \
+            --host "${MMBL_BG_DATABASE_HOST}" \
+            --pw "${MMBL_BG_DATABASE_PASSWORD}"
+        ;;
+    *)
+        echo "[WARN] Skipping local bg database bootstrap for non-local host ${MMBL_BG_DATABASE_HOST}"
+        ;;
+esac
 
 sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${APP_DIR}/requirements.txt"
 

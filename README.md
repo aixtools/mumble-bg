@@ -43,10 +43,10 @@ Relevant files:
 ## Read-only Pilot Contract
 
 - `bg.authd.main.PilotIdentity(character_id, character_name, corporation_id, alliance_id, corporation_name, alliance_name, corporation_ticker, alliance_ticker)`
-- `bg.authd.main.list_cube_pilot_identities() -> list[PilotIdentity]`
+- `bg.authd.main.list_pilot_identities() -> list[PilotIdentity]`
 
 - `character_name` is used for display naming in Mumble.
-- `corporation_name` and `alliance_name` are now carried through from cube-core.
+- `corporation_name` and `alliance_name` are now carried through from the pilot source.
 - `corporation_ticker` and `alliance_ticker` remain supported in the contract and default to empty strings when cube-core does not provide them.
 
 This contract update aligns with Cube core behavioral changes introduced in Cube PR #74.
@@ -60,14 +60,14 @@ This contract update aligns with Cube core behavioral changes introduced in Cube
 
 ## Environment Contracts
 
-- `CUBE_CORE_*` = read-only Cube-core source DB used by the background services.
+- `PILOT_DATABASE_*` = read-only pilot source DB used by the background services.
 - `MMBL_BG_*` = mumble-bg-owned DB used for local migrations and runtime tables.
 
 ```bash
 python manage.py migrate
 ```
 
-uses `MMBL_BG_*` and keeps local schema independent of cube-core.
+uses `MMBL_BG_*` and keeps local schema independent of the pilot source DB.
 
 ## Release Cleanup Note
 

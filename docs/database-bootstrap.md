@@ -26,6 +26,7 @@ It accepts:
 
 If `--pw` is omitted, the script prompts securely.
 If `--engine` is omitted, the script defaults to PostgreSQL.
+If the database user already exists, the script does not change that user's password.
 
 ## Engine Values
 
@@ -76,7 +77,7 @@ This is the intended flag shape for later deploy automation:
 
 ```bash
 bash /home/cube/mumble-bg/deploy/create-db.sh \
-  --engine "${MMBL_BG_DATABASE_ENGINE}" \
+  --engine "${BG_ENGINE}" \
   --user "${MMBL_BG_DATABASE_USER}" \
   --db "${MMBL_BG_DATABASE_NAME}" \
   --host "${MMBL_BG_DATABASE_HOST}" \
@@ -85,7 +86,7 @@ bash /home/cube/mumble-bg/deploy/create-db.sh \
 
 Optional provisioning-only secret:
 
-- `MMBL_BG_DATABASE_ENGINE`
+- `BG_ENGINE`
 
 Recommended values:
 
@@ -98,18 +99,20 @@ For PostgreSQL:
 
 - runs as `root`
 - uses `su - postgres -c ...`
-- creates or updates the role
+- creates the role if missing
 - creates the database if missing
 - sets the database owner to the requested user
 - creates a same-named schema for that user
 - sets the role search path to `user_schema, public`
+- only sets the password when the role is first created
 
 For MySQL/MariaDB:
 
 - runs as `root`
 - uses the local `mysql` client
-- creates or updates the login
+- creates the login if missing
 - grants privileges on the requested database
+- only sets the password when the user is first created
 
 ## After Database Creation
 

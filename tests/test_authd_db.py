@@ -57,15 +57,15 @@ def test_get_db_connection_wraps_errors():
         authd.BG_DB_ADAPTER = original
 
 
-def test_list_cube_pilot_identities_loads_from_query(monkeypatch):
+def test_list_pilot_identities_loads_from_query(monkeypatch):
     def fake_connection():
         return _Conn([
             (1234, "Pilot One", 77, 88, "Corp Name", "Alliance Name", "", ""),
         ])
 
-    monkeypatch.setattr(authd, "get_core_db_connection", fake_connection)
+    monkeypatch.setattr(authd, "get_pilot_db_connection", fake_connection)
 
-    identities = authd.list_cube_pilot_identities()
+    identities = authd.list_pilot_identities()
     assert identities
     identity = identities[0]
     assert identity.character_id == 1234
@@ -76,15 +76,15 @@ def test_list_cube_pilot_identities_loads_from_query(monkeypatch):
     assert identity.alliance_name == "Alliance Name"
 
 
-def test_list_cube_pilot_identities_normalizes_optional_identity_fields(monkeypatch):
+def test_list_pilot_identities_normalizes_optional_identity_fields(monkeypatch):
     def fake_connection():
         return _Conn([
             (1234, "Pilot One", None, None, None, None, None, None),
         ])
 
-    monkeypatch.setattr(authd, "get_core_db_connection", fake_connection)
+    monkeypatch.setattr(authd, "get_pilot_db_connection", fake_connection)
 
-    identities = authd.list_cube_pilot_identities()
+    identities = authd.list_pilot_identities()
     identity = identities[0]
     assert identity.corporation_id is None
     assert identity.alliance_id is None
@@ -94,13 +94,13 @@ def test_list_cube_pilot_identities_normalizes_optional_identity_fields(monkeypa
     assert identity.alliance_ticker == ""
 
 
-def test_list_cube_pilot_identities_returns_empty_on_query_error(monkeypatch):
+def test_list_pilot_identities_returns_empty_on_query_error(monkeypatch):
     def failing_connection():
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(authd, "get_core_db_connection", failing_connection)
+    monkeypatch.setattr(authd, "get_pilot_db_connection", failing_connection)
 
-    assert authd.list_cube_pilot_identities() == []
+    assert authd.list_pilot_identities() == []
 
 
 def test_get_active_servers_uses_primary_query(monkeypatch):

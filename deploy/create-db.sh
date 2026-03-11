@@ -8,11 +8,11 @@ usage() {
 Usage:
   bash deploy/create-db.sh [--engine ENGINE] --user DB_USER --db DB_NAME --host DB_HOST [--pw DB_PASSWORD]
 
-Creates or updates a local database and login for mumble-bg.
+Creates a local database and login for mumble-bg if they do not already exist.
 
 Arguments:
   --engine   postgres|postgresql|psql or mysql|maria|mariadb; defaults to postgres
-  --user     database login/user to create or update
+  --user     database login/user to create if missing
   --db       database name to create
   --host     application host value (used directly for MySQL grants; kept for env parity on PostgreSQL)
   --pw       password for the database user; if omitted, the script prompts securely
@@ -21,6 +21,7 @@ Notes:
   - Run this script as root on the target host.
   - PostgreSQL creation uses: su - postgres -c ...
   - MySQL/MariaDB creation uses the local root client.
+  - Existing database users keep their current password.
 EOF
 }
 
@@ -139,8 +140,6 @@ DO \$\$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${DB_USER}') THEN
         CREATE ROLE "${DB_USER}" LOGIN PASSWORD '${PASSWORD_SQL}';
-    ELSE
-        ALTER ROLE "${DB_USER}" WITH LOGIN PASSWORD '${PASSWORD_SQL}';
     END IF;
 END
 \$\$;
@@ -167,7 +166,6 @@ command -v mysql >/dev/null 2>&1 || fail "mysql client is not installed"
 mysql <<EOF
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'${DB_HOST}' IDENTIFIED BY '${PASSWORD_SQL}';
-ALTER USER '${DB_USER}'@'${DB_HOST}' IDENTIFIED BY '${PASSWORD_SQL}';
 GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'${DB_HOST}';
 FLUSH PRIVILEGES;
 EOF

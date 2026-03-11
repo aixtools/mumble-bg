@@ -6,9 +6,8 @@ Reads active MumbleServer configs from the database and connects to each
 server's ICE endpoint, registering a scoped CubeAuthenticator per server.
 
 Configuration via environment variables:
-    CUBE_CORE_DATABASE_NAME, CUBE_CORE_DATABASE_HOST,
-    CUBE_CORE_DATABASE_USER, CUBE_CORE_DATABASE_PASSWORD,
-    optional CUBE_CORE_DATABASE_ENGINE (postgresql|mysql, default auto-detect)
+    PILOT_DATABASE_NAME, PILOT_DATABASE_HOST,
+    PILOT_DATABASE_USER, PILOT_DATABASE_PASSWORD
 """
 
 import os
@@ -24,7 +23,7 @@ if PROJECT_ROOT not in sys.path:
 
 from bg.db import (
     DBAdapterObject,
-    CubeCoreDBA,
+    PilotDBA,
     CubeDatabaseError,
     MmblBgDBA,
 )
@@ -37,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 class PilotIdentity:
     """
-    Read-only cube-core pilot projection consumed by mumble-bg.
+    Read-only pilot projection consumed by mumble-bg.
 
     Important: PKID does not bind to a fixed alliance.
     A pilot can only change corporation, and a corporation can change alliance,
@@ -92,13 +91,13 @@ class PilotIdentity:
         return iter(self.as_dict().items())
 
 
-CORE_DB_ADAPTER = CubeCoreDBA(
+PILOT_DB_ADAPTER = PilotDBA(
     DBAdapterObject(
-        name=os.environ.get('CUBE_CORE_DATABASE_NAME', 'cube'),
-        host=os.environ.get('CUBE_CORE_DATABASE_HOST', 'localhost'),
-        user=os.environ.get('CUBE_CORE_DATABASE_USER', 'cube'),
-        password=os.environ.get('CUBE_CORE_DATABASE_PASSWORD', ''),
-        engine=os.environ.get('CUBE_CORE_DATABASE_ENGINE', ''),
+        name=os.environ.get('PILOT_DATABASE_NAME', 'pilot'),
+        host=os.environ.get('PILOT_DATABASE_HOST', 'localhost'),
+        user=os.environ.get('PILOT_DATABASE_USER', 'pilot'),
+        password=os.environ.get('PILOT_DATABASE_PASSWORD', ''),
+        engine='',
     )
 )
 
@@ -173,17 +172,17 @@ PILOT_IDENTITY_QUERY = """
       AND ec.is_main = true
 """
 
-MUMBLE_PILOT_IDENTITY_SOURCE = "cube-core/mumble-bg adapter contract"
+MUMBLE_PILOT_IDENTITY_SOURCE = "pilot/mumble-bg adapter contract"
 
 
-def list_cube_pilot_identities():
+def list_pilot_identities():
     """
-    Return read-only pilot identities from cube-core for mumble-bg orchestration.
+    Return read-only pilot identities from the pilot source for mumble-bg orchestration.
 
     Returns a list of PilotIdentity objects.
     """
     try:
-        conn = get_core_db_connection()
+        conn = get_pilot_db_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(PILOT_IDENTITY_QUERY)
@@ -212,11 +211,11 @@ def list_cube_pilot_identities():
     ]
 
 
-def get_core_db_connection():
+def get_pilot_db_connection():
     try:
-        return CORE_DB_ADAPTER.connect()
+        return PILOT_DB_ADAPTER.connect()
     except Exception as exc:
-        raise CubeDatabaseError('Could not connect to cube-core read DB') from exc
+        raise CubeDatabaseError('Could not connect to pilot source DB') from exc
 
 
 def get_db_connection():

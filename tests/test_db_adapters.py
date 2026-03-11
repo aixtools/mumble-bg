@@ -4,16 +4,16 @@ import sys
 import pytest
 
 from bg.db import (
-    CubeCoreDBA,
     CubeDatabaseError,
     DBAdapterObject,
     MmblBgDBA,
+    PilotDBA,
 )
 
 
-def test_core_dba_prefers_postgresql_when_requested(monkeypatch):
-    config = DBAdapterObject(name="cube", host="localhost", user="u", password="p", engine="postgresql")
-    adapter = CubeCoreDBA(config)
+def test_pilot_dba_autodetect_prefers_postgresql_first(monkeypatch):
+    config = DBAdapterObject(name="pilot", host="localhost", user="u", password="p", engine="")
+    adapter = PilotDBA(config)
 
     called = []
 
@@ -29,12 +29,12 @@ def test_core_dba_prefers_postgresql_when_requested(monkeypatch):
 
     conn = adapter.connect()
     assert conn is not None
-    assert called == [("cube", "127.0.0.1", "5432", "u", "p")]
+    assert called == [("pilot", "127.0.0.1", "5432", "u", "p")]
 
 
-def test_core_dba_autodetect_falls_back_to_postgresql(monkeypatch):
-    config = DBAdapterObject(name="cube", host="localhost", user="u", password="p", engine="")
-    adapter = CubeCoreDBA(config)
+def test_pilot_dba_autodetect_falls_back_to_mysql(monkeypatch):
+    config = DBAdapterObject(name="pilot", host="localhost", user="u", password="p", engine="")
+    adapter = PilotDBA(config)
 
     class PsyException(Exception):
         pass
@@ -53,9 +53,9 @@ def test_core_dba_autodetect_falls_back_to_postgresql(monkeypatch):
     assert conn is not None
 
 
-def test_core_dba_raises_when_no_connector_and_autodetect_needed(monkeypatch):
-    config = DBAdapterObject(name="cube", host="localhost", user="u", password="p", engine="")
-    adapter = CubeCoreDBA(config)
+def test_pilot_dba_raises_when_no_connector_and_autodetect_needed(monkeypatch):
+    config = DBAdapterObject(name="pilot", host="localhost", user="u", password="p", engine="")
+    adapter = PilotDBA(config)
 
     def fake_connect_raise(**kwargs):
         raise Exception("psyc down")

@@ -1,4 +1,4 @@
-"""Database adapters for mumble-bg runtime and cube-core read access."""
+"""Database adapters for mumble-bg runtime and pilot-source read access."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class DBAdapterObject:
     engine: str = ''
 
 
-class CubeCoreBaseDBA:
+class BaseDBA:
     """Small base used by auth/runtime paths to avoid DB logic in auth handlers."""
 
     def __init__(self, config: DBAdapterObject):
@@ -28,18 +28,8 @@ class CubeCoreBaseDBA:
         raise NotImplementedError
 
 
-class CubeCoreDBA(CubeCoreBaseDBA):
-    """Read-only adapter for cube-core source data (prefer SQL-compatible backends)."""
-
-    def __init__(self, config: DBAdapterObject):
-        super().__init__(config=config)
-        self._candidates = self._build_candidates(config.engine)
-
-    def _build_candidates(self, engine: str):
-        requested = (engine or '').strip().lower()
-        if requested in {'postgresql', 'mysql'}:
-            return [requested]
-        return ['postgresql', 'mysql']
+class PilotDBA(BaseDBA):
+    """Read-only adapter for pilot-source data (auto-detect SQL backend)."""
 
     def _candidate_hosts(self):
         requested = (self._config.host or '').strip() or '127.0.0.1'
@@ -68,7 +58,7 @@ class CubeCoreDBA(CubeCoreBaseDBA):
                 import mysql.connector
             except Exception as exc:  # pragma: no cover - runtime dependency optional until needed
                 raise CubeDatabaseError(
-                    'mysql client is not installed for cube-core mysql fallback'
+                    'mysql client is not installed for pilot-source mysql fallback'
                 ) from exc
 
             return mysql.connector.connect(
@@ -89,7 +79,7 @@ class CubeCoreDBA(CubeCoreBaseDBA):
 
     def connect(self):
         errors = []
-        for engine in self._candidates:
+        for engine in ['postgresql', 'mysql']:
             for host in self._candidate_hosts():
                 try:
                     if engine == 'mysql':
@@ -99,17 +89,17 @@ class CubeCoreDBA(CubeCoreBaseDBA):
                     errors.append((engine, host, exc))
                     continue
         if not errors:
-            raise CubeDatabaseError('Could not connect to cube-core via postgresql or mysql')
+            raise CubeDatabaseError('Could not connect to pilot source via postgresql or mysql')
         attempted = '; '.join(
             f'{engine}@{host}: {exc}'
             for engine, host, exc in errors
         )
         raise CubeDatabaseError(
-            f'Could not connect to cube-core via postgresql or mysql. Attempts: {attempted}'
+            f'Could not connect to pilot source via postgresql or mysql. Attempts: {attempted}'
         ) from errors[-1][2]
 
 
-class MmblBgDBA(CubeCoreBaseDBA):
+class MmblBgDBA(BaseDBA):
     """Read-write adapter for mumble-bg local runtime schema."""
 
     def _candidate_hosts(self):

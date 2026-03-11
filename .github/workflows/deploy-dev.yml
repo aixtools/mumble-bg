@@ -38,15 +38,15 @@ jobs:
           ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" << 'EOF'
           mkdir -p /home/cube/.env
           cat > /home/cube/.env/mumble-bg << 'ENVFILE'
-          CUBE_CORE_DATABASE_NAME=${{ secrets.CUBE_CORE_DATABASE_NAME }}
-          CUBE_CORE_DATABASE_HOST=${{ secrets.CUBE_CORE_DATABASE_HOST }}
-          CUBE_CORE_DATABASE_USER=${{ secrets.CUBE_CORE_DATABASE_USER }}
-          CUBE_CORE_DATABASE_PASSWORD=${{ secrets.CUBE_CORE_DATABASE_PASSWORD }}
-          CUBE_CORE_DATABASE_ENGINE=${{ secrets.CUBE_CORE_DATABASE_ENGINE }}
+          PILOT_DATABASE_NAME=${{ secrets.PILOT_DATABASE_NAME }}
+          PILOT_DATABASE_HOST=${{ secrets.PILOT_DATABASE_HOST }}
+          PILOT_DATABASE_USER=${{ secrets.PILOT_DATABASE_USER }}
+          PILOT_DATABASE_PASSWORD=${{ secrets.PILOT_DATABASE_PASSWORD }}
           MMBL_BG_DATABASE_NAME=${{ secrets.MMBL_BG_DATABASE_NAME }}
           MMBL_BG_DATABASE_HOST=${{ secrets.MMBL_BG_DATABASE_HOST }}
           MMBL_BG_DATABASE_USER=${{ secrets.MMBL_BG_DATABASE_USER }}
           MMBL_BG_DATABASE_PASSWORD=${{ secrets.MMBL_BG_DATABASE_PASSWORD }}
+          BG_ENGINE=${{ secrets.BG_ENGINE }}
           ENVFILE
           chmod 600 /home/cube/.env/mumble-bg
           EOF
