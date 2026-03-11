@@ -1,13 +1,15 @@
 """
 Minimal Django settings for mumble-bg-owned tables.
 
-The runtime auth daemon still reads Cube-core via SQL directly.
+The runtime auth daemon still reads the pilot source via SQL directly.
 This settings module is for `manage.py migrate` and local ownership of
-mumble-bg runtime schema in `MMBL_BG_*`.
+mumble-bg runtime schema in `DATABASES.bg`.
 """
 
 import os
 import socket
+
+from bg.db import db_config_from_env
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -52,7 +54,15 @@ def _detect_database_engine(host):
     return 'postgresql'
 
 
-DATABASE_HOST = os.environ.get('MMBL_BG_DATABASE_HOST', 'localhost')
+BG_DATABASE = db_config_from_env(
+    'DATABASES',
+    'bg',
+    default_database='MMBL_BG',
+    default_host='localhost',
+    default_username='cube',
+)
+
+DATABASE_HOST = BG_DATABASE.host
 DATABASE_ENGINE = _detect_database_engine(DATABASE_HOST)
 
 if DATABASE_ENGINE.startswith('mysql'):
@@ -63,10 +73,10 @@ else:
 DATABASES = {
     'default': {
         'ENGINE': DB_ENGINE,
-        'NAME': os.environ.get('MMBL_BG_DATABASE_NAME', 'MMBL_BG'),
+        'NAME': BG_DATABASE.name,
         'HOST': DATABASE_HOST,
-        'USER': os.environ.get('MMBL_BG_DATABASE_USER', 'cube'),
-        'PASSWORD': os.environ.get('MMBL_BG_DATABASE_PASSWORD', ''),
+        'USER': BG_DATABASE.user,
+        'PASSWORD': BG_DATABASE.password,
     }
 }
 

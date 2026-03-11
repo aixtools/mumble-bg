@@ -78,10 +78,10 @@ This is the intended flag shape for later deploy automation:
 ```bash
 bash /home/cube/mumble-bg/deploy/create-db.sh \
   --engine "${BG_ENGINE}" \
-  --user "${MMBL_BG_DATABASE_USER}" \
-  --db "${MMBL_BG_DATABASE_NAME}" \
-  --host "${MMBL_BG_DATABASE_HOST}" \
-  --pw "${MMBL_BG_DATABASE_PASSWORD}"
+  --user "$(python3 -c 'import json, os; print(json.loads(os.environ["DATABASES"])["bg"]["username"])')" \
+  --db "$(python3 -c 'import json, os; print(json.loads(os.environ["DATABASES"])["bg"]["database"])')" \
+  --host "$(python3 -c 'import json, os; print(json.loads(os.environ["DATABASES"])["bg"]["host"])')" \
+  --pw "$(python3 -c 'import json, os; print(json.loads(os.environ["DATABASES"])["bg"]["password"])')"
 ```
 
 Optional provisioning-only secret:

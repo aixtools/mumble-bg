@@ -152,12 +152,12 @@ def _apply_user_presence(mumble_user, *, authenticated_at=None, connected_at=Non
         mumble_user.save(update_fields=updates + ['updated_at'])
 
 
-def record_successful_authentication(cube_row_id, certhash):
+def record_successful_authentication(bg_row_id, certhash):
     now = timezone.now()
     try:
-        mumble_user = MumbleUser.objects.get(pk=cube_row_id)
+        mumble_user = MumbleUser.objects.get(pk=bg_row_id)
     except MumbleUser.DoesNotExist:
-        logger.warning('Murmur Pulse auth update skipped for missing MumbleUser pk=%s', cube_row_id)
+        logger.warning('Murmur Pulse auth update skipped for missing MumbleUser pk=%s', bg_row_id)
         return
 
     updates = ['last_authenticated', 'updated_at']
@@ -337,31 +337,31 @@ def _build_meta_callback(M, endpoint_runtime):
     return PulseMetaCallback()
 
 
-def _build_server_callback(M, cube_server):
+def _build_server_callback(M, bg_server):
     class PulseServerCallback(M.ServerCallback):
         def userConnected(self, state, current=None):
             try:
-                upsert_session_from_state(cube_server, state, observed_at=timezone.now())
+                upsert_session_from_state(bg_server, state, observed_at=timezone.now())
             except Exception:
-                logger.exception('Murmur Pulse failed to process userConnected for server=%s', cube_server.pk)
+                logger.exception('Murmur Pulse failed to process userConnected for server=%s', bg_server.pk)
 
         def userDisconnected(self, state, current=None):
             try:
                 normalized = _normalize_user_state(state)
                 mark_session_disconnected(
-                    cube_server,
+                    bg_server,
                     normalized.session_id,
                     state=state,
                     observed_at=timezone.now(),
                 )
             except Exception:
-                logger.exception('Murmur Pulse failed to process userDisconnected for server=%s', cube_server.pk)
+                logger.exception('Murmur Pulse failed to process userDisconnected for server=%s', bg_server.pk)
 
         def userStateChanged(self, state, current=None):
             try:
-                upsert_session_from_state(cube_server, state, observed_at=timezone.now())
+                upsert_session_from_state(bg_server, state, observed_at=timezone.now())
             except Exception:
-                logger.exception('Murmur Pulse failed to process userStateChanged for server=%s', cube_server.pk)
+                logger.exception('Murmur Pulse failed to process userStateChanged for server=%s', bg_server.pk)
 
         def userTextMessage(self, state, message, current=None):
             return None
@@ -431,45 +431,45 @@ class _EndpointRuntime:
     def _match_booted_servers(self, booted_servers):
         targets = {}
         single_booted = booted_servers[0] if len(booted_servers) == 1 else None
-        for cube_server in self._server_configs:
+        for bg_server in self._server_configs:
             target = None
-            if cube_server.virtual_server_id is not None:
+            if bg_server.virtual_server_id is not None:
                 for booted_server in booted_servers:
-                    if booted_server.id() == cube_server.virtual_server_id:
+                    if booted_server.id() == bg_server.virtual_server_id:
                         target = self._with_secret(booted_server)
                         break
                 if target is None:
                     logger.warning(
-                        'Murmur Pulse could not find virtual_server_id=%s for Cube server=%s',
-                        cube_server.virtual_server_id,
-                        cube_server.pk,
+                        'Murmur Pulse could not find virtual_server_id=%s for bg server=%s',
+                        bg_server.virtual_server_id,
+                        bg_server.pk,
                     )
             elif single_booted is not None:
                 target = self._with_secret(single_booted)
             else:
                 logger.warning(
-                    'Murmur Pulse requires virtual_server_id for Cube server=%s because multiple booted servers share %s:%s',
-                    cube_server.pk,
+                    'Murmur Pulse requires virtual_server_id for bg server=%s because multiple booted servers share %s:%s',
+                    bg_server.pk,
                     self._host,
                     self._port,
                 )
             if target is not None:
-                targets[cube_server.pk] = target
+                targets[bg_server.pk] = target
         return targets
 
-    def _add_server_callback(self, cube_server, server_proxy):
-        servant = _build_server_callback(self._M, cube_server)
+    def _add_server_callback(self, bg_server, server_proxy):
+        servant = _build_server_callback(self._M, bg_server)
         base_proxy = self._adapter.addWithUUID(servant)
         callback_proxy = self._M.ServerCallbackPrx.uncheckedCast(base_proxy)
         server_proxy.addCallback(callback_proxy)
-        self._server_callbacks[cube_server.pk] = {
+        self._server_callbacks[bg_server.pk] = {
             'proxy': callback_proxy,
             'servant': servant,
             'server_proxy': server_proxy,
         }
 
-    def _remove_server_callback(self, cube_server_id):
-        existing = self._server_callbacks.pop(cube_server_id, None)
+    def _remove_server_callback(self, bg_server_id):
+        existing = self._server_callbacks.pop(bg_server_id, None)
         if not existing:
             return
         try:
@@ -488,12 +488,12 @@ class _EndpointRuntime:
         for missing_id in existing_ids - matched_ids:
             self._remove_server_callback(missing_id)
 
-        for cube_server in self._server_configs:
-            server_proxy = matched_targets.get(cube_server.pk)
+        for bg_server in self._server_configs:
+            server_proxy = matched_targets.get(bg_server.pk)
             if server_proxy is None:
                 continue
-            if cube_server.pk not in self._server_callbacks:
-                self._add_server_callback(cube_server, server_proxy)
+            if bg_server.pk not in self._server_callbacks:
+                self._add_server_callback(bg_server, server_proxy)
 
     def tick(self):
         meta = self._get_meta()
@@ -502,19 +502,19 @@ class _EndpointRuntime:
         self._sync_server_callbacks(matched_targets)
 
         observed_at = timezone.now()
-        for cube_server in self._server_configs:
-            server_proxy = matched_targets.get(cube_server.pk)
+        for bg_server in self._server_configs:
+            server_proxy = matched_targets.get(bg_server.pk)
             if server_proxy is None:
-                mark_server_sessions_disconnected(cube_server, observed_at=observed_at)
+                mark_server_sessions_disconnected(bg_server, observed_at=observed_at)
                 continue
             users = server_proxy.getUsers()
-            reconcile_server_snapshot(cube_server, users, observed_at=observed_at)
+            reconcile_server_snapshot(bg_server, users, observed_at=observed_at)
 
         self._refresh_requested = False
 
     def close(self):
-        for cube_server_id in list(self._server_callbacks):
-            self._remove_server_callback(cube_server_id)
+        for bg_server_id in list(self._server_callbacks):
+            self._remove_server_callback(bg_server_id)
         if self._meta is not None and self._meta_callback_proxy is not None:
             try:
                 self._meta.removeCallback(self._meta_callback_proxy)

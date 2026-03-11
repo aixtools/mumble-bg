@@ -78,18 +78,15 @@ The extracted Cube-facing Django code now lives in the sibling repository `../mu
 
 The extracted background service currently expects:
 
-- `PILOT_DATABASE_NAME`
-- `PILOT_DATABASE_HOST`
-- `PILOT_DATABASE_USER`
-- `PILOT_DATABASE_PASSWORD`
+- `DATABASES`
 
-That is the model where it reads the pilot source for pilot identity and uses `MMBL_BG_*` for its own runtime tables.
+That is the model where it reads the pilot source for pilot identity from `DATABASES.pilot` and uses `DATABASES.bg` for its own runtime tables.
 
 The target split model is:
 
 - `mumble-bg` should use its own runtime/private DB
-- `mumble-bg` should get read-only credentials for the pilot source DB using `PILOT_DATABASE_*`
-- the owned schema in this repo should use `MMBL_BG_*`
+- `mumble-bg` should get read-only credentials for the pilot source DB using `DATABASES.pilot`
+- the owned schema in this repo should use `DATABASES.bg`
 - any writeback or command channel should be explicit and not rely on Cube deploying the service
 
 ## What Not To Carry Forward

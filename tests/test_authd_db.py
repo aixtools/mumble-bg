@@ -1,5 +1,5 @@
 from bg.authd import main as authd
-from bg.db import CubeDatabaseError
+from bg.db import PilotDBError
 
 
 class _Cursor:
@@ -50,8 +50,8 @@ def test_get_db_connection_wraps_errors():
         authd.BG_DB_ADAPTER = _BadAdapter()
         try:
             authd.get_db_connection()
-            raise AssertionError("expected CubeDatabaseError")
-        except CubeDatabaseError:
+            raise AssertionError("expected PilotDBError")
+        except PilotDBError:
             pass
     finally:
         authd.BG_DB_ADAPTER = original

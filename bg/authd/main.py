@@ -3,11 +3,10 @@
 Standalone ICE authenticator daemon for Mumble (multi-server).
 
 Reads active MumbleServer configs from the database and connects to each
-server's ICE endpoint, registering a scoped CubeAuthenticator per server.
+server's ICE endpoint, registering a scoped authenticator per server.
 
 Configuration via environment variables:
-    PILOT_DATABASE_NAME, PILOT_DATABASE_HOST,
-    PILOT_DATABASE_USER, PILOT_DATABASE_PASSWORD
+    DATABASES (JSON object containing pilot and bg)
 """
 
 import os
@@ -22,10 +21,10 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from bg.db import (
-    DBAdapterObject,
     PilotDBA,
-    CubeDatabaseError,
+    PilotDBError,
     MmblBgDBA,
+    db_config_from_env,
 )
 from bg.ice import load_ice_module
 from bg.passwords import LEGACY_BCRYPT_SHA256, verify_murmur_password
@@ -92,22 +91,22 @@ class PilotIdentity:
 
 
 PILOT_DB_ADAPTER = PilotDBA(
-    DBAdapterObject(
-        name=os.environ.get('PILOT_DATABASE_NAME', 'pilot'),
-        host=os.environ.get('PILOT_DATABASE_HOST', 'localhost'),
-        user=os.environ.get('PILOT_DATABASE_USER', 'pilot'),
-        password=os.environ.get('PILOT_DATABASE_PASSWORD', ''),
-        engine='',
+    db_config_from_env(
+        'DATABASES',
+        'pilot',
+        default_database='pilot',
+        default_host='localhost',
+        default_username='pilot',
     )
 )
 
 BG_DB_ADAPTER = MmblBgDBA(
-    DBAdapterObject(
-        name=os.environ.get('MMBL_BG_DATABASE_NAME', 'mumble'),
-        host=os.environ.get('MMBL_BG_DATABASE_HOST', 'localhost'),
-        user=os.environ.get('MMBL_BG_DATABASE_USER', 'cube'),
-        password=os.environ.get('MMBL_BG_DATABASE_PASSWORD', ''),
-        engine='',
+    db_config_from_env(
+        'DATABASES',
+        'bg',
+        default_database='mumble',
+        default_host='localhost',
+        default_username='cube',
     )
 )
 
@@ -215,14 +214,14 @@ def get_pilot_db_connection():
     try:
         return PILOT_DB_ADAPTER.connect()
     except Exception as exc:
-        raise CubeDatabaseError('Could not connect to pilot source DB') from exc
+        raise PilotDBError('Could not connect to pilot source DB') from exc
 
 
 def get_db_connection():
     try:
         return BG_DB_ADAPTER.connect()
     except Exception as exc:
-        raise CubeDatabaseError('Could not connect to mumble-bg DB') from exc
+        raise PilotDBError('Could not connect to mumble-bg DB') from exc
 
 
 def get_active_servers():
@@ -265,7 +264,7 @@ def select_target_servers(booted_servers, virtual_server_id):
     if len(booted_servers) == 1:
         return booted_servers
     raise ValueError(
-        'Multiple Murmur virtual servers are booted on this ICE endpoint; configure virtual_server_id in Cube'
+        'Multiple Murmur virtual servers are booted on this ICE endpoint; configure virtual_server_id in bg inventory'
     )
 
 
@@ -278,7 +277,7 @@ def authenticate(username, password, server_id, certhash=''):
     """
     Authenticate a user against the database for a specific server.
 
-    Returns (cube_row_id, auth_user_id, display_name, groups) or None.
+    Returns (bg_row_id, auth_user_id, display_name, groups) or None.
     """
     try:
         conn = get_db_connection()
@@ -295,7 +294,7 @@ def authenticate(username, password, server_id, certhash=''):
     if row is None:
         return _USER_NOT_FOUND
 
-    cube_row_id, mumble_userid, pwhash, hashfn, pw_salt, kdf_iterations, stored_certhash, groups, display_name = row
+    bg_row_id, mumble_userid, pwhash, hashfn, pw_salt, kdf_iterations, stored_certhash, groups, display_name = row
     password_ok = False
 
     if password:
@@ -323,14 +322,14 @@ def authenticate(username, password, server_id, certhash=''):
         return None
 
     group_list = [g for g in groups.split(',') if g] if groups else []
-    auth_user_id = mumble_userid if mumble_userid is not None else cube_row_id
+    auth_user_id = mumble_userid if mumble_userid is not None else bg_row_id
     if mumble_userid is None:
         logger.warning(
-            'User %s on server_id=%s is missing mumble_userid; returning Cube row id temporarily',
+            'User %s on server_id=%s is missing mumble_userid; returning local row id temporarily',
             username,
             server_id,
         )
-    return cube_row_id, auth_user_id, display_name or username, group_list
+    return bg_row_id, auth_user_id, display_name or username, group_list
 
 
 def authenticate_user(username, password, server_id, certhash):
@@ -378,19 +377,19 @@ UPDATE_CONNECTION_QUERY = """
 """
 
 
-def update_connection_info(cube_row_id, certhash):
+def update_connection_info(bg_row_id, certhash):
     """Store the client certificate hash and last successful auth time."""
     now = datetime.now(timezone.utc)
     try:
         conn = get_db_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute(UPDATE_CONNECTION_QUERY, (certhash or '', now, now, cube_row_id))
+                cur.execute(UPDATE_CONNECTION_QUERY, (certhash or '', now, now, bg_row_id))
             conn.commit()
         finally:
             conn.close()
     except Exception:
-        logger.exception('Failed to update connection info for cube_row_id=%s', cube_row_id)
+        logger.exception('Failed to update connection info for bg_row_id=%s', bg_row_id)
 
 
 def wait_for_server_configs(retry_interval=30):
@@ -430,7 +429,7 @@ def main():
 
     with Ice.initialize(['--Ice.ImplicitContext=Shared', '--Ice.Default.EncodingVersion=1.0']) as communicator:
         adapter = communicator.createObjectAdapterWithEndpoints(
-            'CubeAuth', 'tcp -h 0.0.0.0'
+            'MumbleBgAuth', 'tcp -h 0.0.0.0'
         )
         adapter.activate()
 
@@ -451,8 +450,8 @@ def main():
                         if result is None:
                             # Known user, wrong password -- hard reject.
                             return (-1, None, None)
-                        cube_row_id, auth_user_id, display_name, groups = result
-                        update_connection_info(cube_row_id, certhash)
+                        bg_row_id, auth_user_id, display_name, groups = result
+                        update_connection_info(bg_row_id, certhash)
                         return (auth_user_id, display_name, groups)
 
                     def getInfo(self, id, current=None):
