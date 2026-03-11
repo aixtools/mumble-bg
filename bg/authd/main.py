@@ -9,7 +9,6 @@ Configuration via environment variables:
     CUBE_CORE_DATABASE_NAME, CUBE_CORE_DATABASE_HOST,
     CUBE_CORE_DATABASE_USER, CUBE_CORE_DATABASE_PASSWORD,
     optional CUBE_CORE_DATABASE_ENGINE (postgresql|mysql, default auto-detect)
-    MUMBLE_ICE_SLICE — path to the .ice slice file (default: MumbleServer.ice)
 """
 
 import os
@@ -29,6 +28,7 @@ from bg.db import (
     CubeDatabaseError,
     MmblBgDBA,
 )
+from bg.ice import load_ice_module
 from bg.passwords import LEGACY_BCRYPT_SHA256, verify_murmur_password
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -111,8 +111,6 @@ BG_DB_ADAPTER = MmblBgDBA(
         engine='',
     )
 )
-
-ICE_SLICE = os.environ.get('MUMBLE_ICE_SLICE', 'MumbleServer.ice')
 
 SERVERS_QUERY = """
     SELECT id, ice_host, ice_port, ice_secret, virtual_server_id
@@ -396,25 +394,6 @@ def update_connection_info(cube_row_id, certhash):
         logger.exception('Failed to update connection info for cube_row_id=%s', cube_row_id)
 
 
-def _load_slice():
-    """Load the ICE slice definition and return the generated module."""
-    import Ice
-
-    slice_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ICE_SLICE)
-    if not os.path.exists(slice_path):
-        slice_path = ICE_SLICE  # fall back to raw path / cwd
-
-    Ice.loadSlice(f"-I{Ice.getSliceDir()} {slice_path}")
-
-    # Newer Mumble uses module MumbleServer, older uses Murmur
-    try:
-        import MumbleServer
-        return MumbleServer
-    except ImportError:
-        import Murmur
-        return Murmur
-
-
 def main():
     """Start the ICE authenticator daemon."""
     try:
@@ -424,9 +403,9 @@ def main():
         sys.exit(1)
 
     try:
-        M = _load_slice()
+        M = load_ice_module()
     except Exception:
-        logger.exception('Failed to load ICE slice definition from %s', ICE_SLICE)
+        logger.exception('Failed to load bundled ICE slice definition')
         sys.exit(1)
 
     RETRY_INTERVAL = 30

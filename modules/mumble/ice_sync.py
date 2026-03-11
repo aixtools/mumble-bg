@@ -1,4 +1,4 @@
-import os
+from bg.ice import load_ice_module
 
 
 class MumbleSyncError(RuntimeError):
@@ -7,26 +7,9 @@ class MumbleSyncError(RuntimeError):
 
 def _load_slice():
     try:
-        import Ice
-    except ImportError as exc:
-        raise MumbleSyncError('ZeroC ICE is not installed in this environment') from exc
-
-    slice_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        'bg',
-        'authd',
-        'MumbleServer.ice',
-    )
-    Ice.loadSlice(f"-I{Ice.getSliceDir()} {slice_path}")
-    try:
-        import MumbleServer
-        return MumbleServer
-    except ImportError:
-        try:
-            import Murmur
-            return Murmur
-        except ImportError as exc:
-            raise MumbleSyncError('Failed to load the MumbleServer ICE slice bindings') from exc
+        return load_ice_module()
+    except RuntimeError as exc:
+        raise MumbleSyncError(str(exc)) from exc
 
 
 def _open_target_server(server_config):

@@ -83,7 +83,6 @@ The extracted background service currently expects:
 - `CUBE_CORE_DATABASE_USER`
 - `CUBE_CORE_DATABASE_PASSWORD`
 - optional `CUBE_CORE_DATABASE_ENGINE` (`postgresql` or `mysql`, default autodetect)
-- optional `MUMBLE_ICE_SLICE`
 
 That is the model where it reads Cube core for pilot identity and uses `MMBL_BG_*` for its own runtime tables.
 
