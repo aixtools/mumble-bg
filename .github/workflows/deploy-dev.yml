@@ -38,14 +38,9 @@ jobs:
           ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" << 'EOF'
           mkdir -p /home/cube/.env
           cat > /home/cube/.env/mumble-bg << 'ENVFILE'
-          PILOT_DATABASE_NAME=${{ secrets.PILOT_DATABASE_NAME }}
-          PILOT_DATABASE_HOST=${{ secrets.PILOT_DATABASE_HOST }}
-          PILOT_DATABASE_USER=${{ secrets.PILOT_DATABASE_USER }}
-          PILOT_DATABASE_PASSWORD=${{ secrets.PILOT_DATABASE_PASSWORD }}
-          MMBL_BG_DATABASE_NAME=${{ secrets.MMBL_BG_DATABASE_NAME }}
-          MMBL_BG_DATABASE_HOST=${{ secrets.MMBL_BG_DATABASE_HOST }}
-          MMBL_BG_DATABASE_USER=${{ secrets.MMBL_BG_DATABASE_USER }}
-          MMBL_BG_DATABASE_PASSWORD=${{ secrets.MMBL_BG_DATABASE_PASSWORD }}
+          DATABASES='${{ secrets.DATABASES }}'
+          ICE='${{ secrets.ICE }}'
+          MURMUR_PROBE='${{ secrets.MURMUR_PROBE }}'
           BG_ENGINE=${{ secrets.BG_ENGINE }}
           ENVFILE
           chmod 600 /home/cube/.env/mumble-bg
@@ -59,6 +54,10 @@ jobs:
             python3 -m venv /home/cube/.venv/mumble-bg
           fi
           /home/cube/.venv/mumble-bg/bin/pip install --quiet -r /home/cube/mumble-bg/requirements.txt
+          set -a
+          source /home/cube/.env/mumble-bg
+          set +a
+          /home/cube/.venv/mumble-bg/bin/python /home/cube/mumble-bg/manage.py migrate --noinput
           EOF
 
       - name: Restart service

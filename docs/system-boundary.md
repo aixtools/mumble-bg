@@ -26,6 +26,88 @@ These constraints are locked:
 - Data collected by runtime daemons in this repo may be surfaced to the UI layer
   only through explicit interfaces/messages.
 
+## Murmur Contract
+
+The shared Murmur configuration is split into two structured JSON secrets:
+
+- `ICE`
+- `MURMUR_PROBE`
+
+`ICE` is the required ICE/runtime contract.
+
+Shape:
+
+```json
+[
+  {
+    "name": "optional label",
+    "host": "127.0.0.1",
+    "virtual_server_id": 1,
+    "icewrite": "write-secret",
+    "iceport": 6502,
+    "iceread": "read-secret"
+  }
+]
+```
+
+Required fields per server:
+
+- `host`
+- `virtual_server_id`
+- `icewrite`
+
+Optional fields per server:
+
+- `name`
+- `iceport`
+- `iceread`
+
+Rules:
+
+- `name` defaults to `host:virtual_server_id` when omitted.
+- `icewrite` is the required control path for `authd`.
+- `iceread` is optional and is intended for `pulse` or other read-only ICE access.
+- If `iceread` is omitted, `icewrite` may be reused.
+- `iceport` may be supplied, but bg should discover it when absent.
+
+`MURMUR_PROBE` is the optional Murmur DB probe/debug contract.
+
+Shape:
+
+```json
+[
+  {
+    "name": "optional label",
+    "host": "127.0.0.1",
+    "username": "mumble",
+    "database": "mumble_db",
+    "password": "secret",
+    "dbport": 5432,
+    "dbengine": "postgres"
+  }
+]
+```
+
+Required fields per probe target:
+
+- `host`
+- `username`
+- `database`
+- `password`
+
+Optional fields per probe target:
+
+- `name`
+- `dbport`
+- `dbengine`
+
+Rules:
+
+- `name` defaults to `host` when omitted.
+- `MURMUR_PROBE` is optional and debug-only.
+- If `MURMUR_PROBE` is absent, normal ICE operation still proceeds.
+- `dbport` and `dbengine` may be supplied, but bg should discover them when absent.
+
 ## Disallowed Cross-System Flow
 
 - No direct reads by `eveo` from this repo's private database.

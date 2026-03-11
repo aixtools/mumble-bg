@@ -1,5 +1,5 @@
 from bg.authd import main as authd
-from bg.db import CubeDatabaseError
+from bg.db import PilotDBError
 
 
 class _Cursor:
@@ -50,8 +50,8 @@ def test_get_db_connection_wraps_errors():
         authd.BG_DB_ADAPTER = _BadAdapter()
         try:
             authd.get_db_connection()
-            raise AssertionError("expected CubeDatabaseError")
-        except CubeDatabaseError:
+            raise AssertionError("expected PilotDBError")
+        except PilotDBError:
             pass
     finally:
         authd.BG_DB_ADAPTER = original
@@ -152,3 +152,23 @@ def test_get_active_servers_falls_back_when_virtual_server_id_column_is_missing(
         authd.LEGACY_SERVERS_QUERY,
     ]
     assert conn.closed is True
+
+
+def test_wait_for_server_configs_sleeps_until_data_exists(monkeypatch):
+    calls = []
+    sleep_calls = []
+
+    def fake_get_active_servers():
+        calls.append(True)
+        if len(calls) == 1:
+            return []
+        return [(1, "127.0.0.1", 6502, "secret", 1)]
+
+    monkeypatch.setattr(authd, "get_active_servers", fake_get_active_servers)
+    monkeypatch.setattr(authd.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    servers = authd.wait_for_server_configs(retry_interval=7)
+
+    assert servers == [(1, "127.0.0.1", 6502, "secret", 1)]
+    assert len(calls) == 2
+    assert sleep_calls == [7]

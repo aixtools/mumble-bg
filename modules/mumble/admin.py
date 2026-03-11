@@ -15,7 +15,7 @@ class MumbleServerAdmin(admin.ModelAdmin):
                 '<ol>'
                 '<li>On the Mumble server: set <code>ice="tcp -h 0.0.0.0 -p 6502"</code> '
                 'and <code>icesecretwrite=&lt;secret&gt;</code></li>'
-                '<li>Ensure the Cube authenticator container can reach the ICE endpoint over the network</li>'
+                '<li>Ensure the mumble-bg authenticator can reach the ICE endpoint over the network</li>'
                 '<li>Add the server here with matching ICE host, port, secret, and virtual server ID when needed</li>'
                 '<li>Restart the authenticator container to pick up new servers</li>'
                 '</ol>'

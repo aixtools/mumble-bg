@@ -60,14 +60,15 @@ This contract update aligns with Cube core behavioral changes introduced in Cube
 
 ## Environment Contracts
 
-- `PILOT_DATABASE_*` = read-only pilot source DB used by the background services.
-- `MMBL_BG_*` = mumble-bg-owned DB used for local migrations and runtime tables.
+- `DATABASES` = JSON object containing the read-only `pilot` DB config and the owned `bg` DB config.
+- `ICE` = JSON list describing required ICE connectivity for `authd` and `pulse`.
+- `MURMUR_PROBE` = optional JSON list for Murmur DB probe/debug targets.
 
 ```bash
 python manage.py migrate
 ```
 
-uses `MMBL_BG_*` and keeps local schema independent of the pilot source DB.
+uses `DATABASES.bg` and keeps local schema independent of the pilot source DB.
 
 ## Release Cleanup Note
 

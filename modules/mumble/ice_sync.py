@@ -53,7 +53,7 @@ def _open_target_server(server_config):
             target = booted_servers[0]
         else:
             raise MumbleSyncError(
-                'Multiple Murmur virtual servers are booted on this ICE endpoint; configure virtual_server_id in Cube'
+                'Multiple Murmur virtual servers are booted on this ICE endpoint; configure virtual_server_id in bg inventory'
             )
 
         return communicator, M, target

@@ -12,7 +12,7 @@ class Command(BaseCommand):
         parser.add_argument('--server-id', type=int, help='Only sync one mumble-bg MumbleServer row')
         parser.add_argument('--user-id', type=int, help='Only sync one Django user')
         parser.add_argument('--only-missing-ids', action='store_true', help='Only sync rows missing mumble_userid')
-        parser.add_argument('--dry-run', action='store_true', help='Report intended changes without mutating Murmur or Cube')
+        parser.add_argument('--dry-run', action='store_true', help='Report intended changes without mutating Murmur or the pilot source')
 
     def handle(self, *args, **options):
         qs = MumbleUser.objects.select_related('server', 'user').filter(is_active=True, server__is_active=True)

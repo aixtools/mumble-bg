@@ -44,7 +44,7 @@ class Migration(migrations.Migration):
                 ('kdf_iterations', models.PositiveIntegerField(blank=True, null=True)),
                 ('certhash', models.CharField(blank=True, default='', help_text='Client certificate hash (updated on each connection)', max_length=255)),
                 ('groups', models.TextField(blank=True, default='')),
-                ('last_authenticated', models.DateTimeField(blank=True, help_text='Last successful Cube authenticator callback timestamp', null=True)),
+                ('last_authenticated', models.DateTimeField(blank=True, help_text='Last successful mumble-bg authenticator callback timestamp', null=True)),
                 ('last_connected', models.DateTimeField(blank=True, help_text='Last confirmed Murmur connection timestamp', null=True)),
                 ('last_disconnected', models.DateTimeField(blank=True, help_text='Last confirmed Murmur disconnect timestamp', null=True)),
                 ('last_seen', models.DateTimeField(blank=True, help_text='Last time Murmur Pulse observed this account online', null=True)),

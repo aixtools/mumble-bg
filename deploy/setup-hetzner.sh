@@ -47,6 +47,43 @@ set -a
 source "${ENV_FILE}"
 set +a
 
+json_field() {
+    local env_var="$1"
+    local object_key="$2"
+    local field="$3"
+    python3 - "$env_var" "$object_key" "$field" <<'PY'
+import json
+import os
+import sys
+
+env_var = sys.argv[1]
+object_key = sys.argv[2]
+field = sys.argv[3]
+raw = os.environ.get(env_var, '').strip()
+if not raw:
+    raise SystemExit(f"{env_var} is not set")
+
+try:
+    payload = json.loads(raw)
+except json.JSONDecodeError as exc:
+    raise SystemExit(f"{env_var} must be valid JSON: {exc}") from exc
+
+if not isinstance(payload, dict):
+    raise SystemExit(f"{env_var} must be a JSON object")
+
+payload = payload.get(object_key)
+if payload is None:
+    raise SystemExit(f"{env_var} is missing required object: {object_key}")
+if not isinstance(payload, dict):
+    raise SystemExit(f"{env_var}.{object_key} must be a JSON object")
+
+value = payload.get(field, '')
+if value is None:
+    value = ''
+print(value)
+PY
+}
+
 BG_ENGINE="${BG_ENGINE:-postgres}"
 
 case "${BG_ENGINE}" in
@@ -75,26 +112,34 @@ if [ ! -d "${VENV_DIR}" ]; then
     sudo -u "${APP_USER}" python3 -m venv "${VENV_DIR}"
 fi
 
-if [ -z "${MMBL_BG_DATABASE_NAME:-}" ] || [ -z "${MMBL_BG_DATABASE_HOST:-}" ] || [ -z "${MMBL_BG_DATABASE_USER:-}" ] || [ -z "${MMBL_BG_DATABASE_PASSWORD:-}" ]; then
-    echo "Expected MMBL_BG_DATABASE_NAME, MMBL_BG_DATABASE_HOST, MMBL_BG_DATABASE_USER, and MMBL_BG_DATABASE_PASSWORD in ${ENV_FILE}"
+BG_DATABASE_NAME="$(json_field DATABASES bg database)"
+BG_DATABASE_HOST="$(json_field DATABASES bg host)"
+BG_DATABASE_USER="$(json_field DATABASES bg username)"
+BG_DATABASE_PASSWORD="$(json_field DATABASES bg password)"
+
+if [ -z "${BG_DATABASE_NAME}" ] || [ -z "${BG_DATABASE_HOST}" ] || [ -z "${BG_DATABASE_USER}" ] || [ -z "${BG_DATABASE_PASSWORD}" ]; then
+    echo "Expected DATABASES.bg JSON with host, username, database, and password in ${ENV_FILE}"
     exit 1
 fi
 
-case "${MMBL_BG_DATABASE_HOST}" in
+case "${BG_DATABASE_HOST}" in
     127.0.0.1|localhost)
         bash "${APP_DIR}/deploy/create-db.sh" \
             --engine "${BG_ENGINE}" \
-            --user "${MMBL_BG_DATABASE_USER}" \
-            --db "${MMBL_BG_DATABASE_NAME}" \
-            --host "${MMBL_BG_DATABASE_HOST}" \
-            --pw "${MMBL_BG_DATABASE_PASSWORD}"
+            --user "${BG_DATABASE_USER}" \
+            --db "${BG_DATABASE_NAME}" \
+            --host "${BG_DATABASE_HOST}" \
+            --pw "${BG_DATABASE_PASSWORD}"
         ;;
     *)
-        echo "[WARN] Skipping local bg database bootstrap for non-local host ${MMBL_BG_DATABASE_HOST}"
+        echo "[WARN] Skipping local bg database bootstrap for non-local host ${BG_DATABASE_HOST}"
         ;;
 esac
 
 sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${APP_DIR}/requirements.txt"
+sudo -u "${APP_USER}" env \
+    DATABASES="${DATABASES}" \
+    "${VENV_DIR}/bin/python" "${APP_DIR}/manage.py" migrate --noinput
 
 cat > /etc/sudoers.d/mumble-bg << 'EOF'
 cube ALL=(ALL) NOPASSWD: /bin/systemctl restart mumble-bg-auth, /bin/systemctl status mumble-bg-auth, /bin/systemctl daemon-reload

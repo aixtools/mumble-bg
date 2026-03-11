@@ -44,7 +44,7 @@ class MumbleUser(models.Model):
     last_authenticated = models.DateTimeField(
         null=True,
         blank=True,
-        help_text='Last successful Cube authenticator callback timestamp',
+        help_text='Last successful mumble-bg authenticator callback timestamp',
     )
     last_connected = models.DateTimeField(
         null=True,

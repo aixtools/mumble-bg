@@ -71,13 +71,14 @@ This script:
 - ensures `/home/cube/.venv/mumble-bg`
 - provisions the local `mumble-bg` database/user if needed
 - installs background-service requirements
+- runs `manage.py migrate` for the `mumble-bg` schema
 - installs `/etc/systemd/system/mumble-bg-auth.service`
 - installs sudoers for service restart/status
 - enables and restarts the service
 
 Database bootstrap behavior:
 
-- uses `MMBL_BG_DATABASE_*` from `/home/cube/.env/mumble-bg`
+- uses `DATABASES.bg` from `/home/cube/.env/mumble-bg`
 - uses optional `BG_ENGINE`, defaulting to PostgreSQL when omitted
 - only bootstraps local database hosts (`127.0.0.1` or `localhost`)
 - does not change the password of an already-existing database user
@@ -89,7 +90,7 @@ bash /home/cube/mumble-bg/deploy/undeploy-hetzner.sh
 bash /home/cube/mumble-bg/deploy/setup-hetzner.sh
 ```
 
-`deploy/undeploy-hetzner.sh` removes both legacy and current auth systemd units, removes the matching sudoers files, and deletes `/home/cube/.venv/mumble-bg`. It intentionally keeps the repo checkout and `/home/cube/.env/mumble-bg`.
+`deploy/undeploy-hetzner.sh` removes the current `mumble-bg-auth` systemd unit, removes the matching sudoers file, and deletes `/home/cube/.venv/mumble-bg`. It intentionally keeps the repo checkout and `/home/cube/.env/mumble-bg`.
 
 4. Verify the service:
 
@@ -132,14 +133,14 @@ Required runtime/deploy:
 - `HETZNER_DEV_SSH_KEY`
 - `HETZNER_DEV_HOST`
 - `HETZNER_DEV_USER`
-- `PILOT_DATABASE_NAME`
-- `PILOT_DATABASE_HOST`
-- `PILOT_DATABASE_USER`
-- `PILOT_DATABASE_PASSWORD`
-- `MMBL_BG_DATABASE_NAME`
-- `MMBL_BG_DATABASE_HOST`
-- `MMBL_BG_DATABASE_USER`
-- `MMBL_BG_DATABASE_PASSWORD`
+
+- `DATABASES`
+
+- `ICE`
+
+Optional runtime/debug:
+
+- `MURMUR_PROBE`
 
 Optional provisioning-only:
 
@@ -149,3 +150,139 @@ Recommended `BG_ENGINE` values:
 
 - `psql`
 - `mysql`
+
+`DATABASES` is a JSON object with `pilot` and `bg` entries:
+
+```json
+{
+  "pilot": {
+    "name": "pilot",
+    "host": "127.0.0.1",
+    "username": "pilot_user",
+    "database": "pilot_db",
+    "password": "change_me"
+  },
+  "bg": {
+    "name": "mumble-bg",
+    "host": "127.0.0.1",
+    "username": "mumble_bg",
+    "database": "bg_data",
+    "password": "change_me"
+  }
+}
+```
+
+Required top-level keys:
+
+- `pilot`
+- `bg`
+
+Required fields for `pilot` and `bg`:
+
+- `host`
+- `username`
+- `database`
+- `password`
+
+Optional fields for `pilot` and `bg`:
+
+- `name`
+- `engine`
+
+`ICE` is a JSON list of Murmur ICE definitions. Each item uses this shape:
+
+```json
+[
+  {
+    "name": "optional label",
+    "host": "127.0.0.1",
+    "virtual_server_id": 1,
+    "icewrite": "write-secret",
+    "iceport": 6502,
+    "iceread": "read-secret"
+  }
+]
+```
+
+Required per server:
+
+- `host`
+- `virtual_server_id`
+- `icewrite`
+
+Optional per server:
+
+- `name`
+- `iceport`
+- `iceread`
+
+Notes:
+
+- `name` defaults to `host:virtual_server_id` when omitted.
+- `iceread` is optional; if omitted, bg may reuse `icewrite`.
+- `iceport` may be provided, but bg should discover it when absent.
+
+`MURMUR_PROBE` is a JSON list of optional Murmur DB probe definitions. Each item uses this shape:
+
+```json
+[
+  {
+    "name": "optional label",
+    "host": "127.0.0.1",
+    "username": "mumble",
+    "database": "mumble_db",
+    "password": "secret",
+    "dbport": 5432,
+    "dbengine": "postgres"
+  }
+]
+```
+
+Required per probe target:
+
+- `host`
+- `username`
+- `database`
+- `password`
+
+Optional per probe target:
+
+- `name`
+- `dbport`
+- `dbengine`
+
+Notes:
+
+- `name` defaults to `host` when omitted.
+- `MURMUR_PROBE` is optional and debug-only.
+- If `MURMUR_PROBE` is absent, normal operation still proceeds over ICE only.
+- `dbengine` and `dbport` may be provided, but bg should discover them when absent.
+
+## Appendix: Fill-In Table
+
+**Host Access**
+
+| Secret | Value |
+| --- | --- |
+| `HETZNER_DEV_SSH_KEY` | |
+| `HETZNER_DEV_HOST` | |
+| `HETZNER_DEV_USER` | |
+
+**Databases**
+
+| Secret | Value |
+| --- | --- |
+| `DATABASES` | |
+| `BG_ENGINE` | |
+
+**Murmur ICE**
+
+| Secret | Value |
+| --- | --- |
+| `ICE` | |
+
+**Murmur Probe**
+
+| Secret | Value |
+| --- | --- |
+| `MURMUR_PROBE` | |

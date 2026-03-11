@@ -16,20 +16,14 @@ ENV_FILE="${ENV_FILE:-${APP_HOME}/.env/mumble-bg}"
 
 SERVICES=(
     "mumble-bg-auth"
-    "cube-monitor-auth"
-    "cube-mumble-auth"
 )
 
 SUDOERS_FILES=(
     "/etc/sudoers.d/mumble-bg"
-    "/etc/sudoers.d/cube-monitor"
-    "/etc/sudoers.d/cube-mumble"
 )
 
 SERVICE_FILES=(
     "/etc/systemd/system/mumble-bg-auth.service"
-    "/etc/systemd/system/cube-monitor-auth.service"
-    "/etc/systemd/system/cube-mumble-auth.service"
 )
 
 for service in "${SERVICES[@]}"; do
@@ -48,7 +42,7 @@ for sudoers_file in "${SUDOERS_FILES[@]}"; do
 done
 
 systemctl daemon-reload
-systemctl reset-failed mumble-bg-auth cube-monitor-auth cube-mumble-auth || true
+systemctl reset-failed mumble-bg-auth >/dev/null 2>&1 || true
 
 if [ -d "${VENV_DIR}" ]; then
     rm -rf "${VENV_DIR}"
@@ -58,8 +52,8 @@ cat <<EOF
 [OK] Removed mumble-bg deployment artifacts.
 
 Removed:
-- systemd units for mumble-bg-auth, cube-monitor-auth, and cube-mumble-auth
-- sudoers files for mumble-bg, cube-monitor, and cube-mumble
+- systemd unit for mumble-bg-auth
+- sudoers file for mumble-bg
 - virtualenv ${VENV_DIR}
 
 Kept:

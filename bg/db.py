@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
 
 
-class CubeDatabaseError(RuntimeError):
-    """Raised when a mumble-bg database adapter cannot connect."""
+class PilotDBError(RuntimeError):
+    """Raised when a mumble-bg database adapter or DB config cannot be used."""
 
 
 @dataclass(frozen=True)
@@ -16,6 +18,69 @@ class DBAdapterObject:
     user: str
     password: str
     engine: str = ''
+
+
+def db_config_from_env(
+    env_var: str,
+    key: str,
+    *,
+    default_database: str,
+    default_host: str,
+    default_username: str,
+    default_password: str = '',
+):
+    """
+    Load a JSON DB config from one env var containing keyed DB objects.
+
+    Expected top-level shape:
+    - {"pilot": {...}, "bg": {...}}
+
+    Expected nested object keys:
+    - host
+    - username
+    - database
+    - password
+    - optional name
+    - optional engine
+    """
+    raw = (os.environ.get(env_var) or '').strip()
+    if not raw:
+        return DBAdapterObject(
+            name=default_database,
+            host=default_host,
+            user=default_username,
+            password=default_password,
+            engine='',
+        )
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise PilotDBError(f'{env_var} must be valid JSON') from exc
+
+    if not isinstance(payload, dict):
+        raise PilotDBError(f'{env_var} must be a JSON object')
+
+    payload = payload.get(key)
+    if payload is None:
+        raise PilotDBError(f'{env_var} is missing required object: {key}')
+    if not isinstance(payload, dict):
+        raise PilotDBError(f'{env_var}.{key} must be a JSON object')
+
+    required = ['host', 'username', 'database', 'password']
+    missing = [field for field in required if field not in payload or payload[field] in {None, ''}]
+    if missing:
+        raise PilotDBError(
+            f"{env_var} is missing required fields: {', '.join(missing)}"
+        )
+
+    return DBAdapterObject(
+        name=str(payload['database']),
+        host=str(payload['host']),
+        user=str(payload['username']),
+        password=str(payload['password']),
+        engine=str(payload.get('engine', '') or ''),
+    )
 
 
 class BaseDBA:
@@ -57,7 +122,7 @@ class PilotDBA(BaseDBA):
             try:
                 import mysql.connector
             except Exception as exc:  # pragma: no cover - runtime dependency optional until needed
-                raise CubeDatabaseError(
+                raise PilotDBError(
                     'mysql client is not installed for pilot-source mysql fallback'
                 ) from exc
 
@@ -89,12 +154,12 @@ class PilotDBA(BaseDBA):
                     errors.append((engine, host, exc))
                     continue
         if not errors:
-            raise CubeDatabaseError('Could not connect to pilot source via postgresql or mysql')
+            raise PilotDBError('Could not connect to pilot source via postgresql or mysql')
         attempted = '; '.join(
             f'{engine}@{host}: {exc}'
             for engine, host, exc in errors
         )
-        raise CubeDatabaseError(
+        raise PilotDBError(
             f'Could not connect to pilot source via postgresql or mysql. Attempts: {attempted}'
         ) from errors[-1][2]
 
@@ -117,7 +182,7 @@ class MmblBgDBA(BaseDBA):
         elif requested == '':
             candidates = ['postgresql', 'mysql']
         else:
-            raise CubeDatabaseError(f'Unsupported mumble-bg database engine={requested}')
+            raise PilotDBError(f'Unsupported mumble-bg database engine={requested}')
 
         errors = []
         for engine in candidates:
@@ -130,12 +195,12 @@ class MmblBgDBA(BaseDBA):
                     errors.append((engine, host, exc))
                     continue
         if not errors:
-            raise CubeDatabaseError('Could not connect to mumble-bg via postgresql or mysql')
+            raise PilotDBError('Could not connect to mumble-bg via postgresql or mysql')
         attempted = '; '.join(
             f'{engine}@{host}: {exc}'
             for engine, host, exc in errors
         )
-        raise CubeDatabaseError(
+        raise PilotDBError(
             f'Could not connect to mumble-bg via postgresql or mysql. Attempts: {attempted}'
         ) from errors[-1][2]
 
@@ -157,7 +222,7 @@ class MmblBgDBA(BaseDBA):
             try:
                 import mysql.connector
             except Exception as exc:  # pragma: no cover - runtime dependency optional until needed
-                raise CubeDatabaseError(
+                raise PilotDBError(
                     'mysql client is not installed for the mumble-bg mysql backend'
                 ) from exc
 

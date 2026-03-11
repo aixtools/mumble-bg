@@ -190,22 +190,44 @@ I would not put this in `bg/db.py`, because:
 
 Recommended approach:
 
-- normal operation requires no Murmur DB env at all
-- probe mode turns on only if a minimal dedicated env set is present
+- normal operation requires no Murmur DB probe secret at all
+- probe mode turns on only if optional `MURMUR_PROBE` data is present
+- ICE connectivity itself is described separately by `ICE`
 
-Suggested optional env names:
+Suggested secret shape for `MURMUR_PROBE`:
 
-- `MURMUR_PROBE_DATABASE_NAME`
-- `MURMUR_PROBE_DATABASE_HOST`
-- `MURMUR_PROBE_DATABASE_USER`
-- `MURMUR_PROBE_DATABASE_PASSWORD`
-- optional `MURMUR_PROBE_DATABASE_ENGINE`
+```json
+[
+  {
+    "name": "optional label",
+    "host": "127.0.0.1",
+    "username": "mumble",
+    "database": "mumble_db",
+    "password": "secret",
+    "dbport": 5432,
+    "dbengine": "postgres"
+  }
+]
+```
 
-Optional feature switch:
+Required per probe target:
 
-- `MURMUR_PROBE_ENABLED=1`
+- `host`
+- `username`
+- `database`
+- `password`
 
-If those are absent:
+Optional per probe target:
+
+- `name`
+- `dbport`
+- `dbengine`
+
+If `name` is omitted:
+
+- default it to `host`
+
+If `MURMUR_PROBE` is absent:
 
 - instantiate `NullMurmurProbe`
 
