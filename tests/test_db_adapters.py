@@ -3,17 +3,17 @@ import sys
 
 import pytest
 
-from authenticator.database import (
-    CubeCoreDBA,
+from bg.db import (
     CubeDatabaseError,
     DBAdapterObject,
     MmblBgDBA,
+    PilotDBA,
 )
 
 
-def test_core_dba_prefers_postgresql_when_requested(monkeypatch):
-    config = DBAdapterObject(name="cube", host="localhost", user="u", password="p", engine="postgresql")
-    adapter = CubeCoreDBA(config)
+def test_pilot_dba_autodetect_prefers_postgresql_first(monkeypatch):
+    config = DBAdapterObject(name="pilot", host="localhost", user="u", password="p", engine="")
+    adapter = PilotDBA(config)
 
     called = []
 
@@ -29,12 +29,12 @@ def test_core_dba_prefers_postgresql_when_requested(monkeypatch):
 
     conn = adapter.connect()
     assert conn is not None
-    assert called == [("cube", "127.0.0.1", "5432", "u", "p")]
+    assert called == [("pilot", "127.0.0.1", "5432", "u", "p")]
 
 
-def test_core_dba_autodetect_falls_back_to_postgresql(monkeypatch):
-    config = DBAdapterObject(name="cube", host="localhost", user="u", password="p", engine="")
-    adapter = CubeCoreDBA(config)
+def test_pilot_dba_autodetect_falls_back_to_mysql(monkeypatch):
+    config = DBAdapterObject(name="pilot", host="localhost", user="u", password="p", engine="")
+    adapter = PilotDBA(config)
 
     class PsyException(Exception):
         pass
@@ -53,9 +53,9 @@ def test_core_dba_autodetect_falls_back_to_postgresql(monkeypatch):
     assert conn is not None
 
 
-def test_core_dba_raises_when_no_connector_and_autodetect_needed(monkeypatch):
-    config = DBAdapterObject(name="cube", host="localhost", user="u", password="p", engine="")
-    adapter = CubeCoreDBA(config)
+def test_pilot_dba_raises_when_no_connector_and_autodetect_needed(monkeypatch):
+    config = DBAdapterObject(name="pilot", host="localhost", user="u", password="p", engine="")
+    adapter = PilotDBA(config)
 
     def fake_connect_raise(**kwargs):
         raise Exception("psyc down")
@@ -83,6 +83,26 @@ def test_mbll_dba_supports_explicit_postgresql_and_mysql(monkeypatch):
     adapter_mysql = MmblBgDBA(config_mysql)
     monkeypatch.setitem(sys.modules, "MySQLdb", SimpleNamespace(connect=lambda **kwargs: "ok-mysql"))
     assert adapter_mysql.connect() == "ok-mysql"
+
+
+def test_mbll_dba_autodetect_falls_back_to_mysql(monkeypatch):
+    config = DBAdapterObject(name="mumble", host="localhost", user="u", password="p", engine="")
+    adapter = MmblBgDBA(config)
+
+    class PsyException(Exception):
+        pass
+
+    def fake_connect_raise(**kwargs):
+        raise PsyException("postgres down")
+
+    def fake_mysql_connect(*, host=None, port=None, db=None, user=None, passwd=None):
+        return object()
+
+    monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(connect=fake_connect_raise))
+    monkeypatch.setitem(sys.modules, "MySQLdb", SimpleNamespace(connect=fake_mysql_connect))
+
+    conn = adapter.connect()
+    assert conn is not None
 
 
 def test_mbll_dba_invalid_engine():

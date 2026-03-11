@@ -2,7 +2,7 @@
 
 This document covers the initial one-time setup for deploying `mumble-bg` from GitHub Actions to the dev host.
 
-This is for the current standalone authenticator phase only.
+This is for the current standalone background-service phase only.
 
 ## What The Workflow Does
 
@@ -55,6 +55,11 @@ install -m 0600 /home/cube/mumble-bg/.env.example /home/cube/.env/mumble-bg
 
 Edit `/home/cube/.env/mumble-bg` with the real database values.
 
+If you need to create a fresh local database/user first, use:
+
+- [docs/database-bootstrap.md](/home/michael/prj/mumble-bg/docs/database-bootstrap.md)
+- [deploy/create-db.sh](/home/michael/prj/mumble-bg/deploy/create-db.sh)
+
 3. Run the one-time setup script as root:
 
 ```bash
@@ -64,10 +69,18 @@ bash /home/cube/mumble-bg/deploy/setup-hetzner.sh
 This script:
 
 - ensures `/home/cube/.venv/mumble-bg`
-- installs authenticator requirements
+- provisions the local `mumble-bg` database/user if needed
+- installs background-service requirements
 - installs `/etc/systemd/system/mumble-bg-auth.service`
 - installs sudoers for service restart/status
 - enables and restarts the service
+
+Database bootstrap behavior:
+
+- uses `MMBL_BG_DATABASE_*` from `/home/cube/.env/mumble-bg`
+- uses optional `BG_ENGINE`, defaulting to PostgreSQL when omitted
+- only bootstraps local database hosts (`127.0.0.1` or `localhost`)
+- does not change the password of an already-existing database user
 
 If the host still has stale auth service state, reset it first:
 
@@ -87,20 +100,7 @@ journalctl -u mumble-bg-auth -n 50 --no-pager
 
 ## GitHub Actions Secrets
 
-These must be configured in `aixtools/mumble-bg`:
-
-- `HETZNER_DEV_SSH_KEY`
-- `HETZNER_DEV_HOST`
-- `HETZNER_DEV_USER`
-- `CUBE_CORE_DATABASE_NAME`
-- `CUBE_CORE_DATABASE_HOST`
-- `CUBE_CORE_DATABASE_USER`
-- `CUBE_CORE_DATABASE_PASSWORD`
-- optional `CUBE_CORE_DATABASE_ENGINE` (`postgresql` or `mysql`, default autodetect)
-- `MMBL_BG_DATABASE_NAME`
-- `MMBL_BG_DATABASE_HOST`
-- `MMBL_BG_DATABASE_USER`
-- `MMBL_BG_DATABASE_PASSWORD`
+See the appendix below for the exact GitHub Actions configuration values to define in `aixtools/mumble-bg`.
 
 ## SSH Key Clarification
 
@@ -124,3 +124,28 @@ Once the one-time setup exists:
 - the workflow refreshes `/home/cube/mumble-bg`
 - dependencies in `/home/cube/.venv/mumble-bg` are updated
 - `mumble-bg-auth` is restarted
+
+## Appendix: GitHub Actions Configuration
+
+Required runtime/deploy:
+
+- `HETZNER_DEV_SSH_KEY`
+- `HETZNER_DEV_HOST`
+- `HETZNER_DEV_USER`
+- `PILOT_DATABASE_NAME`
+- `PILOT_DATABASE_HOST`
+- `PILOT_DATABASE_USER`
+- `PILOT_DATABASE_PASSWORD`
+- `MMBL_BG_DATABASE_NAME`
+- `MMBL_BG_DATABASE_HOST`
+- `MMBL_BG_DATABASE_USER`
+- `MMBL_BG_DATABASE_PASSWORD`
+
+Optional provisioning-only:
+
+- `BG_ENGINE`
+
+Recommended `BG_ENGINE` values:
+
+- `psql`
+- `mysql`

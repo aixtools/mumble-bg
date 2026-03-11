@@ -6,10 +6,8 @@ Reads active MumbleServer configs from the database and connects to each
 server's ICE endpoint, registering a scoped CubeAuthenticator per server.
 
 Configuration via environment variables:
-    CUBE_CORE_DATABASE_NAME, CUBE_CORE_DATABASE_HOST,
-    CUBE_CORE_DATABASE_USER, CUBE_CORE_DATABASE_PASSWORD,
-    optional CUBE_CORE_DATABASE_ENGINE (postgresql|mysql, default auto-detect)
-    MUMBLE_ICE_SLICE — path to the .ice slice file (default: MumbleServer.ice)
+    PILOT_DATABASE_NAME, PILOT_DATABASE_HOST,
+    PILOT_DATABASE_USER, PILOT_DATABASE_PASSWORD
 """
 
 import os
@@ -23,12 +21,14 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from authenticator.database import (
+from bg.db import (
     DBAdapterObject,
-    CubeCoreDBA,
+    PilotDBA,
     CubeDatabaseError,
+    MmblBgDBA,
 )
-from authenticator.passwords import LEGACY_BCRYPT_SHA256, verify_murmur_password
+from bg.ice import load_ice_module
+from bg.passwords import LEGACY_BCRYPT_SHA256, verify_murmur_password
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 class PilotIdentity:
     """
-    Read-only cube-core pilot projection consumed by mumble-bg.
+    Read-only pilot projection consumed by mumble-bg.
 
     Important: PKID does not bind to a fixed alliance.
     A pilot can only change corporation, and a corporation can change alliance,
@@ -91,17 +91,25 @@ class PilotIdentity:
         return iter(self.as_dict().items())
 
 
-CORE_DB_ADAPTER = CubeCoreDBA(
+PILOT_DB_ADAPTER = PilotDBA(
     DBAdapterObject(
-        name=os.environ.get('CUBE_CORE_DATABASE_NAME', 'cube'),
-        host=os.environ.get('CUBE_CORE_DATABASE_HOST', 'localhost'),
-        user=os.environ.get('CUBE_CORE_DATABASE_USER', 'cube'),
-        password=os.environ.get('CUBE_CORE_DATABASE_PASSWORD', ''),
-        engine=os.environ.get('CUBE_CORE_DATABASE_ENGINE', ''),
+        name=os.environ.get('PILOT_DATABASE_NAME', 'pilot'),
+        host=os.environ.get('PILOT_DATABASE_HOST', 'localhost'),
+        user=os.environ.get('PILOT_DATABASE_USER', 'pilot'),
+        password=os.environ.get('PILOT_DATABASE_PASSWORD', ''),
+        engine='',
     )
 )
 
-ICE_SLICE = os.environ.get('MUMBLE_ICE_SLICE', 'MumbleServer.ice')
+BG_DB_ADAPTER = MmblBgDBA(
+    DBAdapterObject(
+        name=os.environ.get('MMBL_BG_DATABASE_NAME', 'mumble'),
+        host=os.environ.get('MMBL_BG_DATABASE_HOST', 'localhost'),
+        user=os.environ.get('MMBL_BG_DATABASE_USER', 'cube'),
+        password=os.environ.get('MMBL_BG_DATABASE_PASSWORD', ''),
+        engine='',
+    )
+)
 
 SERVERS_QUERY = """
     SELECT id, ice_host, ice_port, ice_secret, virtual_server_id
@@ -164,17 +172,17 @@ PILOT_IDENTITY_QUERY = """
       AND ec.is_main = true
 """
 
-MUMBLE_PILOT_IDENTITY_SOURCE = "cube-core/mumble-bg adapter contract"
+MUMBLE_PILOT_IDENTITY_SOURCE = "pilot/mumble-bg adapter contract"
 
 
-def list_cube_pilot_identities():
+def list_pilot_identities():
     """
-    Return read-only pilot identities from cube-core for mumble-bg orchestration.
+    Return read-only pilot identities from the pilot source for mumble-bg orchestration.
 
     Returns a list of PilotIdentity objects.
     """
     try:
-        conn = get_db_connection()
+        conn = get_pilot_db_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(PILOT_IDENTITY_QUERY)
@@ -203,11 +211,18 @@ def list_cube_pilot_identities():
     ]
 
 
+def get_pilot_db_connection():
+    try:
+        return PILOT_DB_ADAPTER.connect()
+    except Exception as exc:
+        raise CubeDatabaseError('Could not connect to pilot source DB') from exc
+
+
 def get_db_connection():
     try:
-        return CORE_DB_ADAPTER.connect()
+        return BG_DB_ADAPTER.connect()
     except Exception as exc:
-        raise CubeDatabaseError('Could not connect to cube-core read DB') from exc
+        raise CubeDatabaseError('Could not connect to mumble-bg DB') from exc
 
 
 def get_active_servers():
@@ -378,25 +393,6 @@ def update_connection_info(cube_row_id, certhash):
         logger.exception('Failed to update connection info for cube_row_id=%s', cube_row_id)
 
 
-def _load_slice():
-    """Load the ICE slice definition and return the generated module."""
-    import Ice
-
-    slice_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ICE_SLICE)
-    if not os.path.exists(slice_path):
-        slice_path = ICE_SLICE  # fall back to raw path / cwd
-
-    Ice.loadSlice(f"-I{Ice.getSliceDir()} {slice_path}")
-
-    # Newer Mumble uses module MumbleServer, older uses Murmur
-    try:
-        import MumbleServer
-        return MumbleServer
-    except ImportError:
-        import Murmur
-        return Murmur
-
-
 def main():
     """Start the ICE authenticator daemon."""
     try:
@@ -406,9 +402,9 @@ def main():
         sys.exit(1)
 
     try:
-        M = _load_slice()
+        M = load_ice_module()
     except Exception:
-        logger.exception('Failed to load ICE slice definition from %s', ICE_SLICE)
+        logger.exception('Failed to load bundled ICE slice definition')
         sys.exit(1)
 
     RETRY_INTERVAL = 30
