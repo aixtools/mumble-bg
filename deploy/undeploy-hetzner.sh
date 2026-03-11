@@ -48,7 +48,7 @@ for sudoers_file in "${SUDOERS_FILES[@]}"; do
 done
 
 systemctl daemon-reload
-systemctl reset-failed mumble-bg-auth cube-monitor-auth cube-mumble-auth || true
+systemctl reset-failed mumble-bg-auth cube-monitor-auth cube-mumble-auth >/dev/null 2>&1 || true
 
 if [ -d "${VENV_DIR}" ]; then
     rm -rf "${VENV_DIR}"

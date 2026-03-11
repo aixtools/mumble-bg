@@ -71,6 +71,7 @@ This script:
 - ensures `/home/cube/.venv/mumble-bg`
 - provisions the local `mumble-bg` database/user if needed
 - installs background-service requirements
+- runs `manage.py migrate` for the `mumble-bg` schema
 - installs `/etc/systemd/system/mumble-bg-auth.service`
 - installs sudoers for service restart/status
 - enables and restarts the service

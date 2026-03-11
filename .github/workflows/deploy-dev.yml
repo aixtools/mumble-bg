@@ -59,6 +59,10 @@ jobs:
             python3 -m venv /home/cube/.venv/mumble-bg
           fi
           /home/cube/.venv/mumble-bg/bin/pip install --quiet -r /home/cube/mumble-bg/requirements.txt
+          set -a
+          source /home/cube/.env/mumble-bg
+          set +a
+          /home/cube/.venv/mumble-bg/bin/python /home/cube/mumble-bg/manage.py migrate --noinput
           EOF
 
       - name: Restart service

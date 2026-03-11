@@ -95,6 +95,12 @@ case "${MMBL_BG_DATABASE_HOST}" in
 esac
 
 sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${APP_DIR}/requirements.txt"
+sudo -u "${APP_USER}" env \
+    MMBL_BG_DATABASE_NAME="${MMBL_BG_DATABASE_NAME}" \
+    MMBL_BG_DATABASE_HOST="${MMBL_BG_DATABASE_HOST}" \
+    MMBL_BG_DATABASE_USER="${MMBL_BG_DATABASE_USER}" \
+    MMBL_BG_DATABASE_PASSWORD="${MMBL_BG_DATABASE_PASSWORD}" \
+    "${VENV_DIR}/bin/python" "${APP_DIR}/manage.py" migrate --noinput
 
 cat > /etc/sudoers.d/mumble-bg << 'EOF'
 cube ALL=(ALL) NOPASSWD: /bin/systemctl restart mumble-bg-auth, /bin/systemctl status mumble-bg-auth, /bin/systemctl daemon-reload
