@@ -143,7 +143,7 @@ def unregister_mumble_registration(mumble_user):
 
 
 def sync_live_admin_membership(mumble_user):
-    from .models import MumbleSession
+    from bg.state.models import MumbleSession
 
     session_ids = list(
         MumbleSession.objects.filter(
