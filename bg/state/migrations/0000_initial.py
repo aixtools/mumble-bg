@@ -53,8 +53,8 @@ class Migration(migrations.Migration):
                 ('is_active', models.BooleanField(default=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
-                ('server', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='accounts', to='mumble.mumbleserver')),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='mumble_accounts', to=settings.AUTH_USER_MODEL)),
+                ('server', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='mumble_registrations', to='state.mumbleserver')),
+                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='mumble_registrations', to=settings.AUTH_USER_MODEL)),
             ],
             options={
                 'db_table': 'mumble_user',
@@ -90,8 +90,8 @@ class Migration(migrations.Migration):
                 ('is_active', models.BooleanField(default=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
-                ('mumble_user', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='presence_sessions', to='mumble.mumbleuser')),
-                ('server', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='presence_sessions', to='mumble.mumbleserver')),
+                ('mumble_user', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='mumble_sessions', to='state.mumbleuser')),
+                ('server', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='mumble_sessions', to='state.mumbleserver')),
             ],
             options={
                 'db_table': 'mumble_session',

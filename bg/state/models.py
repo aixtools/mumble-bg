@@ -26,8 +26,8 @@ class MumbleServer(models.Model):
 
 
 class MumbleUser(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='mumble_accounts')
-    server = models.ForeignKey(MumbleServer, on_delete=models.CASCADE, related_name='accounts')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='mumble_registrations')
+    server = models.ForeignKey(MumbleServer, on_delete=models.CASCADE, related_name='mumble_registrations')
     mumble_userid = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -90,13 +90,13 @@ class MumbleUser(models.Model):
 
 
 class MumbleSession(models.Model):
-    server = models.ForeignKey(MumbleServer, on_delete=models.CASCADE, related_name='presence_sessions')
+    server = models.ForeignKey(MumbleServer, on_delete=models.CASCADE, related_name='mumble_sessions')
     mumble_user = models.ForeignKey(
         MumbleUser,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='presence_sessions',
+        related_name='mumble_sessions',
     )
     session_id = models.PositiveIntegerField()
     mumble_userid = models.IntegerField(

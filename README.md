@@ -19,6 +19,9 @@ This is not the target architecture. The copied code is here to preserve the cur
 
 The locked boundary rules are documented in [docs/system-boundary.md](/home/michael/prj/mumble-bg/docs/system-boundary.md).
 
+The bg-owned Django app and model naming choices are documented in
+[docs/bg-state.md](/home/michael/prj/mumble-bg/docs/bg-state.md).
+
 See [docs/extraction-inventory.md](/home/michael/prj/mumble-bg/docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
 
 ## Standalone Deploy Defaults
