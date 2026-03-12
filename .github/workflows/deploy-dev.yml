@@ -119,6 +119,7 @@ jobs:
           ICE='${{ secrets.ICE }}'
           MURMUR_PROBE='${{ secrets.MURMUR_PROBE }}'
           BG_ENGINE=${{ secrets.BG_ENGINE }}
+          MURMUR_CONTROL_PSK='${{ secrets.MURMUR_CONTROL_PSK }}'
           ENVFILE
           chmod 600 "${DEPLOY_ENV_FILE}"
           EOF
@@ -137,6 +138,17 @@ jobs:
           set -a
           source "${DEPLOY_ENV_FILE}"
           set +a
+
+          # Optional suffix trigger: if the configured PSK ends with ":reset",
+          # strip the suffix for runtime and reset DB control-key state.
+          CONTROL_PSK_RESET_REQUESTED=0
+          if [ -n "${MURMUR_CONTROL_PSK:-}" ] && [ "${MURMUR_CONTROL_PSK%:reset}" != "${MURMUR_CONTROL_PSK}" ]; then
+            CONTROL_PSK_RESET_REQUESTED=1
+            MURMUR_CONTROL_PSK="${MURMUR_CONTROL_PSK%:reset}"
+            export MURMUR_CONTROL_PSK
+            esc_psk="$(printf '%s' "${MURMUR_CONTROL_PSK}" | sed "s/[\\/&]/\\\\&/g")"
+            sed -i "s|^MURMUR_CONTROL_PSK=.*$|MURMUR_CONTROL_PSK='${esc_psk}'|" "${DEPLOY_ENV_FILE}"
+          fi
 
           json_field() {
             local env_var="$1"
@@ -197,6 +209,10 @@ jobs:
           esac
 
           "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" migrate --noinput
+
+          if [ "${CONTROL_PSK_RESET_REQUESTED}" -eq 1 ]; then
+            "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" reset_murmur_control_key --yes
+          fi
           EOF
 
       - name: Restart service

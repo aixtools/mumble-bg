@@ -152,6 +152,7 @@ Required runtime/deploy:
 Optional runtime/debug:
 
 - `MURMUR_PROBE`
+- `MURMUR_CONTROL_PSK`
 
 Optional provisioning-only:
 
@@ -269,6 +270,13 @@ Notes:
 - If `MURMUR_PROBE` is absent, normal operation still proceeds over ICE only.
 - `dbengine` and `dbport` may be provided, but bg should discover them when absent.
 
+`MURMUR_CONTROL_PSK` notes:
+
+- when set, this is written to `<env_file>` for bg runtime/auth control
+- if the value ends with `:reset`, deploy strips that suffix for runtime and
+  runs `manage.py reset_murmur_control_key --yes` during deploy
+- this supports one-shot fg/bg handshake reset without exposing reset via web endpoints
+
 ## Appendix: Fill-In Table
 
 **Host Access**
@@ -318,3 +326,4 @@ Optional target JSON fields:
 | Secret | Value |
 | --- | --- |
 | `MURMUR_PROBE` | |
+| `MURMUR_CONTROL_PSK` | |
