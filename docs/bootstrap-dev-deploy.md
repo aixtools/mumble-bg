@@ -113,7 +113,7 @@ See the appendix below for the exact GitHub Actions configuration values to defi
 ## SSH Key Clarification
 
 Deploy target SSH is now provided via one JSON secret keyed by target name
-(default: `DEV_DEPLOY_TARGET`).
+(default: `CUBE_DEV_CUBE`).
 
 That secret is **not** a GitHub deploy key for cloning this repository.
 
@@ -142,7 +142,7 @@ Once the one-time setup exists:
 
 Required runtime/deploy:
 
-- deploy target JSON secret (default secret name: `DEV_DEPLOY_TARGET`)
+- deploy target JSON secret (default secret name: `CUBE_DEV_CUBE`)
 - optional workflow-dispatch input: `deploy_target_name`
 
 - `DATABASES`
@@ -275,7 +275,7 @@ Notes:
 
 | Secret | Value |
 | --- | --- |
-| `DEV_DEPLOY_TARGET` | `{"host":"<deploy_host>","user":"<deploy_user>","key":"-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----"}` |
+| `CUBE_DEV_CUBE` | `{"host":"<deploy_host>","user":"<deploy_user>","key":"-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----"}` |
 
 Target JSON shape:
 
