@@ -8,7 +8,7 @@ class MumbleServer(models.Model):
     address = models.CharField(max_length=255, help_text='User-facing connection string (e.g. mumble.example.com:64738)')
     ice_host = models.CharField(max_length=255, help_text='ICE endpoint hostname')
     ice_port = models.PositiveIntegerField(default=6502, help_text='ICE endpoint port')
-    ice_secret = models.CharField(max_length=255, blank=True, default='', help_text='ICE write secret (leave blank if none)')
+    ice_secret = models.CharField(max_length=255, blank=True, null=True, default=None, help_text='ICE write secret (leave blank if none)')
     virtual_server_id = models.PositiveIntegerField(
         null=True,
         blank=True,

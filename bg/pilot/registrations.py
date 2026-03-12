@@ -142,16 +142,32 @@ def unregister_mumble_registration(mumble_user):
         ) from exc
 
 
-def sync_live_admin_membership(mumble_user):
+def _coerce_session_ids(session_ids):
+    normalized = []
+    for value in (session_ids or []):
+        try:
+            session_id = int(value)
+        except (TypeError, ValueError):
+            raise MumbleSyncError(f'Invalid session_id in payload: {value!r}') from None
+        if session_id > 0:
+            normalized.append(session_id)
+    return normalized
+
+
+def sync_live_admin_membership(mumble_user, *, session_ids=None):
     from bg.state.models import MumbleSession
 
-    session_ids = list(
-        MumbleSession.objects.filter(
-            server=mumble_user.server,
-            mumble_user=mumble_user,
-            is_active=True,
-        ).order_by('session_id').values_list('session_id', flat=True)
-    )
+    if session_ids is None:
+        session_ids = list(
+            MumbleSession.objects.filter(
+                server=mumble_user.server,
+                mumble_user=mumble_user,
+                is_active=True,
+            ).order_by('session_id').values_list('session_id', flat=True)
+        )
+    else:
+        session_ids = _coerce_session_ids(session_ids)
+
     if not session_ids:
         return 0
 

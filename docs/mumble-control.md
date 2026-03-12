@@ -95,7 +95,9 @@ Write/control endpoints:
 - `POST /v1/password-reset`
 - `POST /v1/registrations/sync`
 - `POST /v1/registrations/disable`
+- `POST /v1/admin-membership/sync`
 - `POST /v1/pulse/reconcile`
+- `POST /v1/psk/reset`
 
 Read/status endpoints:
 
@@ -155,6 +157,27 @@ Meaning:
 
 - fg asks bg to disable or unregister one pilot on one server
 
+### `POST /v1/admin-membership/sync`
+
+Request payload:
+
+```json
+{
+  "pkid": 12345,
+  "server_name": "de primary",
+  "admin": true,
+  "session_ids": [11, 12, 13]
+}
+```
+
+Meaning:
+
+- fg asks bg to add/remove admin group membership for all listed active Murmur sessions.
+
+The same `server_name`/`pkid` selector style is used as registration sync.
+
+`synced_sessions` returns how many session IDs were processed.
+
 ### `POST /v1/pulse/reconcile`
 
 Request payload:
@@ -169,6 +192,21 @@ Request payload:
 Meaning:
 
 - fg asks bg to run a one-shot pulse reconciliation pass
+
+### `POST /v1/psk/reset`
+
+Request payload:
+
+```json
+{
+  "server_name": "de primary"
+}
+```
+
+Meaning:
+
+- fg requests that bg clears the stored ICE secret (`ice_secret`) for the selected server so next
+  startup can fall back to environment/default key material.
 
 ### `GET /v1/health`
 
@@ -189,6 +227,7 @@ Returns bg-side state for a pilot, for example:
 
 - registration rows
 - current Murmur mapping
+- `pw_lastchanged` read from the registration row timestamp
 - last auth time
 - last seen / last spoke if available
 
