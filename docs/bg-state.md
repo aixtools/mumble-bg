@@ -45,14 +45,14 @@ names, not extraction leftovers:
 
 - `User -> MumbleUser`: `mumble_registrations`
 - `MumbleServer -> MumbleUser`: `mumble_registrations`
-- `MumbleServer -> MumbleSession`: `mumble_sessions`
-- `MumbleUser -> MumbleSession`: `mumble_sessions`
+- `MumbleServer -> MumbleSession`: `murmur_sessions`
+- `MumbleUser -> MumbleSession`: `murmur_sessions`
 
 Reasoning:
 
 - `mumble_registrations` says what the rows are, instead of generic names like
   `accounts`.
-- `mumble_sessions` says these are live/history session rows, not a vague
+- `murmur_sessions` says these are live/history Murmur session rows, not a vague
   `presence_sessions` bucket.
 - The names match the domain model we actually want to maintain going forward,
   rather than the names inherited from the original extraction.

@@ -90,8 +90,8 @@ class Migration(migrations.Migration):
                 ('is_active', models.BooleanField(default=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
-                ('mumble_user', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='mumble_sessions', to='state.mumbleuser')),
-                ('server', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='mumble_sessions', to='state.mumbleserver')),
+                ('mumble_user', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='murmur_sessions', to='state.mumbleuser')),
+                ('server', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='murmur_sessions', to='state.mumbleserver')),
             ],
             options={
                 'db_table': 'mumble_session',

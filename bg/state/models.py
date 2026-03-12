@@ -90,13 +90,13 @@ class MumbleUser(models.Model):
 
 
 class MumbleSession(models.Model):
-    server = models.ForeignKey(MumbleServer, on_delete=models.CASCADE, related_name='mumble_sessions')
+    server = models.ForeignKey(MumbleServer, on_delete=models.CASCADE, related_name='murmur_sessions')
     mumble_user = models.ForeignKey(
         MumbleUser,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='mumble_sessions',
+        related_name='murmur_sessions',
     )
     session_id = models.PositiveIntegerField()
     mumble_userid = models.IntegerField(
