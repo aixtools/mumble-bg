@@ -107,14 +107,19 @@ See the appendix below for the exact GitHub Actions configuration values to defi
 
 ## SSH Key Clarification
 
-`HETZNER_DEV_SSH_KEY` is **not** a GitHub deploy key for cloning the repository.
+Deploy target SSH is now provided via one JSON secret keyed by target name
+(default: `CUBE_DEV_CUBE`).
 
-It is the private SSH key that the GitHub Actions runner uses to log into the target server.
+That secret is **not** a GitHub deploy key for cloning this repository.
+
+It is the private SSH key + host/user metadata that the GitHub Actions runner
+uses to log into the target server.
 
 That means:
 
-- the matching public key must be present in `/home/cube/.ssh/authorized_keys` for the user named by `HETZNER_DEV_USER`
-- if `HETZNER_DEV_USER=cube`, the key must authorize SSH as `cube`
+- the matching public key must be present in `/home/cube/.ssh/authorized_keys`
+  for the user specified in the target JSON
+- if `user` is `cube`, the key must authorize SSH as `cube`
 
 If you previously stored this key only in `ru-dash/Cube`, that does not automatically make it available to `aixtools/mumble-bg`. GitHub Actions secrets are repo-scoped unless you deliberately use organization secrets.
 
@@ -132,9 +137,8 @@ Once the one-time setup exists:
 
 Required runtime/deploy:
 
-- `HETZNER_DEV_SSH_KEY`
-- `HETZNER_DEV_HOST`
-- `HETZNER_DEV_USER`
+- deploy target JSON secret (default secret name: `CUBE_DEV_CUBE`)
+- optional workflow-dispatch input: `deploy_target_name`
 
 - `DATABASES`
 
@@ -266,9 +270,17 @@ Notes:
 
 | Secret | Value |
 | --- | --- |
-| `HETZNER_DEV_SSH_KEY` | |
-| `HETZNER_DEV_HOST` | |
-| `HETZNER_DEV_USER` | |
+| `CUBE_DEV_CUBE` | `{"host":"cube-dev","user":"cube","key":"-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----"}` |
+
+Target JSON shape:
+
+```json
+{
+  "host": "cube-dev",
+  "user": "cube",
+  "key": "-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----"
+}
+```
 
 **Databases**
 

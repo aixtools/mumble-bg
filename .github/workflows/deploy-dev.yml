@@ -5,24 +5,77 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      deploy_target_name:
+        description: 'Secret name containing deploy target JSON (host/user/key)'
+        required: false
+        default: 'CUBE_DEV_CUBE'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      DEPLOY_TARGET_NAME: ${{ github.event.inputs.deploy_target_name || 'CUBE_DEV_CUBE' }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up SSH
+      - name: Resolve deploy target
+        env:
+          DEPLOY_TARGET_JSON: ${{ secrets[github.event.inputs.deploy_target_name || 'CUBE_DEV_CUBE'] }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
-          echo "${{ secrets.HETZNER_DEV_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.HETZNER_DEV_HOST }}" >> ~/.ssh/known_hosts
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          target_name = os.environ.get("DEPLOY_TARGET_NAME", "").strip()
+          raw = os.environ.get("DEPLOY_TARGET_JSON", "").strip()
+          if not target_name:
+              raise SystemExit("DEPLOY_TARGET_NAME is empty")
+          if not raw:
+              raise SystemExit(
+                  f"Missing deploy target secret payload for {target_name}. "
+                  f"Create a secret named {target_name} with JSON fields host/user/key."
+              )
+
+          payload = json.loads(raw)
+          if not isinstance(payload, dict):
+              raise SystemExit(f"Secret {target_name} must be a JSON object")
+
+          host = str(payload.get("host", "")).strip()
+          user = str(payload.get("user", "")).strip()
+          key = payload.get("key", "")
+
+          if not host:
+              raise SystemExit(f"Secret {target_name} missing required field: host")
+          if not user:
+              raise SystemExit(f"Secret {target_name} missing required field: user")
+          if not isinstance(key, str) or not key.strip():
+              raise SystemExit(f"Secret {target_name} missing required field: key")
+
+          key_path = Path.home() / ".ssh" / "deploy_key"
+          key_path.write_text(key.replace("\\n", "\n").rstrip() + "\n", encoding="utf-8")
+          key_path.chmod(0o600)
+
+          github_env = Path(os.environ["GITHUB_ENV"])
+          with github_env.open("a", encoding="utf-8") as fh:
+              fh.write(f"DEPLOY_TARGET_HOST={host}\n")
+              fh.write(f"DEPLOY_TARGET_USER={user}\n")
+          PY
+
+      - name: Set up SSH known hosts
+        run: |
+          set -euo pipefail
+          ssh-keyscan -H "${DEPLOY_TARGET_HOST}" >> ~/.ssh/known_hosts
 
       - name: Deploy code via rsync
         run: |
+          set -euo pipefail
           rsync -avz --delete \
             --exclude '.git/' \
             --exclude '__pycache__/' \
@@ -31,11 +84,12 @@ jobs:
             --exclude '.env' \
             --exclude '.venv/' \
             -e "ssh -i ~/.ssh/deploy_key" \
-            ./ "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}:/home/cube/mumble-bg/"
+            ./ "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}:/home/cube/mumble-bg/"
 
       - name: Write environment file
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" << 'EOF'
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" << 'EOF'
           mkdir -p /home/cube/.env
           cat > /home/cube/.env/mumble-bg << 'ENVFILE'
           DATABASES='${{ secrets.DATABASES }}'
@@ -48,7 +102,8 @@ jobs:
 
       - name: Install runtime dependencies
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" << 'EOF'
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" << 'EOF'
           set -euo pipefail
           mkdir -p /home/cube/.venv
           if [ ! -d /home/cube/.venv/mumble-bg ]; then
@@ -122,10 +177,12 @@ jobs:
 
       - name: Restart service
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" \
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
             "sudo systemctl restart mumble-bg-auth"
 
       - name: Health check
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" \
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
             "sudo systemctl is-active mumble-bg-auth"
