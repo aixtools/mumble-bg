@@ -34,11 +34,11 @@ That is acceptable as a temporary insecure mode for local dev only.
 
 Current implementation:
 
-- write endpoints accept a control PSK via `X-Mumble-Control-PSK`
+- write endpoints accept a control PSK via `X-Murmur-Control-PSK`
   (or `Authorization: Bearer <psk>`)
 - bg resolves active PSK from:
   - DB key (`control_channel_key.shared_secret`) when set
-  - otherwise `MUMBLE_CONTROL_PSK` env fallback
+  - otherwise `MURMUR_CONTROL_PSK` env fallback
 - if neither exists, bg is in `open` mode (local bootstrap/dev only)
 
 ## Request Shape
@@ -190,7 +190,7 @@ Meaning:
 
 - resets fg/bg control PSK in DB back to `NULL`
 - optional `server_name`/`server_id` also clears that server's `ice_secret`
-- once DB PSK is `NULL`, auth falls back to `MUMBLE_CONTROL_PSK` env (or `open` mode)
+- once DB PSK is `NULL`, auth falls back to `MURMUR_CONTROL_PSK` env (or `open` mode)
 
 ### `POST /v1/control-key/bootstrap`
 

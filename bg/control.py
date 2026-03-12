@@ -14,10 +14,10 @@ from django.views.decorators.http import require_http_methods
 
 from bg.passwords import build_murmur_password_record
 from bg.pilot.registrations import (
-    MumbleSyncError,
+    MurmurSyncError,
     sync_live_admin_membership,
-    sync_mumble_registration,
-    unregister_mumble_registration,
+    sync_murmur_registration,
+    unregister_murmur_registration,
 )
 from bg.state.models import ControlChannelKey, MumbleServer, MumbleSession, MumbleUser
 
@@ -50,7 +50,7 @@ def _new_password(length: int = 16) -> str:
 
 
 def _env_bootstrap_psk() -> str | None:
-    value = os.getenv('MUMBLE_CONTROL_PSK', '').strip()
+    value = os.getenv('MURMUR_CONTROL_PSK', '').strip()
     return value or None
 
 
@@ -73,7 +73,7 @@ def _configured_control_secret() -> tuple[str | None, str]:
 
 
 def _provided_control_secret(request) -> str | None:
-    value = request.headers.get('X-Mumble-Control-PSK') or request.headers.get('X-Control-PSK')
+    value = request.headers.get('X-Murmur-Control-PSK') or request.headers.get('X-Control-PSK')
     if value:
         value = str(value).strip()
         return value or None
@@ -300,11 +300,10 @@ class _PilotRegistrationSnapshot:
             'server_id': self.row.server_id,
             'server_name': self.row.server.name,
             'username': self.row.username,
-            'mumble_userid': self.row.mumble_userid,
             'murmur_userid': self.row.mumble_userid,
             'registration_status': registration_status,
             'is_active': self.row.is_active,
-            'is_mumble_admin': self.row.is_mumble_admin,
+            'is_murmur_admin': self.row.is_mumble_admin,
             'admin_membership_state': 'granted' if self.row.is_mumble_admin else 'revoked',
             'active_session_ids': self.active_session_ids,
             'active_session_count': len(self.active_session_ids),
@@ -396,8 +395,8 @@ def registrations_sync(request):
     password = _read_preferred_password(payload)
 
     try:
-        mumble_userid = sync_mumble_registration(mumble_user, password=password)
-    except MumbleSyncError as exc:
+        murmur_userid = sync_murmur_registration(mumble_user, password=password)
+    except MurmurSyncError as exc:
         return _response(
             request_id,
             'failed',
@@ -405,15 +404,14 @@ def registrations_sync(request):
             code=HTTPStatus.BAD_GATEWAY,
         )
 
-    if mumble_userid is not None and mumble_user.mumble_userid != mumble_userid:
-        mumble_user.mumble_userid = mumble_userid
+    if murmur_userid is not None and mumble_user.mumble_userid != murmur_userid:
+        mumble_user.mumble_userid = murmur_userid
         mumble_user.save(update_fields=['mumble_userid', 'updated_at'])
 
     return _response(
         request_id,
         'completed',
         message='Registration synchronized',
-        mumble_userid=mumble_user.mumble_userid,
         murmur_userid=mumble_user.mumble_userid,
         user_id=mumble_user.user_id,
         server_name=server.name,
@@ -440,8 +438,8 @@ def registrations_disable(request):
         return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
 
     try:
-        disabled = unregister_mumble_registration(mumble_user)
-    except MumbleSyncError as exc:
+        disabled = unregister_murmur_registration(mumble_user)
+    except MurmurSyncError as exc:
         return _response(
             request_id,
             'failed',
@@ -490,7 +488,7 @@ def admin_membership_sync(request):
 
     try:
         synced_sessions = sync_live_admin_membership(mumble_user, session_ids=session_ids)
-    except MumbleSyncError as exc:
+    except MurmurSyncError as exc:
         return _response(
             request_id,
             'failed',
@@ -539,8 +537,8 @@ def password_reset(request):
     mumble_user.kdf_iterations = record['kdf_iterations']
 
     try:
-        mumble_userid = sync_mumble_registration(mumble_user, password=password)
-    except MumbleSyncError as exc:
+        murmur_userid = sync_murmur_registration(mumble_user, password=password)
+    except MurmurSyncError as exc:
         return _response(
             request_id,
             'failed',
@@ -548,8 +546,8 @@ def password_reset(request):
             code=HTTPStatus.BAD_GATEWAY,
         )
 
-    if mumble_userid is not None:
-        mumble_user.mumble_userid = mumble_userid
+    if murmur_userid is not None:
+        mumble_user.mumble_userid = murmur_userid
 
     mumble_user.save(update_fields=['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations', 'mumble_userid', 'updated_at'])
 
@@ -559,8 +557,7 @@ def password_reset(request):
         message='Password set and registration synchronized',
         user_id=mumble_user.user_id,
         server_name=server.name,
-        mumble_userid=mumble_userid,
-        murmur_userid=mumble_userid,
+        murmur_userid=murmur_userid,
         password=password,
         password_generated=requested,
     )

@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 
 from bg.passwords import LEGACY_BCRYPT_SHA256
-from bg.pilot.registrations import MumbleSyncError, sync_mumble_registration
+from bg.pilot.registrations import MurmurSyncError, sync_murmur_registration
 from bg.state.models import MumbleUser
 
 
@@ -11,7 +11,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--server-id', type=int, help='Only sync one mumble-bg MumbleServer row')
         parser.add_argument('--user-id', type=int, help='Only sync one Django user')
-        parser.add_argument('--only-missing-ids', action='store_true', help='Only sync rows missing mumble_userid')
+        parser.add_argument('--only-missing-ids', action='store_true', help='Only sync rows missing murmur_userid')
         parser.add_argument('--dry-run', action='store_true', help='Report intended changes without mutating Murmur or the pilot source')
 
     def handle(self, *args, **options):
@@ -48,8 +48,8 @@ class Command(BaseCommand):
                 continue
 
             try:
-                synced_userid = sync_mumble_registration(mumble_user)
-            except MumbleSyncError as exc:
+                synced_userid = sync_murmur_registration(mumble_user)
+            except MurmurSyncError as exc:
                 failed += 1
                 self.stderr.write(
                     f'FAILED {mumble_user.server.name}: {mumble_user.username} ({mumble_user.user.username}) {exc}'
@@ -61,12 +61,12 @@ class Command(BaseCommand):
                 mumble_user.save(update_fields=['mumble_userid', 'updated_at'])
                 synced += 1
                 self.stdout.write(
-                    f'SYNCED {mumble_user.server.name}: {mumble_user.username} -> mumble_userid={synced_userid}'
+                    f'SYNCED {mumble_user.server.name}: {mumble_user.username} -> murmur_userid={synced_userid}'
                 )
             else:
                 unchanged += 1
                 self.stdout.write(
-                    f'UNCHANGED {mumble_user.server.name}: {mumble_user.username} already mapped to mumble_userid={synced_userid}'
+                    f'UNCHANGED {mumble_user.server.name}: {mumble_user.username} already mapped to murmur_userid={synced_userid}'
                 )
 
         if options['dry_run']:

@@ -1,7 +1,7 @@
 from bg.ice import load_ice_module
 
 
-class MumbleSyncError(RuntimeError):
+class MurmurSyncError(RuntimeError):
     pass
 
 
@@ -9,14 +9,14 @@ def _load_slice():
     try:
         return load_ice_module()
     except RuntimeError as exc:
-        raise MumbleSyncError(str(exc)) from exc
+        raise MurmurSyncError(str(exc)) from exc
 
 
 def _open_target_server(server_config):
     try:
         import Ice
     except ImportError as exc:
-        raise MumbleSyncError('ZeroC ICE is not installed in this environment') from exc
+        raise MurmurSyncError('ZeroC ICE is not installed in this environment') from exc
 
     M = _load_slice()
     communicator = Ice.initialize(['--Ice.ImplicitContext=Shared', '--Ice.Default.EncodingVersion=1.0'])
@@ -29,12 +29,12 @@ def _open_target_server(server_config):
         )
         meta = M.MetaPrx.checkedCast(proxy)
         if not meta:
-            raise MumbleSyncError(
+            raise MurmurSyncError(
                 f'Failed to connect to ICE on {server_config.ice_host}:{server_config.ice_port}'
             )
         booted_servers = meta.getBootedServers()
         if not booted_servers:
-            raise MumbleSyncError(
+            raise MurmurSyncError(
                 f'No booted Murmur servers found on {server_config.ice_host}:{server_config.ice_port}'
             )
 
@@ -45,14 +45,14 @@ def _open_target_server(server_config):
                     target = srv
                     break
             if target is None:
-                raise MumbleSyncError(
+                raise MurmurSyncError(
                     f'Configured virtual server ID {server_config.virtual_server_id} was not found on '
                     f'{server_config.ice_host}:{server_config.ice_port}'
                 )
         elif len(booted_servers) == 1:
             target = booted_servers[0]
         else:
-            raise MumbleSyncError(
+            raise MurmurSyncError(
                 'Multiple Murmur virtual servers are booted on this ICE endpoint; configure virtual_server_id in bg inventory'
             )
 
@@ -90,7 +90,7 @@ def _find_existing_userid(server_proxy, username, preferred_userid=None):
     return None
 
 
-def sync_mumble_registration(mumble_user, password=None):
+def sync_murmur_registration(mumble_user, password=None):
     try:
         communicator, M, server_proxy = _open_target_server(mumble_user.server)
         try:
@@ -103,7 +103,7 @@ def sync_mumble_registration(mumble_user, password=None):
             if target_userid is None:
                 target_userid = server_proxy.registerUser(info)
                 if target_userid < 0:
-                    raise MumbleSyncError(
+                    raise MurmurSyncError(
                         f'Failed to register Murmur user {mumble_user.username} on {mumble_user.server.name}'
                     )
             else:
@@ -111,15 +111,15 @@ def sync_mumble_registration(mumble_user, password=None):
             return int(target_userid)
         finally:
             communicator.destroy()
-    except MumbleSyncError:
+    except MurmurSyncError:
         raise
     except Exception as exc:
-        raise MumbleSyncError(
+        raise MurmurSyncError(
             f'Failed to sync Murmur registration for {mumble_user.username} on {mumble_user.server.name}: {exc}'
         ) from exc
 
 
-def unregister_mumble_registration(mumble_user):
+def unregister_murmur_registration(mumble_user):
     try:
         communicator, _, server_proxy = _open_target_server(mumble_user.server)
         try:
@@ -134,10 +134,10 @@ def unregister_mumble_registration(mumble_user):
             return True
         finally:
             communicator.destroy()
-    except MumbleSyncError:
+    except MurmurSyncError:
         raise
     except Exception as exc:
-        raise MumbleSyncError(
+        raise MurmurSyncError(
             f'Failed to unregister Murmur registration for {mumble_user.username} on {mumble_user.server.name}: {exc}'
         ) from exc
 
@@ -148,7 +148,7 @@ def _coerce_session_ids(session_ids):
         try:
             session_id = int(value)
         except (TypeError, ValueError):
-            raise MumbleSyncError(f'Invalid session_id in payload: {value!r}') from None
+            raise MurmurSyncError(f'Invalid session_id in payload: {value!r}') from None
         if session_id > 0:
             normalized.append(session_id)
     return normalized
@@ -182,11 +182,11 @@ def sync_live_admin_membership(mumble_user, *, session_ids=None):
             return len(session_ids)
         finally:
             communicator.destroy()
-    except MumbleSyncError:
+    except MurmurSyncError:
         raise
     except Exception as exc:
         action = 'grant' if mumble_user.is_mumble_admin else 'revoke'
-        raise MumbleSyncError(
+        raise MurmurSyncError(
             f'Failed to {action} live Murmur admin membership for {mumble_user.username} '
             f'on {mumble_user.server.name}: {exc}'
         ) from exc
