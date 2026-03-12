@@ -26,8 +26,8 @@ class MumbleServer(models.Model):
 
 
 class MumbleUser(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='mumble_registrations')
-    server = models.ForeignKey(MumbleServer, on_delete=models.CASCADE, related_name='mumble_registrations')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='murmur_registrations')
+    server = models.ForeignKey(MumbleServer, on_delete=models.CASCADE, related_name='murmur_registrations')
     mumble_userid = models.PositiveIntegerField(
         null=True,
         blank=True,

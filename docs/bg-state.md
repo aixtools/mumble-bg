@@ -43,14 +43,14 @@ commands through installed apps.
 The reverse relation names in `bg/state/models.py` are intentionally domain
 names, not extraction leftovers:
 
-- `User -> MumbleUser`: `mumble_registrations`
-- `MumbleServer -> MumbleUser`: `mumble_registrations`
+- `User -> MumbleUser`: `murmur_registrations`
+- `MumbleServer -> MumbleUser`: `murmur_registrations`
 - `MumbleServer -> MumbleSession`: `murmur_sessions`
 - `MumbleUser -> MumbleSession`: `murmur_sessions`
 
 Reasoning:
 
-- `mumble_registrations` says what the rows are, instead of generic names like
+- `murmur_registrations` says what the rows are, instead of generic names like
   `accounts`.
 - `murmur_sessions` says these are live/history Murmur session rows, not a vague
   `presence_sessions` bucket.

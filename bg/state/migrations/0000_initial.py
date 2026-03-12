@@ -53,8 +53,8 @@ class Migration(migrations.Migration):
                 ('is_active', models.BooleanField(default=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
-                ('server', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='mumble_registrations', to='state.mumbleserver')),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='mumble_registrations', to=settings.AUTH_USER_MODEL)),
+                ('server', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='murmur_registrations', to='state.mumbleserver')),
+                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='murmur_registrations', to=settings.AUTH_USER_MODEL)),
             ],
             options={
                 'db_table': 'mumble_user',
