@@ -157,7 +157,7 @@ jobs:
           ICE='${{ secrets.ICE }}'
           MURMUR_PROBE='${{ secrets.MURMUR_PROBE }}'
           BG_ENGINE=${{ secrets.BG_ENGINE }}
-          BG_RESET_DB_ON_DEPLOY=${{ secrets.BG_RESET_DB_ON_DEPLOY }}
+          BG_RESET_DB_ON_DEPLOY=${{ secrets.BG_RESET_DB_ON_DEPLOY || vars.BG_RESET_DB_ON_DEPLOY }}
           MURMUR_CONTROL_PSK='${{ secrets.MURMUR_CONTROL_PSK }}'
           ENVFILE
           chmod 600 "${DEPLOY_ENV_FILE}"
