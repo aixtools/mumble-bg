@@ -3,6 +3,7 @@
 import json
 import os
 import secrets
+from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any
 
@@ -247,39 +248,120 @@ def _read_new_control_secret(payload: dict[str, Any]) -> str:
     raise _BadRequest('new_control_psk is required')
 
 
+class _ServerResolver:
+    """Resolve server selectors from control payloads."""
+
+    def resolve(self, payload: dict[str, Any]) -> MumbleServer:
+        name = payload.get('server_name')
+        server_id = payload.get('server_id')
+
+        if not name and not server_id:
+            raise _BadRequest('Either server_name or server_id is required')
+        if name and server_id:
+            raise _BadRequest('Use either server_name or server_id, not both')
+
+        if name:
+            if not isinstance(name, str) or not name.strip():
+                raise _BadRequest('server_name must be a non-empty string')
+            servers = list(MumbleServer.objects.filter(name=name, is_active=True))
+        else:
+            server_id_value = _coerce_int(server_id, field='server_id')
+            servers = list(MumbleServer.objects.filter(pk=server_id_value, is_active=True))
+
+        if not servers:
+            raise _NotFound('Server not found')
+        if len(servers) > 1:
+            raise _BadRequest('Multiple matching servers found; use server_id')
+        return servers[0]
+
+
+class _MumbleUserResolver:
+    """Resolve pilot registration rows scoped to a target server."""
+
+    def resolve(self, *, server: MumbleServer, payload: dict[str, Any]) -> MumbleUser:
+        pkid = payload.get('pkid')
+        if pkid is None:
+            raise _BadRequest('pkid is required')
+        pkid_value = _coerce_int(pkid, field='pkid')
+        mumble_user = MumbleUser.objects.filter(user_id=pkid_value, server=server, is_active=True).first()
+        if not mumble_user:
+            raise _NotFound('Mumble registration not found')
+        return mumble_user
+
+
+@dataclass(frozen=True)
+class _PilotRegistrationSnapshot:
+    row: MumbleUser
+    active_session_ids: list[int]
+
+    def as_dict(self) -> dict[str, Any]:
+        registration_status = 'active' if self.row.mumble_userid else 'pending'
+        return {
+            'server_id': self.row.server_id,
+            'server_name': self.row.server.name,
+            'username': self.row.username,
+            'mumble_userid': self.row.mumble_userid,
+            'murmur_userid': self.row.mumble_userid,
+            'registration_status': registration_status,
+            'is_active': self.row.is_active,
+            'is_mumble_admin': self.row.is_mumble_admin,
+            'admin_membership_state': 'granted' if self.row.is_mumble_admin else 'revoked',
+            'active_session_ids': self.active_session_ids,
+            'active_session_count': len(self.active_session_ids),
+            'pw_lastchanged': self.row.updated_at.isoformat() if self.row.updated_at else None,
+            'last_authenticated': self.row.last_authenticated.isoformat() if self.row.last_authenticated else None,
+            'last_connected': self.row.last_connected.isoformat() if self.row.last_connected else None,
+            'last_seen': self.row.last_seen.isoformat() if self.row.last_seen else None,
+        }
+
+
+class _PilotProbeService:
+    """Build read-only probe payloads for pilot registration status."""
+
+    @staticmethod
+    def _active_session_ids(row: MumbleUser) -> list[int]:
+        return list(
+            MumbleSession.objects.filter(
+                server_id=row.server_id,
+                mumble_user=row,
+                is_active=True,
+            ).order_by('session_id').values_list('session_id', flat=True)
+        )
+
+    def pilot_payload(self, pkid: int) -> dict[str, Any] | None:
+        rows = list(
+            MumbleUser.objects.filter(user_id=pkid, is_active=True)
+            .select_related('server')
+            .order_by('server__display_order', 'server__name')
+        )
+        if not rows:
+            return None
+
+        snapshots = [
+            _PilotRegistrationSnapshot(row=row, active_session_ids=self._active_session_ids(row))
+            for row in rows
+        ]
+        return {
+            'status': 'completed',
+            'pkid': pkid,
+            'request_id': now().strftime('%Y%m%dT%H%M%SZ'),
+            'registrations': [snapshot.as_dict() for snapshot in snapshots],
+            'registration_count': len(snapshots),
+            'timestamp': now().isoformat(),
+        }
+
+
+_SERVER_RESOLVER = _ServerResolver()
+_MUMBLE_USER_RESOLVER = _MumbleUserResolver()
+_PILOT_PROBE_SERVICE = _PilotProbeService()
+
+
 def _resolve_server(payload: dict[str, Any]) -> MumbleServer:
-    name = payload.get('server_name')
-    server_id = payload.get('server_id')
-
-    if not name and not server_id:
-        raise _BadRequest('Either server_name or server_id is required')
-    if name and server_id:
-        raise _BadRequest('Use either server_name or server_id, not both')
-
-    if name:
-        if not isinstance(name, str) or not name.strip():
-            raise _BadRequest('server_name must be a non-empty string')
-        servers = list(MumbleServer.objects.filter(name=name, is_active=True))
-    else:
-        server_id_value = _coerce_int(server_id, field='server_id')
-        servers = list(MumbleServer.objects.filter(pk=server_id_value, is_active=True))
-
-    if not servers:
-        raise _NotFound('Server not found')
-    if len(servers) > 1:
-        raise _BadRequest('Multiple matching servers found; use server_id')
-    return servers[0]
+    return _SERVER_RESOLVER.resolve(payload)
 
 
 def _resolve_mumble_user(*, server: MumbleServer, payload: dict[str, Any]) -> MumbleUser:
-    pkid = payload.get('pkid')
-    if pkid is None:
-        raise _BadRequest('pkid is required')
-    pkid_value = _coerce_int(pkid, field='pkid')
-    mumble_user = MumbleUser.objects.filter(user_id=pkid_value, server=server, is_active=True).first()
-    if not mumble_user:
-        raise _NotFound('Mumble registration not found')
-    return mumble_user
+    return _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
 
 
 def _sync_context(request):
@@ -643,53 +725,10 @@ def servers(request):
 
 @require_http_methods(['GET'])
 def pilot(request, pkid: int):
-    rows = MumbleUser.objects.filter(user_id=pkid, is_active=True).select_related('server').order_by(
-        'server__display_order',
-        'server__name',
-    )
-    if not rows:
+    payload = _PILOT_PROBE_SERVICE.pilot_payload(pkid)
+    if payload is None:
         return _response('unknown', 'not_found', message='No registration records found', code=HTTPStatus.NOT_FOUND)
-
-    registrations = []
-    for row in rows:
-        active_session_ids = list(
-            MumbleSession.objects.filter(
-                server_id=row.server_id,
-                mumble_user=row,
-                is_active=True,
-            ).order_by('session_id').values_list('session_id', flat=True)
-        )
-        registration_status = 'active' if row.mumble_userid else 'pending'
-        registrations.append(
-            {
-                'server_id': row.server_id,
-                'server_name': row.server.name,
-                'username': row.username,
-                'mumble_userid': row.mumble_userid,
-                'murmur_userid': row.mumble_userid,
-                'registration_status': registration_status,
-                'is_active': row.is_active,
-                'is_mumble_admin': row.is_mumble_admin,
-                'admin_membership_state': 'granted' if row.is_mumble_admin else 'revoked',
-                'active_session_ids': active_session_ids,
-                'active_session_count': len(active_session_ids),
-                'pw_lastchanged': row.updated_at.isoformat() if row.updated_at else None,
-                'last_authenticated': row.last_authenticated.isoformat() if row.last_authenticated else None,
-                'last_connected': row.last_connected.isoformat() if row.last_connected else None,
-                'last_seen': row.last_seen.isoformat() if row.last_seen else None,
-            }
-        )
-
-    return JsonResponse(
-        {
-            'status': 'completed',
-            'pkid': pkid,
-            'request_id': now().strftime('%Y%m%dT%H%M%SZ'),
-            'registrations': registrations,
-            'registration_count': len(registrations),
-            'timestamp': now().isoformat(),
-        }
-    )
+    return JsonResponse(payload)
 
 
 @csrf_exempt
