@@ -356,14 +356,6 @@ _MUMBLE_USER_RESOLVER = _MumbleUserResolver()
 _PILOT_PROBE_SERVICE = _PilotProbeService()
 
 
-def _resolve_server(payload: dict[str, Any]) -> MumbleServer:
-    return _SERVER_RESOLVER.resolve(payload)
-
-
-def _resolve_mumble_user(*, server: MumbleServer, payload: dict[str, Any]) -> MumbleUser:
-    return _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
-
-
 def _sync_context(request):
     envelope = _load_json_payload(request)
     outer_payload, payload = _extract_payload_envelope(envelope)
@@ -380,8 +372,8 @@ def registrations_sync(request):
         auth_source = _require_control_auth(request)
         payload, request_id, requested_by, _ = _sync_context(request)
         _require_requested_by(requested_by)
-        server = _resolve_server(payload)
-        mumble_user = _resolve_mumble_user(server=server, payload=payload)
+        server = _SERVER_RESOLVER.resolve(payload)
+        mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
         del auth_source  # validated, reserved for future audit logging
     except _BadRequest as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
@@ -435,8 +427,8 @@ def registrations_disable(request):
         auth_source = _require_control_auth(request)
         payload, request_id, requested_by, _ = _sync_context(request)
         _require_requested_by(requested_by)
-        server = _resolve_server(payload)
-        mumble_user = _resolve_mumble_user(server=server, payload=payload)
+        server = _SERVER_RESOLVER.resolve(payload)
+        mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
         del auth_source  # validated, reserved for future audit logging
     except _BadRequest as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
@@ -478,8 +470,8 @@ def admin_membership_sync(request):
         auth_source = _require_control_auth(request)
         payload, request_id, requested_by, _ = _sync_context(request)
         _require_requested_by(requested_by)
-        server = _resolve_server(payload)
-        mumble_user = _resolve_mumble_user(server=server, payload=payload)
+        server = _SERVER_RESOLVER.resolve(payload)
+        mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
         admin = _coerce_bool(payload.get('admin'), field='admin')
         session_ids = _coerce_session_ids(payload)
         del auth_source  # validated, reserved for future audit logging
@@ -524,8 +516,8 @@ def password_reset(request):
         auth_source = _require_control_auth(request)
         payload, request_id, requested_by, _ = _sync_context(request)
         _require_requested_by(requested_by)
-        server = _resolve_server(payload)
-        mumble_user = _resolve_mumble_user(server=server, payload=payload)
+        server = _SERVER_RESOLVER.resolve(payload)
+        mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
         desired_password = _read_preferred_password(payload)
         del auth_source  # validated, reserved for future audit logging
     except _BadRequest as exc:
@@ -763,7 +755,7 @@ def psk_reset(request):
     server = None
     if payload.get('server_name') is not None or payload.get('server_id') is not None:
         try:
-            server = _resolve_server(payload)
+            server = _SERVER_RESOLVER.resolve(payload)
         except _BadRequest as exc:
             return _response(request_id, 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
         except _NotFound as exc:
