@@ -7,15 +7,15 @@ on:
   workflow_dispatch:
     inputs:
       deploy_target_name:
-        description: 'Secret name containing deploy target JSON (host/user/key)'
+        description: 'Secret name containing deploy target JSON'
         required: false
-        default: 'CUBE_DEV_CUBE'
+        default: 'DEV_DEPLOY_TARGET'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      DEPLOY_TARGET_NAME: ${{ github.event.inputs.deploy_target_name || 'CUBE_DEV_CUBE' }}
+      DEPLOY_TARGET_NAME: ${{ github.event.inputs.deploy_target_name || 'DEV_DEPLOY_TARGET' }}
 
     steps:
       - name: Checkout code
@@ -23,7 +23,7 @@ jobs:
 
       - name: Resolve deploy target
         env:
-          DEPLOY_TARGET_JSON: ${{ secrets[github.event.inputs.deploy_target_name || 'CUBE_DEV_CUBE'] }}
+          DEPLOY_TARGET_JSON: ${{ secrets[github.event.inputs.deploy_target_name || 'DEV_DEPLOY_TARGET'] }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -50,6 +50,11 @@ jobs:
           host = str(payload.get("host", "")).strip()
           user = str(payload.get("user", "")).strip()
           key = payload.get("key", "")
+          home_dir = str(payload.get("home_dir", "")).strip()
+          project_dir = str(payload.get("project_dir", "")).strip()
+          env_file = str(payload.get("env_file", "")).strip()
+          venv_dir = str(payload.get("venv_dir", "")).strip()
+          service_name = str(payload.get("service_name", "")).strip()
 
           if not host:
               raise SystemExit(f"Secret {target_name} missing required field: host")
@@ -57,6 +62,17 @@ jobs:
               raise SystemExit(f"Secret {target_name} missing required field: user")
           if not isinstance(key, str) or not key.strip():
               raise SystemExit(f"Secret {target_name} missing required field: key")
+
+          if not home_dir:
+              home_dir = f"/home/{user}"
+          if not project_dir:
+              project_dir = f"{home_dir}/mumble-bg"
+          if not env_file:
+              env_file = f"{home_dir}/.env/mumble-bg"
+          if not venv_dir:
+              venv_dir = f"{home_dir}/.venv/mumble-bg"
+          if not service_name:
+              service_name = "mumble-bg-auth"
 
           key_path = Path.home() / ".ssh" / "deploy_key"
           key_path.write_text(key.replace("\\n", "\n").rstrip() + "\n", encoding="utf-8")
@@ -66,6 +82,11 @@ jobs:
           with github_env.open("a", encoding="utf-8") as fh:
               fh.write(f"DEPLOY_TARGET_HOST={host}\n")
               fh.write(f"DEPLOY_TARGET_USER={user}\n")
+              fh.write(f"DEPLOY_HOME_DIR={home_dir}\n")
+              fh.write(f"DEPLOY_PROJECT_DIR={project_dir}\n")
+              fh.write(f"DEPLOY_ENV_FILE={env_file}\n")
+              fh.write(f"DEPLOY_VENV_DIR={venv_dir}\n")
+              fh.write(f"DEPLOY_SERVICE_NAME={service_name}\n")
           PY
 
       - name: Set up SSH known hosts
@@ -84,34 +105,37 @@ jobs:
             --exclude '.env' \
             --exclude '.venv/' \
             -e "ssh -i ~/.ssh/deploy_key" \
-            ./ "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}:/home/cube/mumble-bg/"
+            ./ "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}:${DEPLOY_PROJECT_DIR%/}/"
 
       - name: Write environment file
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" << 'EOF'
-          mkdir -p /home/cube/.env
-          cat > /home/cube/.env/mumble-bg << 'ENVFILE'
+          DEPLOY_ENV_DIR="$(dirname "${DEPLOY_ENV_FILE}")"
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+            "DEPLOY_ENV_DIR='${DEPLOY_ENV_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' bash -s" <<'EOF'
+          mkdir -p "${DEPLOY_ENV_DIR}"
+          cat > "${DEPLOY_ENV_FILE}" <<'ENVFILE'
           DATABASES='${{ secrets.DATABASES }}'
           ICE='${{ secrets.ICE }}'
           MURMUR_PROBE='${{ secrets.MURMUR_PROBE }}'
           BG_ENGINE=${{ secrets.BG_ENGINE }}
           ENVFILE
-          chmod 600 /home/cube/.env/mumble-bg
+          chmod 600 "${DEPLOY_ENV_FILE}"
           EOF
 
       - name: Install runtime dependencies
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" << 'EOF'
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+            "DEPLOY_VENV_DIR='${DEPLOY_VENV_DIR}' DEPLOY_PROJECT_DIR='${DEPLOY_PROJECT_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' bash -s" <<'EOF'
           set -euo pipefail
-          mkdir -p /home/cube/.venv
-          if [ ! -d /home/cube/.venv/mumble-bg ]; then
-            python3 -m venv /home/cube/.venv/mumble-bg
+          mkdir -p "$(dirname "${DEPLOY_VENV_DIR}")"
+          if [ ! -d "${DEPLOY_VENV_DIR}" ]; then
+            python3 -m venv "${DEPLOY_VENV_DIR}"
           fi
-          /home/cube/.venv/mumble-bg/bin/pip install --quiet -r /home/cube/mumble-bg/requirements.txt
+          "${DEPLOY_VENV_DIR}/bin/pip" install --quiet -r "${DEPLOY_PROJECT_DIR}/requirements.txt"
           set -a
-          source /home/cube/.env/mumble-bg
+          source "${DEPLOY_ENV_FILE}"
           set +a
 
           json_field() {
@@ -155,14 +179,14 @@ jobs:
           case "${BG_DATABASE_HOST}" in
             127.0.0.1|localhost)
               if [ "$(id -u)" -eq 0 ]; then
-                bash /home/cube/mumble-bg/deploy/create-db.sh \
+                bash "${DEPLOY_PROJECT_DIR}/deploy/create-db.sh" \
                   --engine "${BG_ENGINE:-postgres}" \
                   --user "${BG_DATABASE_USER}" \
                   --db "${BG_DATABASE_NAME}" \
                   --host "${BG_DATABASE_HOST}" \
                   --pw "${BG_DATABASE_PASSWORD}"
               else
-                sudo -n bash /home/cube/mumble-bg/deploy/create-db.sh \
+                sudo -n bash "${DEPLOY_PROJECT_DIR}/deploy/create-db.sh" \
                   --engine "${BG_ENGINE:-postgres}" \
                   --user "${BG_DATABASE_USER}" \
                   --db "${BG_DATABASE_NAME}" \
@@ -172,17 +196,17 @@ jobs:
               ;;
           esac
 
-          /home/cube/.venv/mumble-bg/bin/python /home/cube/mumble-bg/manage.py migrate --noinput
+          "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" migrate --noinput
           EOF
 
       - name: Restart service
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
-            "sudo systemctl restart mumble-bg-auth"
+            "sudo systemctl restart '${DEPLOY_SERVICE_NAME}'"
 
       - name: Health check
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
-            "sudo systemctl is-active mumble-bg-auth"
+            "sudo systemctl is-active '${DEPLOY_SERVICE_NAME}'"
