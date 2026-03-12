@@ -182,22 +182,9 @@ Use the CLI command instead:
 python manage.py reset_murmur_control_key --yes
 ```
 
-Optional server-specific ICE secret reset:
-
-```bash
-python manage.py reset_murmur_control_key --yes --server-id 1
-```
-
-or
-
-```bash
-python manage.py reset_murmur_control_key --yes --server-name "de primary"
-```
-
 Meaning:
 
 - resets fg/bg control PSK in DB back to `NULL`
-- optional `--server-id`/`--server-name` also clears that server's `ice_secret`
 - once DB PSK is `NULL`, auth falls back to `MURMUR_CONTROL_PSK` env (or `open` mode)
 
 ### `POST /v1/control-key/bootstrap`
