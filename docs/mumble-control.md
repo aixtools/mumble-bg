@@ -118,6 +118,7 @@ Meaning:
 
 - fg requests that bg generate/reset local auth state for one pilot
 - bg performs the mutation in its own database and returns status
+- when fg supplies a password, bg accepts printable 7-bit ASCII only and rejects `'`, `"`, `` ` ``, and `\`
 
 ### `POST /v1/registrations/sync`
 
