@@ -21,7 +21,7 @@ class Migration(migrations.Migration):
                 ('address', models.CharField(help_text='User-facing connection string (e.g. mumble.example.com:64738)', max_length=255)),
                 ('ice_host', models.CharField(help_text='ICE endpoint hostname', max_length=255)),
                 ('ice_port', models.PositiveIntegerField(default=6502, help_text='ICE endpoint port')),
-                ('ice_secret', models.CharField(blank=True, default='', help_text='ICE write secret (leave blank if none)', max_length=255)),
+                ('ice_secret', models.CharField(blank=True, default=None, help_text='ICE write secret (leave blank if none)', max_length=255, null=True)),
                 ('virtual_server_id', models.PositiveIntegerField(blank=True, help_text='Target Murmur virtual server ID on this ICE endpoint. Leave blank only if the endpoint hosts a single booted server.', null=True)),
                 ('is_active', models.BooleanField(default=True)),
                 ('display_order', models.PositiveIntegerField(default=0, help_text='Ordering on the profile page (lower = first)')),
@@ -104,6 +104,20 @@ class Migration(migrations.Migration):
                     models.Index(fields=['server', 'is_active'], name='mumble_sess_server__0310c1_idx'),
                     models.Index(fields=['mumble_user', 'is_active'], name='mumble_sess_mumble__5be72e_idx'),
                 ],
+            },
+        ),
+        migrations.CreateModel(
+            name='ControlChannelKey',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('name', models.CharField(default='fg_bg', max_length=64, unique=True)),
+                ('shared_secret', models.CharField(blank=True, default=None, help_text='FG/BG control channel PSK. If NULL, control falls back to env bootstrap secret.', max_length=255, null=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+            ],
+            options={
+                'db_table': 'control_channel_key',
+                'ordering': ['name'],
             },
         ),
         migrations.AddConstraint(

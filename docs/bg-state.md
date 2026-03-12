@@ -35,6 +35,13 @@ Reasoning:
 - `bg/state/migrations/`
 - `bg/state/management/commands/`
 
+State tables currently include:
+
+- `mumble_server`
+- `mumble_user`
+- `mumble_session`
+- `control_channel_key` (fg/bg control PSK lifecycle state)
+
 Those command modules stay here only because Django discovers `manage.py`
 commands through installed apps.
 

@@ -8,7 +8,7 @@ class MumbleServer(models.Model):
     address = models.CharField(max_length=255, help_text='User-facing connection string (e.g. mumble.example.com:64738)')
     ice_host = models.CharField(max_length=255, help_text='ICE endpoint hostname')
     ice_port = models.PositiveIntegerField(default=6502, help_text='ICE endpoint port')
-    ice_secret = models.CharField(max_length=255, blank=True, default='', help_text='ICE write secret (leave blank if none)')
+    ice_secret = models.CharField(max_length=255, blank=True, null=True, default=None, help_text='ICE write secret (leave blank if none)')
     virtual_server_id = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -28,6 +28,21 @@ class MumbleServer(models.Model):
 class MumbleUser(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='murmur_registrations')
     server = models.ForeignKey(MumbleServer, on_delete=models.CASCADE, related_name='murmur_registrations')
+    evepilot_id = models.BigIntegerField(
+        null=True,
+        blank=True,
+        help_text='Pilot character ID tracked in the FG/BG contract.',
+    )
+    corporation_id = models.BigIntegerField(
+        null=True,
+        blank=True,
+        help_text='Pilot corporation ID tracked in the FG/BG contract.',
+    )
+    alliance_id = models.BigIntegerField(
+        null=True,
+        blank=True,
+        help_text='Pilot alliance ID tracked in the FG/BG contract.',
+    )
     mumble_userid = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -148,3 +163,23 @@ class MumbleSession(models.Model):
 
     def __str__(self):
         return f'{self.server.name}:{self.username}#{self.session_id}'
+
+
+class ControlChannelKey(models.Model):
+    name = models.CharField(max_length=64, unique=True, default='fg_bg')
+    shared_secret = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        default=None,
+        help_text='FG/BG control channel PSK. If NULL, control falls back to env bootstrap secret.',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'control_channel_key'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name

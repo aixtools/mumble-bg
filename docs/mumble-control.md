@@ -28,27 +28,18 @@ If a Unix socket is not practical at first, use:
 
 - HTTP + JSON on `127.0.0.1`
 
-That is acceptable as a temporary insecure mode as long as the contract stays
-the same and authentication can be added later.
+That is acceptable as a temporary insecure mode for local dev only.
 
 ## Security Phases
 
-Phase 1:
+Current implementation:
 
-- Unix socket only, protected by filesystem permissions
-- or `127.0.0.1` only, with no auth yet
-
-Phase 2:
-
-- add a shared secret or HMAC signature header
-
-Phase 3:
-
-- if fg and bg become remote, keep the same API and move to HTTPS with mTLS or
-  signed service credentials
-
-The important rule is that the transport may evolve, but the command contract
-should stay stable.
+- write endpoints accept a control PSK via `X-Murmur-Control-PSK`
+  (or `Authorization: Bearer <psk>`)
+- bg resolves active PSK from:
+  - DB key (`control_channel_key.shared_secret`) when set
+  - otherwise `MURMUR_CONTROL_PSK` env fallback
+- if neither exists, bg is in `open` mode (local bootstrap/dev only)
 
 ## Request Shape
 
@@ -56,6 +47,7 @@ Every write/control request should carry:
 
 - `request_id`
 - `requested_by`
+- `is_super` (required for control-key lifecycle endpoints)
 - `timestamp`
 - command-specific payload
 
@@ -94,14 +86,18 @@ Write/control endpoints:
 
 - `POST /v1/password-reset`
 - `POST /v1/registrations/sync`
+- `POST /v1/registrations/contract-sync`
 - `POST /v1/registrations/disable`
-- `POST /v1/pulse/reconcile`
+- `POST /v1/admin-membership/sync`
+- `POST /v1/control-key/bootstrap`
+- `POST /v1/control-key/rotate`
 
 Read/status endpoints:
 
 - `GET /v1/health`
 - `GET /v1/servers`
 - `GET /v1/pilots/{pkid}`
+- `GET /v1/control-key/status`
 
 These are intentionally narrow. Add endpoints only when fg has a real caller.
 
@@ -122,6 +118,7 @@ Meaning:
 
 - fg requests that bg generate/reset local auth state for one pilot
 - bg performs the mutation in its own database and returns status
+- when fg supplies a password, bg accepts printable 7-bit ASCII only and rejects `'`, `"`, `` ` ``, and `\`
 
 ### `POST /v1/registrations/sync`
 
@@ -140,6 +137,29 @@ Meaning:
 - fg asks bg to reconcile one pilot registration into Murmur
 - bg decides create/adopt/update behavior
 
+### `POST /v1/registrations/contract-sync`
+
+Request payload:
+
+```json
+{
+  "pkid": 12345,
+  "server_name": "de primary",
+  "evepilot_id": 90000001,
+  "corporation_id": 98000001,
+  "alliance_id": 99000001,
+  "kdf_iterations": 120000,
+  "is_super": true
+}
+```
+
+Meaning:
+
+- fg requests bg to persist registration contract metadata for one pilot/server row
+- endpoint is superuser-gated (`is_super` required and must be true)
+- accepts any subset of these fields: `evepilot_id`, `corporation_id`, `alliance_id`, `kdf_iterations`
+- probe reads (`GET /v1/pilots/{pkid}`) are the source of truth for verification after updates
+
 ### `POST /v1/registrations/disable`
 
 Request payload:
@@ -155,20 +175,71 @@ Meaning:
 
 - fg asks bg to disable or unregister one pilot on one server
 
-### `POST /v1/pulse/reconcile`
+### `POST /v1/admin-membership/sync`
 
 Request payload:
 
 ```json
 {
+  "pkid": 12345,
   "server_name": "de primary",
-  "once": true
+  "admin": true,
+  "session_ids": [11, 12, 13]
 }
 ```
 
 Meaning:
 
-- fg asks bg to run a one-shot pulse reconciliation pass
+- fg asks bg to add/remove admin group membership for all listed active Murmur sessions.
+
+The same `server_name`/`pkid` selector style is used as registration sync.
+
+`synced_sessions` returns how many session IDs were processed.
+
+### CLI-only control-key reset
+
+There is intentionally no HTTP endpoint for control-key reset.
+
+Use the CLI command instead:
+
+```bash
+python manage.py reset_murmur_control_key --yes
+```
+
+Meaning:
+
+- resets fg/bg control PSK in DB back to `NULL`
+- once DB PSK is `NULL`, auth falls back to `MURMUR_CONTROL_PSK` env (or `open` mode)
+
+### `POST /v1/control-key/bootstrap`
+
+Request payload:
+
+```json
+{
+  "new_control_psk": "at-least-16-characters",
+  "is_super": true
+}
+```
+
+Meaning:
+
+- creates first DB control PSK when none exists
+
+### `POST /v1/control-key/rotate`
+
+Request payload:
+
+```json
+{
+  "new_control_psk": "at-least-16-characters",
+  "is_super": true
+}
+```
+
+Meaning:
+
+- rotates the DB control PSK to a new value
 
 ### `GET /v1/health`
 
@@ -176,8 +247,7 @@ Returns:
 
 - process health
 - bg DB reachability
-- pilot DB reachability
-- optional probe availability
+- control mode (`db`, `env`, `open`)
 
 ### `GET /v1/servers`
 
@@ -189,8 +259,22 @@ Returns bg-side state for a pilot, for example:
 
 - registration rows
 - current Murmur mapping
+- `registration_status`
+- `admin_membership_state`
+- `evepilot_id`, `corporation_id`, `alliance_id`
+- `hashfn`, `kdf_iterations`
+- `active_session_ids` and `active_session_count`
+- `pw_lastchanged` read from the registration row timestamp
 - last auth time
 - last seen / last spoke if available
+
+### `GET /v1/control-key/status`
+
+Returns:
+
+- whether DB control key exists
+- current mode (`db`, `env`, `open`)
+- last update timestamp (if DB key row exists)
 
 ## Naming Notes
 

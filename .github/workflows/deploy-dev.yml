@@ -5,24 +5,136 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      deploy_target_name:
+        description: 'Secret name containing deploy target JSON'
+        required: false
+        default: 'CUBE_DEV_CUBE'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      DEPLOY_TARGET_NAME: ${{ github.event.inputs.deploy_target_name || 'CUBE_DEV_CUBE' }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up SSH
+      - name: Resolve deploy target
+        env:
+          DEPLOY_TARGET_JSON: ${{ secrets[github.event.inputs.deploy_target_name || 'CUBE_DEV_CUBE'] }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
-          echo "${{ secrets.HETZNER_DEV_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.HETZNER_DEV_HOST }}" >> ~/.ssh/known_hosts
+
+          python3 - <<'PY'
+          import json
+          import os
+          from json import JSONDecodeError
+          from pathlib import Path
+
+          def _parse_target_payload(raw: str, target_name: str) -> dict:
+              try:
+                  payload = json.loads(raw)
+              except JSONDecodeError:
+                  # Common operator input mistake: literal newlines in "key" JSON string.
+                  key_field = '"key"'
+                  key_index = raw.find(key_field)
+                  if key_index < 0:
+                      raise
+                  colon_index = raw.find(':', key_index + len(key_field))
+                  if colon_index < 0:
+                      raise
+                  quote_start = raw.find('"', colon_index + 1)
+                  if quote_start < 0:
+                      raise
+
+                  i = quote_start + 1
+                  while i < len(raw):
+                      if raw[i] == '"' and raw[i - 1] != '\\':
+                          break
+                      i += 1
+                  if i >= len(raw):
+                      raise
+
+                  key_raw = raw[quote_start + 1:i]
+                  key_escaped = (
+                      key_raw
+                      .replace('\\', '\\\\')
+                      .replace('\r', '\\r')
+                      .replace('\n', '\\n')
+                      .replace('\t', '\\t')
+                  )
+                  repaired = raw[:quote_start + 1] + key_escaped + raw[i:]
+                  payload = json.loads(repaired)
+
+              if not isinstance(payload, dict):
+                  raise SystemExit(f"Secret {target_name} must be a JSON object")
+              return payload
+
+          target_name = os.environ.get("DEPLOY_TARGET_NAME", "").strip()
+          raw = os.environ.get("DEPLOY_TARGET_JSON", "").strip()
+          if not target_name:
+              raise SystemExit("DEPLOY_TARGET_NAME is empty")
+          if not raw:
+              raise SystemExit(
+                  f"Missing deploy target secret payload for {target_name}. "
+                  f"Create a secret named {target_name} with JSON fields host/user/key."
+              )
+
+          payload = _parse_target_payload(raw, target_name)
+
+          host = str(payload.get("host", "")).strip()
+          user = str(payload.get("user", "")).strip()
+          key = payload.get("key", "")
+          home_dir = str(payload.get("home_dir", "")).strip()
+          project_dir = str(payload.get("project_dir", "")).strip()
+          env_file = str(payload.get("env_file", "")).strip()
+          venv_dir = str(payload.get("venv_dir", "")).strip()
+          service_name = str(payload.get("service_name", "")).strip()
+
+          if not host:
+              raise SystemExit(f"Secret {target_name} missing required field: host")
+          if not user:
+              raise SystemExit(f"Secret {target_name} missing required field: user")
+          if not isinstance(key, str) or not key.strip():
+              raise SystemExit(f"Secret {target_name} missing required field: key")
+
+          if not home_dir:
+              home_dir = f"/home/{user}"
+          if not project_dir:
+              project_dir = f"{home_dir}/mumble-bg"
+          if not env_file:
+              env_file = f"{home_dir}/.env/mumble-bg"
+          if not venv_dir:
+              venv_dir = f"{home_dir}/.venv/mumble-bg"
+          if not service_name:
+              service_name = "mumble-bg-auth"
+
+          key_path = Path.home() / ".ssh" / "deploy_key"
+          key_path.write_text(key.replace("\\n", "\n").rstrip() + "\n", encoding="utf-8")
+          key_path.chmod(0o600)
+
+          github_env = Path(os.environ["GITHUB_ENV"])
+          with github_env.open("a", encoding="utf-8") as fh:
+              fh.write(f"DEPLOY_TARGET_HOST={host}\n")
+              fh.write(f"DEPLOY_TARGET_USER={user}\n")
+              fh.write(f"DEPLOY_HOME_DIR={home_dir}\n")
+              fh.write(f"DEPLOY_PROJECT_DIR={project_dir}\n")
+              fh.write(f"DEPLOY_ENV_FILE={env_file}\n")
+              fh.write(f"DEPLOY_VENV_DIR={venv_dir}\n")
+              fh.write(f"DEPLOY_SERVICE_NAME={service_name}\n")
+          PY
+
+      - name: Set up SSH known hosts
+        run: |
+          set -euo pipefail
+          ssh-keyscan -H "${DEPLOY_TARGET_HOST}" >> ~/.ssh/known_hosts
 
       - name: Deploy code via rsync
         run: |
+          set -euo pipefail
           rsync -avz --delete \
             --exclude '.git/' \
             --exclude '__pycache__/' \
@@ -31,33 +143,50 @@ jobs:
             --exclude '.env' \
             --exclude '.venv/' \
             -e "ssh -i ~/.ssh/deploy_key" \
-            ./ "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}:/home/cube/mumble-bg/"
+            ./ "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}:${DEPLOY_PROJECT_DIR%/}/"
 
       - name: Write environment file
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" << 'EOF'
-          mkdir -p /home/cube/.env
-          cat > /home/cube/.env/mumble-bg << 'ENVFILE'
+          set -euo pipefail
+          DEPLOY_ENV_DIR="$(dirname "${DEPLOY_ENV_FILE}")"
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+            "DEPLOY_ENV_DIR='${DEPLOY_ENV_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' bash -s" <<'EOF'
+          mkdir -p "${DEPLOY_ENV_DIR}"
+          cat > "${DEPLOY_ENV_FILE}" <<'ENVFILE'
           DATABASES='${{ secrets.DATABASES }}'
           ICE='${{ secrets.ICE }}'
           MURMUR_PROBE='${{ secrets.MURMUR_PROBE }}'
           BG_ENGINE=${{ secrets.BG_ENGINE }}
+          MURMUR_CONTROL_PSK='${{ secrets.MURMUR_CONTROL_PSK }}'
           ENVFILE
-          chmod 600 /home/cube/.env/mumble-bg
+          chmod 600 "${DEPLOY_ENV_FILE}"
           EOF
 
       - name: Install runtime dependencies
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" << 'EOF'
           set -euo pipefail
-          mkdir -p /home/cube/.venv
-          if [ ! -d /home/cube/.venv/mumble-bg ]; then
-            python3 -m venv /home/cube/.venv/mumble-bg
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+            "DEPLOY_VENV_DIR='${DEPLOY_VENV_DIR}' DEPLOY_PROJECT_DIR='${DEPLOY_PROJECT_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' bash -s" <<'EOF'
+          set -euo pipefail
+          mkdir -p "$(dirname "${DEPLOY_VENV_DIR}")"
+          if [ ! -d "${DEPLOY_VENV_DIR}" ]; then
+            python3 -m venv "${DEPLOY_VENV_DIR}"
           fi
-          /home/cube/.venv/mumble-bg/bin/pip install --quiet -r /home/cube/mumble-bg/requirements.txt
+          "${DEPLOY_VENV_DIR}/bin/pip" install --quiet -r "${DEPLOY_PROJECT_DIR}/requirements.txt"
           set -a
-          source /home/cube/.env/mumble-bg
+          source "${DEPLOY_ENV_FILE}"
           set +a
+
+          # Optional suffix trigger: if the configured PSK ends with ":reset",
+          # strip the suffix for runtime and reset DB control-key state.
+          CONTROL_PSK_RESET_REQUESTED=0
+          if [ -n "${MURMUR_CONTROL_PSK:-}" ] && [ "${MURMUR_CONTROL_PSK%:reset}" != "${MURMUR_CONTROL_PSK}" ]; then
+            CONTROL_PSK_RESET_REQUESTED=1
+            MURMUR_CONTROL_PSK="${MURMUR_CONTROL_PSK%:reset}"
+            export MURMUR_CONTROL_PSK
+            esc_psk="$(printf '%s' "${MURMUR_CONTROL_PSK}" | sed "s/[\\/&]/\\\\&/g")"
+            sed -i "s|^MURMUR_CONTROL_PSK=.*$|MURMUR_CONTROL_PSK='${esc_psk}'|" "${DEPLOY_ENV_FILE}"
+          fi
 
           json_field() {
             local env_var="$1"
@@ -100,14 +229,14 @@ jobs:
           case "${BG_DATABASE_HOST}" in
             127.0.0.1|localhost)
               if [ "$(id -u)" -eq 0 ]; then
-                bash /home/cube/mumble-bg/deploy/create-db.sh \
+                bash "${DEPLOY_PROJECT_DIR}/deploy/create-db.sh" \
                   --engine "${BG_ENGINE:-postgres}" \
                   --user "${BG_DATABASE_USER}" \
                   --db "${BG_DATABASE_NAME}" \
                   --host "${BG_DATABASE_HOST}" \
                   --pw "${BG_DATABASE_PASSWORD}"
               else
-                sudo -n bash /home/cube/mumble-bg/deploy/create-db.sh \
+                sudo -n bash "${DEPLOY_PROJECT_DIR}/deploy/create-db.sh" \
                   --engine "${BG_ENGINE:-postgres}" \
                   --user "${BG_DATABASE_USER}" \
                   --db "${BG_DATABASE_NAME}" \
@@ -117,15 +246,21 @@ jobs:
               ;;
           esac
 
-          /home/cube/.venv/mumble-bg/bin/python /home/cube/mumble-bg/manage.py migrate --noinput
+          "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" migrate --noinput
+
+          if [ "${CONTROL_PSK_RESET_REQUESTED}" -eq 1 ]; then
+            "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" reset_murmur_control_key --yes
+          fi
           EOF
 
       - name: Restart service
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" \
-            "sudo systemctl restart mumble-bg-auth"
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+            "sudo systemctl restart '${DEPLOY_SERVICE_NAME}'"
 
       - name: Health check
         run: |
-          ssh -i ~/.ssh/deploy_key "${{ secrets.HETZNER_DEV_USER }}@${{ secrets.HETZNER_DEV_HOST }}" \
-            "sudo systemctl is-active mumble-bg-auth"
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+            "sudo systemctl is-active '${DEPLOY_SERVICE_NAME}'"

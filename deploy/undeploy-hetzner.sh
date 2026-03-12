@@ -9,7 +9,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="${APP_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-APP_USER="${APP_USER:-cube}"
+APP_USER="${APP_USER:-$(stat -c '%U' "${APP_DIR}")}"
 APP_HOME="${APP_HOME:-$(getent passwd "${APP_USER}" | cut -d: -f6)}"
 VENV_DIR="${VENV_DIR:-${APP_HOME}/.venv/mumble-bg}"
 ENV_FILE="${ENV_FILE:-${APP_HOME}/.env/mumble-bg}"
