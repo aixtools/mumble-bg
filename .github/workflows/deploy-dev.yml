@@ -267,9 +267,12 @@ jobs:
               echo "BG_RESET_DB_ON_DEPLOY enabled: resetting ${BG_DATABASE_NAME} before migrate."
               DB_RESET_DONE=0
               if PGPASSWORD="${BG_DATABASE_PASSWORD}" psql -h "${BG_DATABASE_HOST}" -U "${BG_DATABASE_USER}" -d postgres -Atqc 'SELECT 1' >/dev/null 2>&1; then
-                PGPASSWORD="${BG_DATABASE_PASSWORD}" dropdb --if-exists -h "${BG_DATABASE_HOST}" -U "${BG_DATABASE_USER}" "${BG_DATABASE_NAME}"
-                PGPASSWORD="${BG_DATABASE_PASSWORD}" createdb -h "${BG_DATABASE_HOST}" -U "${BG_DATABASE_USER}" -O "${BG_DATABASE_USER}" "${BG_DATABASE_NAME}"
-                DB_RESET_DONE=1
+                if PGPASSWORD="${BG_DATABASE_PASSWORD}" dropdb --if-exists -h "${BG_DATABASE_HOST}" -U "${BG_DATABASE_USER}" "${BG_DATABASE_NAME}" \
+                  && PGPASSWORD="${BG_DATABASE_PASSWORD}" createdb -h "${BG_DATABASE_HOST}" -U "${BG_DATABASE_USER}" -O "${BG_DATABASE_USER}" "${BG_DATABASE_NAME}"; then
+                  DB_RESET_DONE=1
+                else
+                  echo "[WARN] App DB role reset failed; falling back to postgres superuser reset."
+                fi
               fi
 
               if [ "${DB_RESET_DONE}" -eq 0 ]; then
