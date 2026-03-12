@@ -148,3 +148,23 @@ class MumbleSession(models.Model):
 
     def __str__(self):
         return f'{self.server.name}:{self.username}#{self.session_id}'
+
+
+class ControlChannelKey(models.Model):
+    name = models.CharField(max_length=64, unique=True, default='fg_bg')
+    shared_secret = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        default=None,
+        help_text='FG/BG control channel PSK. If NULL, control falls back to env bootstrap secret.',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'control_channel_key'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name

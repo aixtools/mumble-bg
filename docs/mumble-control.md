@@ -28,27 +28,18 @@ If a Unix socket is not practical at first, use:
 
 - HTTP + JSON on `127.0.0.1`
 
-That is acceptable as a temporary insecure mode as long as the contract stays
-the same and authentication can be added later.
+That is acceptable as a temporary insecure mode for local dev only.
 
 ## Security Phases
 
-Phase 1:
+Current implementation:
 
-- Unix socket only, protected by filesystem permissions
-- or `127.0.0.1` only, with no auth yet
-
-Phase 2:
-
-- add a shared secret or HMAC signature header
-
-Phase 3:
-
-- if fg and bg become remote, keep the same API and move to HTTPS with mTLS or
-  signed service credentials
-
-The important rule is that the transport may evolve, but the command contract
-should stay stable.
+- write endpoints accept a control PSK via `X-Mumble-Control-PSK`
+  (or `Authorization: Bearer <psk>`)
+- bg resolves active PSK from:
+  - DB key (`control_channel_key.shared_secret`) when set
+  - otherwise `MUMBLE_CONTROL_PSK` env fallback
+- if neither exists, bg is in `open` mode (local bootstrap/dev only)
 
 ## Request Shape
 
@@ -56,6 +47,7 @@ Every write/control request should carry:
 
 - `request_id`
 - `requested_by`
+- `is_super` (required for control-key lifecycle and `/v1/psk/reset`)
 - `timestamp`
 - command-specific payload
 
@@ -96,14 +88,16 @@ Write/control endpoints:
 - `POST /v1/registrations/sync`
 - `POST /v1/registrations/disable`
 - `POST /v1/admin-membership/sync`
-- `POST /v1/pulse/reconcile`
 - `POST /v1/psk/reset`
+- `POST /v1/control-key/bootstrap`
+- `POST /v1/control-key/rotate`
 
 Read/status endpoints:
 
 - `GET /v1/health`
 - `GET /v1/servers`
 - `GET /v1/pilots/{pkid}`
+- `GET /v1/control-key/status`
 
 These are intentionally narrow. Add endpoints only when fg has a real caller.
 
@@ -178,35 +172,54 @@ The same `server_name`/`pkid` selector style is used as registration sync.
 
 `synced_sessions` returns how many session IDs were processed.
 
-### `POST /v1/pulse/reconcile`
-
-Request payload:
-
-```json
-{
-  "server_name": "de primary",
-  "once": true
-}
-```
-
-Meaning:
-
-- fg asks bg to run a one-shot pulse reconciliation pass
-
 ### `POST /v1/psk/reset`
 
 Request payload:
 
 ```json
 {
-  "server_name": "de primary"
+  "is_super": true,
+  "payload": {
+    "server_name": "de primary"
+  }
 }
 ```
 
 Meaning:
 
-- fg requests that bg clears the stored ICE secret (`ice_secret`) for the selected server so next
-  startup can fall back to environment/default key material.
+- resets fg/bg control PSK in DB back to `NULL`
+- optional `server_name`/`server_id` also clears that server's `ice_secret`
+- once DB PSK is `NULL`, auth falls back to `MUMBLE_CONTROL_PSK` env (or `open` mode)
+
+### `POST /v1/control-key/bootstrap`
+
+Request payload:
+
+```json
+{
+  "new_control_psk": "at-least-16-characters",
+  "is_super": true
+}
+```
+
+Meaning:
+
+- creates first DB control PSK when none exists
+
+### `POST /v1/control-key/rotate`
+
+Request payload:
+
+```json
+{
+  "new_control_psk": "at-least-16-characters",
+  "is_super": true
+}
+```
+
+Meaning:
+
+- rotates the DB control PSK to a new value
 
 ### `GET /v1/health`
 
@@ -214,8 +227,7 @@ Returns:
 
 - process health
 - bg DB reachability
-- pilot DB reachability
-- optional probe availability
+- control mode (`db`, `env`, `open`)
 
 ### `GET /v1/servers`
 
@@ -227,9 +239,20 @@ Returns bg-side state for a pilot, for example:
 
 - registration rows
 - current Murmur mapping
+- `registration_status`
+- `admin_membership_state`
+- `active_session_ids` and `active_session_count`
 - `pw_lastchanged` read from the registration row timestamp
 - last auth time
 - last seen / last spoke if available
+
+### `GET /v1/control-key/status`
+
+Returns:
+
+- whether DB control key exists
+- current mode (`db`, `env`, `open`)
+- last update timestamp (if DB key row exists)
 
 ## Naming Notes
 
