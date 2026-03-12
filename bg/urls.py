@@ -13,6 +13,7 @@ def _health(_request):
 urlpatterns = [
     path('', _health),
     path('v1/registrations/sync', control.registrations_sync),
+    path('v1/registrations/contract-sync', control.registration_contract_sync),
     path('v1/registrations/disable', control.registrations_disable),
     path('v1/admin-membership/sync', control.admin_membership_sync),
     path('v1/password-reset', control.password_reset),

@@ -28,6 +28,21 @@ class MumbleServer(models.Model):
 class MumbleUser(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='murmur_registrations')
     server = models.ForeignKey(MumbleServer, on_delete=models.CASCADE, related_name='murmur_registrations')
+    evepilot_id = models.BigIntegerField(
+        null=True,
+        blank=True,
+        help_text='Pilot character ID tracked in the FG/BG contract.',
+    )
+    corporation_id = models.BigIntegerField(
+        null=True,
+        blank=True,
+        help_text='Pilot corporation ID tracked in the FG/BG contract.',
+    )
+    alliance_id = models.BigIntegerField(
+        null=True,
+        blank=True,
+        help_text='Pilot alliance ID tracked in the FG/BG contract.',
+    )
     mumble_userid = models.PositiveIntegerField(
         null=True,
         blank=True,

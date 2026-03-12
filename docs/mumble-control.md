@@ -86,6 +86,7 @@ Write/control endpoints:
 
 - `POST /v1/password-reset`
 - `POST /v1/registrations/sync`
+- `POST /v1/registrations/contract-sync`
 - `POST /v1/registrations/disable`
 - `POST /v1/admin-membership/sync`
 - `POST /v1/control-key/bootstrap`
@@ -135,6 +136,29 @@ Meaning:
 
 - fg asks bg to reconcile one pilot registration into Murmur
 - bg decides create/adopt/update behavior
+
+### `POST /v1/registrations/contract-sync`
+
+Request payload:
+
+```json
+{
+  "pkid": 12345,
+  "server_name": "de primary",
+  "evepilot_id": 90000001,
+  "corporation_id": 98000001,
+  "alliance_id": 99000001,
+  "kdf_iterations": 120000,
+  "is_super": true
+}
+```
+
+Meaning:
+
+- fg requests bg to persist registration contract metadata for one pilot/server row
+- endpoint is superuser-gated (`is_super` required and must be true)
+- accepts any subset of these fields: `evepilot_id`, `corporation_id`, `alliance_id`, `kdf_iterations`
+- probe reads (`GET /v1/pilots/{pkid}`) are the source of truth for verification after updates
 
 ### `POST /v1/registrations/disable`
 
@@ -237,6 +261,8 @@ Returns bg-side state for a pilot, for example:
 - current Murmur mapping
 - `registration_status`
 - `admin_membership_state`
+- `evepilot_id`, `corporation_id`, `alliance_id`
+- `hashfn`, `kdf_iterations`
 - `active_session_ids` and `active_session_count`
 - `pw_lastchanged` read from the registration row timestamp
 - last auth time

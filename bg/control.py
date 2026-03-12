@@ -163,6 +163,14 @@ def _coerce_int(value: Any, *, field: str) -> int:
         raise _BadRequest(f'{field} must be an integer') from exc
 
 
+def _coerce_nullable_int(value: Any, *, field: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return _coerce_int(value, field=field)
+
+
 def _coerce_bool(value: Any, *, field: str) -> bool:
     if isinstance(value, bool):
         return value
@@ -301,16 +309,102 @@ class _PilotRegistrationSnapshot:
             'server_name': self.row.server.name,
             'username': self.row.username,
             'murmur_userid': self.row.mumble_userid,
+            'evepilot_id': self.row.evepilot_id,
+            'corporation_id': self.row.corporation_id,
+            'alliance_id': self.row.alliance_id,
             'registration_status': registration_status,
             'is_active': self.row.is_active,
             'is_murmur_admin': self.row.is_mumble_admin,
             'admin_membership_state': 'granted' if self.row.is_mumble_admin else 'revoked',
+            'hashfn': self.row.hashfn,
+            'kdf_iterations': self.row.kdf_iterations,
             'active_session_ids': self.active_session_ids,
             'active_session_count': len(self.active_session_ids),
             'pw_lastchanged': self.row.updated_at.isoformat() if self.row.updated_at else None,
             'last_authenticated': self.row.last_authenticated.isoformat() if self.row.last_authenticated else None,
             'last_connected': self.row.last_connected.isoformat() if self.row.last_connected else None,
             'last_seen': self.row.last_seen.isoformat() if self.row.last_seen else None,
+        }
+
+
+@dataclass(frozen=True)
+class _RegistrationContractPatch:
+    evepilot_id: int | None
+    corporation_id: int | None
+    alliance_id: int | None
+    kdf_iterations: int | None
+    provided_fields: tuple[str, ...]
+
+    def update_fields(self) -> list[str]:
+        return [*self.provided_fields, 'updated_at']
+
+
+class _RegistrationContractService:
+    """Parse and persist contract metadata fields for one registration row."""
+
+    @staticmethod
+    def _read_kdf_iterations(payload: dict[str, Any]) -> int | None:
+        value = _coerce_nullable_int(payload.get('kdf_iterations'), field='kdf_iterations')
+        if value is not None and value <= 0:
+            raise _BadRequest('kdf_iterations must be a positive integer')
+        return value
+
+    def parse_patch(self, payload: dict[str, Any]) -> _RegistrationContractPatch:
+        fields_present = {
+            'evepilot_id': 'evepilot_id' in payload,
+            'corporation_id': 'corporation_id' in payload,
+            'alliance_id': 'alliance_id' in payload,
+            'kdf_iterations': 'kdf_iterations' in payload,
+        }
+        if not any(fields_present.values()):
+            raise _BadRequest(
+                'At least one contract field is required: '
+                'evepilot_id, corporation_id, alliance_id, or kdf_iterations'
+            )
+
+        evepilot_id = (
+            _coerce_nullable_int(payload.get('evepilot_id'), field='evepilot_id')
+            if fields_present['evepilot_id']
+            else None
+        )
+        corporation_id = (
+            _coerce_nullable_int(payload.get('corporation_id'), field='corporation_id')
+            if fields_present['corporation_id']
+            else None
+        )
+        alliance_id = (
+            _coerce_nullable_int(payload.get('alliance_id'), field='alliance_id')
+            if fields_present['alliance_id']
+            else None
+        )
+        kdf_iterations = self._read_kdf_iterations(payload) if fields_present['kdf_iterations'] else None
+        return _RegistrationContractPatch(
+            evepilot_id=evepilot_id,
+            corporation_id=corporation_id,
+            alliance_id=alliance_id,
+            kdf_iterations=kdf_iterations,
+            provided_fields=tuple(field for field, is_present in fields_present.items() if is_present),
+        )
+
+    @staticmethod
+    def apply(mumble_user: MumbleUser, patch: _RegistrationContractPatch):
+        if 'evepilot_id' in patch.provided_fields:
+            mumble_user.evepilot_id = patch.evepilot_id
+        if 'corporation_id' in patch.provided_fields:
+            mumble_user.corporation_id = patch.corporation_id
+        if 'alliance_id' in patch.provided_fields:
+            mumble_user.alliance_id = patch.alliance_id
+        if 'kdf_iterations' in patch.provided_fields:
+            mumble_user.kdf_iterations = patch.kdf_iterations
+        mumble_user.save(update_fields=patch.update_fields())
+
+    @staticmethod
+    def values(mumble_user: MumbleUser) -> dict[str, int | None]:
+        return {
+            'evepilot_id': mumble_user.evepilot_id,
+            'corporation_id': mumble_user.corporation_id,
+            'alliance_id': mumble_user.alliance_id,
+            'kdf_iterations': mumble_user.kdf_iterations,
         }
 
 
@@ -353,6 +447,7 @@ class _PilotProbeService:
 _SERVER_RESOLVER = _ServerResolver()
 _MUMBLE_USER_RESOLVER = _MumbleUserResolver()
 _PILOT_PROBE_SERVICE = _PilotProbeService()
+_REGISTRATION_CONTRACT_SERVICE = _RegistrationContractService()
 
 
 def _sync_context(request):
@@ -415,6 +510,38 @@ def registrations_sync(request):
         murmur_userid=mumble_user.mumble_userid,
         user_id=mumble_user.user_id,
         server_name=server.name,
+    )
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def registration_contract_sync(request):
+    try:
+        auth_source = _require_control_auth(request)
+        payload, request_id, requested_by, is_super = _sync_context(request)
+        _require_requested_by(requested_by)
+        _require_super(is_super)
+        server = _SERVER_RESOLVER.resolve(payload)
+        mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
+        patch = _REGISTRATION_CONTRACT_SERVICE.parse_patch(payload)
+        del auth_source  # validated, reserved for future audit logging
+    except _BadRequest as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
+    except _Unauthorized as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _Forbidden as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
+    except _NotFound as exc:
+        return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
+
+    _REGISTRATION_CONTRACT_SERVICE.apply(mumble_user, patch)
+    return _response(
+        request_id,
+        'completed',
+        message='Registration contract metadata synchronized',
+        user_id=mumble_user.user_id,
+        server_name=server.name,
+        **_REGISTRATION_CONTRACT_SERVICE.values(mumble_user),
     )
 
 
@@ -718,4 +845,3 @@ def pilot(request, pkid: int):
     if payload is None:
         return _response('unknown', 'not_found', message='No registration records found', code=HTTPStatus.NOT_FOUND)
     return JsonResponse(payload)
-
