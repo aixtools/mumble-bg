@@ -47,7 +47,7 @@ Every write/control request should carry:
 
 - `request_id`
 - `requested_by`
-- `is_super` (required for control-key lifecycle and `/v1/psk/reset`)
+- `is_super` (required for control-key lifecycle endpoints)
 - `timestamp`
 - command-specific payload
 
@@ -88,7 +88,6 @@ Write/control endpoints:
 - `POST /v1/registrations/sync`
 - `POST /v1/registrations/disable`
 - `POST /v1/admin-membership/sync`
-- `POST /v1/psk/reset`
 - `POST /v1/control-key/bootstrap`
 - `POST /v1/control-key/rotate`
 
@@ -173,23 +172,32 @@ The same `server_name`/`pkid` selector style is used as registration sync.
 
 `synced_sessions` returns how many session IDs were processed.
 
-### `POST /v1/psk/reset`
+### CLI-only control-key reset
 
-Request payload:
+There is intentionally no HTTP endpoint for control-key reset.
 
-```json
-{
-  "is_super": true,
-  "payload": {
-    "server_name": "de primary"
-  }
-}
+Use the CLI command instead:
+
+```bash
+python manage.py reset_murmur_control_key --yes
+```
+
+Optional server-specific ICE secret reset:
+
+```bash
+python manage.py reset_murmur_control_key --yes --server-id 1
+```
+
+or
+
+```bash
+python manage.py reset_murmur_control_key --yes --server-name "de primary"
 ```
 
 Meaning:
 
 - resets fg/bg control PSK in DB back to `NULL`
-- optional `server_name`/`server_id` also clears that server's `ice_secret`
+- optional `--server-id`/`--server-name` also clears that server's `ice_secret`
 - once DB PSK is `NULL`, auth falls back to `MURMUR_CONTROL_PSK` env (or `open` mode)
 
 ### `POST /v1/control-key/bootstrap`
