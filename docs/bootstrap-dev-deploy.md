@@ -157,11 +157,18 @@ Optional runtime/debug:
 Optional provisioning-only:
 
 - `BG_ENGINE`
+- `BG_RESET_DB_ON_DEPLOY`
 
 Recommended `BG_ENGINE` values:
 
 - `psql`
 - `mysql`
+
+`BG_RESET_DB_ON_DEPLOY` values:
+
+- `1`, `true`, or `yes` enable reset-before-migrate
+- reset is only applied for local PostgreSQL targets (`DATABASES.bg.host` of `127.0.0.1` or `localhost`)
+- when enabled, deploy attempts `dropdb/createdb` first with app DB user, then falls back to local postgres superuser via sudo
 
 `DATABASES` is a JSON object with `pilot` and `bg` entries:
 
@@ -314,6 +321,7 @@ Optional target JSON fields:
 | --- | --- |
 | `DATABASES` | |
 | `BG_ENGINE` | |
+| `BG_RESET_DB_ON_DEPLOY` | |
 
 **Murmur ICE**
 
