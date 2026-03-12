@@ -9,6 +9,40 @@ It exists to keep the boundary clean:
 - no direct bg writes into host-owned tables
 - no shared Python imports across repos as the long-term interface
 
+## Test Contract (Standalone First)
+
+Before integrating into any host product (Cube, AllianceAuth, or other), fg/bg
+must be validated as a standalone pair.
+
+Required testing order:
+
+1. bring up bg HTTP endpoints directly
+2. call bg control/probe endpoints with PSK over HTTP
+3. point fg control client to standalone bg base URL
+4. verify fg mutating flows route only through bg control endpoints and are
+   validated by bg probe reads
+5. only then wire fg into host URL/sidebar/panel surfaces
+
+This rule prevents host routing/configuration issues from masking fg/bg contract
+regressions.
+
+Suggested local standalone run:
+
+```bash
+cd ~/git/mumble-bg
+source ~/.venv/mumble-bg/bin/activate
+python manage.py migrate --noinput
+python manage.py runserver 127.0.0.1:18080
+```
+
+Then probe:
+
+```bash
+curl -sS http://127.0.0.1:18080/v1/health
+curl -sS -H "X-Murmur-Control-PSK: <psk>" http://127.0.0.1:18080/v1/control-key/status
+curl -sS -H "X-Murmur-Control-PSK: <psk>" http://127.0.0.1:18080/v1/servers
+```
+
 ## Recommended Transport
 
 Current recommendation:
