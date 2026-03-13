@@ -19,6 +19,11 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+WORKSPACE_ROOT = os.path.dirname(PROJECT_ROOT)
+if WORKSPACE_ROOT not in sys.path:
+    sys.path.insert(0, WORKSPACE_ROOT)
+
+from monitor.monitor.models import PilotIdentity
 
 from bg.db import (
     PilotDBA,
@@ -31,63 +36,6 @@ from bg.passwords import LEGACY_BCRYPT_SHA256, verify_murmur_password
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
-
-
-class PilotIdentity:
-    """
-    Read-only pilot projection consumed by mumble-bg.
-
-    Important: PKID does not bind to a fixed alliance.
-    A pilot can only change corporation, and a corporation can change alliance,
-    so alliance_id must be treated as part of the current membership snapshot.
-    """
-
-    __slots__ = (
-        'character_id',
-        'character_name',
-        'corporation_id',
-        'alliance_id',
-        'corporation_name',
-        'alliance_name',
-        'corporation_ticker',
-        'alliance_ticker',
-    )
-
-    def __init__(
-        self,
-        character_id,
-        character_name,
-        corporation_id,
-        alliance_id,
-        corporation_name='',
-        alliance_name='',
-        corporation_ticker='',
-        alliance_ticker='',
-    ):
-        self.character_id = int(character_id) if character_id is not None else None
-        self.character_name = character_name or ''
-        self.corporation_id = int(corporation_id) if corporation_id is not None else None
-        self.alliance_id = int(alliance_id) if alliance_id is not None else None
-        self.corporation_name = (corporation_name or '').strip()
-        self.alliance_name = (alliance_name or '').strip()
-        self.corporation_ticker = corporation_ticker or ''
-        self.alliance_ticker = alliance_ticker or ''
-
-    def as_dict(self):
-        """Return a plain-object payload for downstream adapters."""
-        return {
-            'character_id': self.character_id,
-            'character_name': self.character_name,
-            'corporation_id': self.corporation_id,
-            'alliance_id': self.alliance_id,
-            'corporation_name': self.corporation_name,
-            'alliance_name': self.alliance_name,
-            'corporation_ticker': self.corporation_ticker,
-            'alliance_ticker': self.alliance_ticker,
-        }
-
-    def __iter__(self):
-        return iter(self.as_dict().items())
 
 
 PILOT_DB_ADAPTER = PilotDBA(
@@ -196,7 +144,8 @@ def list_pilot_identities():
         return []
 
     return [
-        PilotIdentity(
+        PilotIdentity.from_record(
+            'allianceauth',
             character_id=row[0],
             character_name=row[1],
             corporation_id=row[2],

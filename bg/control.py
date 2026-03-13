@@ -3,7 +3,7 @@
 import json
 import os
 import secrets
-from dataclasses import dataclass
+import sys
 from http import HTTPStatus
 from typing import Any
 
@@ -20,6 +20,18 @@ from bg.pilot.registrations import (
     unregister_murmur_registration,
 )
 from bg.state.models import ControlChannelKey, MumbleServer, MumbleSession, MumbleUser
+
+WORKSPACE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if WORKSPACE_ROOT not in sys.path:
+    sys.path.insert(0, WORKSPACE_ROOT)
+
+from monitor.monitor.models import (
+    MurmurRegistrationContractPatch,
+    MurmurRegistrationSnapshot,
+)
+
+_PilotRegistrationSnapshot = MurmurRegistrationSnapshot
+_RegistrationContractPatch = MurmurRegistrationContractPatch
 
 
 class _BadRequest(ValueError):
@@ -163,14 +175,6 @@ def _coerce_int(value: Any, *, field: str) -> int:
         raise _BadRequest(f'{field} must be an integer') from exc
 
 
-def _coerce_nullable_int(value: Any, *, field: str) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, str) and not value.strip():
-        return None
-    return _coerce_int(value, field=field)
-
-
 def _coerce_bool(value: Any, *, field: str) -> bool:
     if isinstance(value, bool):
         return value
@@ -297,94 +301,14 @@ class _MumbleUserResolver:
         return mumble_user
 
 
-@dataclass(frozen=True)
-class _PilotRegistrationSnapshot:
-    row: MumbleUser
-    active_session_ids: list[int]
-
-    def as_dict(self) -> dict[str, Any]:
-        registration_status = 'active' if self.row.mumble_userid else 'pending'
-        return {
-            'server_id': self.row.server_id,
-            'server_name': self.row.server.name,
-            'username': self.row.username,
-            'murmur_userid': self.row.mumble_userid,
-            'evepilot_id': self.row.evepilot_id,
-            'corporation_id': self.row.corporation_id,
-            'alliance_id': self.row.alliance_id,
-            'registration_status': registration_status,
-            'is_active': self.row.is_active,
-            'is_murmur_admin': self.row.is_mumble_admin,
-            'admin_membership_state': 'granted' if self.row.is_mumble_admin else 'revoked',
-            'hashfn': self.row.hashfn,
-            'kdf_iterations': self.row.kdf_iterations,
-            'active_session_ids': self.active_session_ids,
-            'active_session_count': len(self.active_session_ids),
-            'pw_lastchanged': self.row.updated_at.isoformat() if self.row.updated_at else None,
-            'last_authenticated': self.row.last_authenticated.isoformat() if self.row.last_authenticated else None,
-            'last_connected': self.row.last_connected.isoformat() if self.row.last_connected else None,
-            'last_seen': self.row.last_seen.isoformat() if self.row.last_seen else None,
-        }
-
-
-@dataclass(frozen=True)
-class _RegistrationContractPatch:
-    evepilot_id: int | None
-    corporation_id: int | None
-    alliance_id: int | None
-    kdf_iterations: int | None
-    provided_fields: tuple[str, ...]
-
-    def update_fields(self) -> list[str]:
-        return [*self.provided_fields, 'updated_at']
-
-
 class _RegistrationContractService:
     """Parse and persist contract metadata fields for one registration row."""
 
-    @staticmethod
-    def _read_kdf_iterations(payload: dict[str, Any]) -> int | None:
-        value = _coerce_nullable_int(payload.get('kdf_iterations'), field='kdf_iterations')
-        if value is not None and value <= 0:
-            raise _BadRequest('kdf_iterations must be a positive integer')
-        return value
-
     def parse_patch(self, payload: dict[str, Any]) -> _RegistrationContractPatch:
-        fields_present = {
-            'evepilot_id': 'evepilot_id' in payload,
-            'corporation_id': 'corporation_id' in payload,
-            'alliance_id': 'alliance_id' in payload,
-            'kdf_iterations': 'kdf_iterations' in payload,
-        }
-        if not any(fields_present.values()):
-            raise _BadRequest(
-                'At least one contract field is required: '
-                'evepilot_id, corporation_id, alliance_id, or kdf_iterations'
-            )
-
-        evepilot_id = (
-            _coerce_nullable_int(payload.get('evepilot_id'), field='evepilot_id')
-            if fields_present['evepilot_id']
-            else None
-        )
-        corporation_id = (
-            _coerce_nullable_int(payload.get('corporation_id'), field='corporation_id')
-            if fields_present['corporation_id']
-            else None
-        )
-        alliance_id = (
-            _coerce_nullable_int(payload.get('alliance_id'), field='alliance_id')
-            if fields_present['alliance_id']
-            else None
-        )
-        kdf_iterations = self._read_kdf_iterations(payload) if fields_present['kdf_iterations'] else None
-        return _RegistrationContractPatch(
-            evepilot_id=evepilot_id,
-            corporation_id=corporation_id,
-            alliance_id=alliance_id,
-            kdf_iterations=kdf_iterations,
-            provided_fields=tuple(field for field, is_present in fields_present.items() if is_present),
-        )
+        try:
+            return _RegistrationContractPatch.from_payload(payload)
+        except ValueError as exc:
+            raise _BadRequest(str(exc)) from exc
 
     @staticmethod
     def apply(mumble_user: MumbleUser, patch: _RegistrationContractPatch):
@@ -431,7 +355,10 @@ class _PilotProbeService:
             return None
 
         snapshots = [
-            _PilotRegistrationSnapshot(row=row, active_session_ids=self._active_session_ids(row))
+            _PilotRegistrationSnapshot.from_row(
+                row,
+                active_session_ids=self._active_session_ids(row),
+            )
             for row in rows
         ]
         return {
