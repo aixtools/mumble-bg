@@ -3,7 +3,6 @@
 import json
 import os
 import secrets
-import sys
 from http import HTTPStatus
 from typing import Any
 
@@ -19,16 +18,8 @@ from bg.pilot.registrations import (
     sync_murmur_registration,
     unregister_murmur_registration,
 )
+from bg.contracts import MurmurRegistrationContractPatch, MurmurRegistrationSnapshot
 from bg.state.models import ControlChannelKey, MumbleServer, MumbleSession, MumbleUser
-
-WORKSPACE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if WORKSPACE_ROOT not in sys.path:
-    sys.path.insert(0, WORKSPACE_ROOT)
-
-from monitor.monitor.models import (
-    MurmurRegistrationContractPatch,
-    MurmurRegistrationSnapshot,
-)
 
 _PilotRegistrationSnapshot = MurmurRegistrationSnapshot
 _RegistrationContractPatch = MurmurRegistrationContractPatch
@@ -179,6 +170,14 @@ def _coerce_bool(value: Any, *, field: str) -> bool:
     if isinstance(value, bool):
         return value
     raise _BadRequest(f'{field} must be a boolean')
+
+
+def _coerce_optional_text(value: Any, *, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise _BadRequest(f'{field} must be a string')
+    return value.strip()
 
 
 def _coerce_session_ids(payload: dict[str, Any]) -> list[int]:
@@ -345,6 +344,15 @@ class _PilotProbeService:
             ).order_by('session_id').values_list('session_id', flat=True)
         )
 
+    @staticmethod
+    def _has_priority_speaker(row: MumbleUser) -> bool:
+        return MumbleSession.objects.filter(
+            server_id=row.server_id,
+            mumble_user=row,
+            is_active=True,
+            priority_speaker=True,
+        ).exists()
+
     def pilot_payload(self, pkid: int) -> dict[str, Any] | None:
         rows = list(
             MumbleUser.objects.filter(user_id=pkid, is_active=True)
@@ -358,12 +366,35 @@ class _PilotProbeService:
             _PilotRegistrationSnapshot.from_row(
                 row,
                 active_session_ids=self._active_session_ids(row),
+                has_priority_speaker=self._has_priority_speaker(row),
             )
             for row in rows
         ]
         return {
             'status': 'completed',
             'pkid': pkid,
+            'request_id': now().strftime('%Y%m%dT%H%M%SZ'),
+            'registrations': [snapshot.as_dict() for snapshot in snapshots],
+            'registration_count': len(snapshots),
+            'timestamp': now().isoformat(),
+        }
+
+    def registrations_payload(self) -> dict[str, Any]:
+        rows = list(
+            MumbleUser.objects.filter(is_active=True)
+            .select_related('server')
+            .order_by('user_id', 'server__display_order', 'server__name')
+        )
+        snapshots = [
+            _PilotRegistrationSnapshot.from_row(
+                row,
+                active_session_ids=self._active_session_ids(row),
+                has_priority_speaker=self._has_priority_speaker(row),
+            )
+            for row in rows
+        ]
+        return {
+            'status': 'completed',
             'request_id': now().strftime('%Y%m%dT%H%M%SZ'),
             'registrations': [snapshot.as_dict() for snapshot in snapshots],
             'registration_count': len(snapshots),
@@ -525,6 +556,7 @@ def admin_membership_sync(request):
         server = _SERVER_RESOLVER.resolve(payload)
         mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
         admin = _coerce_bool(payload.get('admin'), field='admin')
+        groups = _coerce_optional_text(payload.get('groups'), field='groups')
         session_ids = _coerce_session_ids(payload)
         del auth_source  # validated, reserved for future audit logging
     except _BadRequest as exc:
@@ -536,9 +568,15 @@ def admin_membership_sync(request):
     except _NotFound as exc:
         return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
 
+    update_fields: list[str] = []
     if mumble_user.is_mumble_admin != admin:
         mumble_user.is_mumble_admin = admin
-        mumble_user.save(update_fields=['is_mumble_admin', 'updated_at'])
+        update_fields.append('is_mumble_admin')
+    if groups is not None and mumble_user.groups != groups:
+        mumble_user.groups = groups
+        update_fields.append('groups')
+    if update_fields:
+        mumble_user.save(update_fields=[*update_fields, 'updated_at'])
 
     try:
         synced_sessions = sync_live_admin_membership(mumble_user, session_ids=session_ids)
@@ -764,6 +802,12 @@ def servers(request):
             'servers': rows,
         }
     )
+
+
+@require_http_methods(['GET'])
+def registrations(request):
+    payload = _PILOT_PROBE_SERVICE.registrations_payload()
+    return JsonResponse(payload)
 
 
 @require_http_methods(['GET'])

@@ -130,6 +130,7 @@ Read/status endpoints:
 
 - `GET /v1/health`
 - `GET /v1/servers`
+- `GET /v1/registrations`
 - `GET /v1/pilots/{pkid}`
 - `GET /v1/control-key/status`
 
@@ -218,13 +219,16 @@ Request payload:
   "pkid": 12345,
   "server_name": "de primary",
   "admin": true,
+  "groups": "corp,alliance,admin",
   "session_ids": [11, 12, 13]
 }
 ```
 
 Meaning:
 
-- fg asks bg to add/remove admin group membership for all listed active Murmur sessions.
+- fg asks bg to persist admin membership state for one pilot/server row.
+- when `groups` is supplied, bg also persists the authd group string used for future logins.
+- bg updates all listed active Murmur sessions immediately when possible.
 
 The same `server_name`/`pkid` selector style is used as registration sync.
 
@@ -287,6 +291,11 @@ Returns:
 
 Returns bg-owned server inventory and current daemon view of those servers.
 
+### `GET /v1/registrations`
+
+Returns bg-owned active registration rows across all pilots and servers for FG
+operator views.
+
 ### `GET /v1/pilots/{pkid}`
 
 Returns bg-side state for a pilot, for example:
@@ -295,6 +304,7 @@ Returns bg-side state for a pilot, for example:
 - current Murmur mapping
 - `registration_status`
 - `admin_membership_state`
+- `display_name`
 - `evepilot_id`, `corporation_id`, `alliance_id`
 - `hashfn`, `kdf_iterations`
 - `active_session_ids` and `active_session_count`

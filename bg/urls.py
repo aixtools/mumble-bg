@@ -22,6 +22,7 @@ urlpatterns = [
     path('v1/control-key/status', control.control_key_status),
     path('v1/pilot/<int:pkid>', control.pilot),
     path('v1/pilots/<int:pkid>', control.pilot),
+    path('v1/registrations', control.registrations),
     path('v1/health', control.health),
     path('v1/servers', control.servers),
 ]
