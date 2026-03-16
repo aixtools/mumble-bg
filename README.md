@@ -46,6 +46,33 @@ Relevant files:
 
 `deploy/setup-hetzner.sh` is the one-time root install path. The GitHub workflow is for ordinary code updates after that setup exists.
 
+## Pilot Eligibility Rules
+
+BG receives access-control decision tables from FG via the control channel and
+independently provisions Mumble accounts by evaluating the pilot source against these rules.
+
+### Decision Tables (received from FG)
+
+- **Allowed alliances** — an alliance is either in or out (no partial alliance access)
+- **Blocked corps** — corps within an allowed alliance that are denied access
+- **Blocked pilots** — individual pilots within an allowed alliance that are denied access
+- **Allowed pilots** — individual pilot overrides that rescue access even when their corp is blocked
+
+### Precedence (most specific wins)
+
+1. **Pilot allow/block** overrides everything
+2. **Corp block** applies if no pilot-level override exists
+3. **Alliance allow** is the baseline
+
+A blocked corp within an allowed alliance denies that corp's members — but an
+explicit pilot-level allow for a specific member of that corp restores their access.
+
+### Account-wide enforcement
+
+Block checks apply across the **entire account**, not just the main character.
+If the main **or any alt** matches a blocked corp or pilot ID, the whole account
+is denied — unless a pilot-level allow overrides it.
+
 ## Read-only Pilot Contract
 
 - `bg.authd.service.PilotIdentity(character_id, character_name, corporation_id, alliance_id, corporation_name, alliance_name, corporation_ticker, alliance_ticker)`

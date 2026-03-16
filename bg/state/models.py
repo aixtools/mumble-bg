@@ -165,6 +165,74 @@ class MumbleSession(models.Model):
         return f'{self.server.name}:{self.username}#{self.session_id}'
 
 
+ENTITY_TYPE_ALLIANCE = 'alliance'
+ENTITY_TYPE_CORPORATION = 'corporation'
+ENTITY_TYPE_PILOT = 'pilot'
+
+ENTITY_TYPE_CHOICES = [
+    (ENTITY_TYPE_ALLIANCE, 'Alliance'),
+    (ENTITY_TYPE_CORPORATION, 'Corporation'),
+    (ENTITY_TYPE_PILOT, 'Pilot'),
+]
+
+
+class AccessRule(models.Model):
+    """
+    BG's operational copy of the eligibility decision table, received from FG
+    via the control channel.
+
+    Precedence (most specific wins):
+      1. Pilot allow/block overrides everything
+      2. Corp block applies if no pilot-level override
+      3. Alliance allow is the baseline (alliance in = permitted)
+
+    Default is permit (block=False). When block=True the entity is denied.
+    EVE IDs are globally unique so entity_id is unique across the table.
+    Block checks are account-wide: main or any alt matching triggers denial
+    unless a pilot-level allow overrides it.
+    """
+
+    entity_id = models.BigIntegerField(
+        unique=True,
+        help_text='EVE Online ID (alliance, corporation, or character).',
+    )
+    entity_type = models.CharField(
+        max_length=16,
+        choices=ENTITY_TYPE_CHOICES,
+        help_text='Deducible from ID range but kept for query convenience.',
+    )
+    block = models.BooleanField(
+        default=False,
+        help_text='False = permit (default). True = deny access.',
+    )
+    note = models.TextField(
+        blank=True,
+        default='',
+        help_text='Admin notes (e.g. reason for block, ticket reference).',
+    )
+    created_by = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text='Who added this rule.',
+    )
+    synced_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When this rule was last received from FG via control channel.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'bg_access_rule'
+        ordering = ['entity_type', 'entity_id']
+
+    def __str__(self):
+        action = 'BLOCK' if self.block else 'ALLOW'
+        return f'{action} {self.entity_type} {self.entity_id}'
+
+
 class ControlChannelKey(models.Model):
     name = models.CharField(max_length=64, unique=True, default='fg_bg')
     shared_secret = models.CharField(

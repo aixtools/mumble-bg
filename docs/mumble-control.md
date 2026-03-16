@@ -134,6 +134,11 @@ Read/status endpoints:
 - `GET /v1/pilots/{pkid}`
 - `GET /v1/control-key/status`
 
+Eligibility decision table endpoints:
+
+- `POST /v1/access-rules/sync`
+- `GET /v1/access-rules`
+
 These are intentionally narrow. Add endpoints only when fg has a real caller.
 
 ## Endpoint Payloads
@@ -326,6 +331,66 @@ Returns:
 - `server_name` is acceptable as a transitional selector.
 - Long term, fg and bg should share a stable server identifier that is not just
   display text.
+
+## Pilot Eligibility Decision Tables
+
+BG receives access-control decision tables from FG via the control channel and
+independently provisions Mumble accounts by evaluating the pilot source against
+these rules.
+
+### Tables (received from FG, stored locally by BG)
+
+- **allowed_access**: alliance IDs — an alliance is either in or out
+- **blocked_access**: corp IDs, pilot IDs — within an allowed alliance
+
+### Precedence (most specific wins)
+
+1. **Pilot allow/block** overrides everything
+2. **Corp block** applies if no pilot-level override exists
+3. **Alliance allow** is the baseline
+
+A blocked corp within an allowed alliance denies that corp's members — but an
+explicit pilot-level allow for a specific member of that corp restores their
+access. This gives admins surgical control: allow an alliance, block a
+problematic corp, but still whitelist specific trusted pilots from that corp.
+
+### Account-wide enforcement
+
+Block checks apply across the **entire account**, not just the main character.
+If the main **or any alt** matches a blocked corp or pilot ID, the whole account
+is denied — unless a pilot-level allow overrides it.
+
+### Ownership
+
+- FG owns the decision tables (admin panel for submitting IDs)
+- FG pushes decision tables to BG via control channel
+- BG stores its own copy and autonomously provisions `bg_user` rows
+- BG is self-sufficient for provisioning once it has the rules
+
+### `POST /v1/access-rules/sync`
+
+Request payload:
+
+```json
+{
+  "is_super": true,
+  "rules": [
+    {"entity_id": 99000001, "entity_type": "alliance", "block": false, "note": "Main alliance"},
+    {"entity_id": 98000001, "entity_type": "corporation", "block": true, "note": "Problematic corp"},
+    {"entity_id": 90000001, "entity_type": "pilot", "block": false, "note": "Trusted pilot in blocked corp"}
+  ]
+}
+```
+
+Meaning:
+
+- FG pushes the full eligibility decision table to BG
+- this is a full-table sync: rules not in the payload are deleted from BG
+- superuser-gated (`is_super` required)
+
+### `GET /v1/access-rules`
+
+Returns the current access rule set stored in BG.
 
 ## What Not To Do
 

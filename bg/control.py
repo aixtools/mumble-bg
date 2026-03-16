@@ -19,7 +19,16 @@ from bg.pilot.registrations import (
     unregister_murmur_registration,
 )
 from bg.contracts import MurmurRegistrationContractPatch, MurmurRegistrationSnapshot
-from bg.state.models import ControlChannelKey, MumbleServer, MumbleSession, MumbleUser
+from bg.state.models import (
+    AccessRule,
+    ENTITY_TYPE_ALLIANCE,
+    ENTITY_TYPE_CORPORATION,
+    ENTITY_TYPE_PILOT,
+    ControlChannelKey,
+    MumbleServer,
+    MumbleSession,
+    MumbleUser,
+)
 
 _PilotRegistrationSnapshot = MurmurRegistrationSnapshot
 _RegistrationContractPatch = MurmurRegistrationContractPatch
@@ -816,3 +825,121 @@ def pilot(request, pkid: int):
     if payload is None:
         return _response('unknown', 'not_found', message='No registration records found', code=HTTPStatus.NOT_FOUND)
     return JsonResponse(payload)
+
+
+_VALID_ENTITY_TYPES = {ENTITY_TYPE_ALLIANCE, ENTITY_TYPE_CORPORATION, ENTITY_TYPE_PILOT}
+
+
+def _validate_access_rules(rules: list[Any]) -> list[dict[str, Any]]:
+    if not isinstance(rules, list):
+        raise _BadRequest('rules must be a list')
+    validated = []
+    seen_ids = set()
+    for idx, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            raise _BadRequest(f'rules[{idx}] must be an object')
+        entity_id = rule.get('entity_id')
+        if entity_id is None:
+            raise _BadRequest(f'rules[{idx}].entity_id is required')
+        entity_id = _coerce_int(entity_id, field=f'rules[{idx}].entity_id')
+        if entity_id in seen_ids:
+            raise _BadRequest(f'rules[{idx}].entity_id={entity_id} is duplicated')
+        seen_ids.add(entity_id)
+        entity_type = rule.get('entity_type', '')
+        if entity_type not in _VALID_ENTITY_TYPES:
+            raise _BadRequest(
+                f'rules[{idx}].entity_type must be one of: {", ".join(sorted(_VALID_ENTITY_TYPES))}'
+            )
+        block = rule.get('block', False)
+        if not isinstance(block, bool):
+            raise _BadRequest(f'rules[{idx}].block must be a boolean')
+        validated.append({
+            'entity_id': entity_id,
+            'entity_type': entity_type,
+            'block': block,
+            'note': str(rule.get('note', '') or '').strip(),
+            'created_by': str(rule.get('created_by', '') or '').strip(),
+        })
+    return validated
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def access_rules_sync(request):
+    """
+    Replace the full access rule set with the payload from FG.
+
+    This is a full-table sync: BG's access rules are replaced entirely by
+    whatever FG sends. Rules not in the payload are deleted.
+    """
+    try:
+        auth_source = _require_control_auth(request)
+        payload, request_id, requested_by, is_super = _sync_context(request)
+        _require_requested_by(requested_by)
+        _require_super(is_super)
+        rules = payload.get('rules')
+        if rules is None:
+            raise _BadRequest('rules is required')
+        validated = _validate_access_rules(rules)
+        del auth_source
+    except _BadRequest as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
+    except _Unauthorized as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _Forbidden as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
+
+    synced_at = now()
+    incoming_ids = set()
+    created_count = 0
+    updated_count = 0
+
+    for rule in validated:
+        incoming_ids.add(rule['entity_id'])
+        obj, created = AccessRule.objects.update_or_create(
+            entity_id=rule['entity_id'],
+            defaults={
+                'entity_type': rule['entity_type'],
+                'block': rule['block'],
+                'note': rule['note'],
+                'created_by': rule['created_by'],
+                'synced_at': synced_at,
+            },
+        )
+        if created:
+            created_count += 1
+        else:
+            updated_count += 1
+
+    deleted_count, _ = AccessRule.objects.exclude(entity_id__in=incoming_ids).delete()
+
+    return _response(
+        request_id,
+        'completed',
+        message='Access rules synchronized',
+        created=created_count,
+        updated=updated_count,
+        deleted=deleted_count,
+        total=len(validated),
+    )
+
+
+@require_http_methods(['GET'])
+def access_rules(request):
+    """Return the current access rule set."""
+    rows = list(
+        AccessRule.objects.values(
+            'entity_id', 'entity_type', 'block', 'note', 'created_by', 'synced_at', 'updated_at',
+        ).order_by('entity_type', 'entity_id')
+    )
+    for row in rows:
+        if row['synced_at']:
+            row['synced_at'] = row['synced_at'].isoformat()
+        if row['updated_at']:
+            row['updated_at'] = row['updated_at'].isoformat()
+    return JsonResponse({
+        'status': 'completed',
+        'request_id': now().strftime('%Y%m%dT%H%M%SZ'),
+        'rules': rows,
+        'rule_count': len(rows),
+    })

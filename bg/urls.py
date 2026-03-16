@@ -25,4 +25,6 @@ urlpatterns = [
     path('v1/registrations', control.registrations),
     path('v1/health', control.health),
     path('v1/servers', control.servers),
+    path('v1/access-rules/sync', control.access_rules_sync),
+    path('v1/access-rules', control.access_rules),
 ]

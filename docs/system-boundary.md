@@ -111,6 +111,20 @@ Rules:
 - If `MURMUR_PROBE` is absent, normal ICE operation still proceeds.
 - `dbport` and `dbengine` may be supplied, but bg should discover them when absent.
 
+## Pilot Eligibility Decision Tables
+
+FG pushes access-control decision tables to BG via the control channel:
+
+- **allowed_access**: alliance IDs (in or out)
+- **blocked_access**: corp IDs, pilot IDs (within allowed alliances)
+
+Precedence: pilot > corp > alliance (most specific wins). A pilot-level allow
+overrides a corp block. Block checks are account-wide — if the main or any alt
+matches a block, the entire account is denied unless a pilot-level allow
+overrides it.
+
+BG stores its own copy of these tables and autonomously provisions accounts.
+
 ## Disallowed Cross-System Flow
 
 - No direct reads by `eveo` from this repo's private database.
