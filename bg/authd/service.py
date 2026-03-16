@@ -29,7 +29,7 @@ from bg.db import (
     db_config_from_env,
 )
 from bg.ice import load_ice_module
-from bg.passwords import LEGACY_BCRYPT_SHA256, verify_murmur_password
+from bg.passwords import verify_murmur_password
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -255,13 +255,6 @@ def authenticate(username, password, server_id, certhash=''):
         except Exception:
             logger.exception('Hash verification error for user %s', username)
             return None
-        if not password_ok and hashfn == LEGACY_BCRYPT_SHA256:
-            logger.warning(
-                'Legacy bcrypt Mumble password no longer supported for user %s on server_id=%s; password reset required',
-                username,
-                server_id,
-            )
-
     cert_ok = bool(stored_certhash and certhash and stored_certhash == certhash)
 
     if not password_ok and not cert_ok:
