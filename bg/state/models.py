@@ -233,6 +233,30 @@ class AccessRule(models.Model):
         return f'{action} {self.entity_type} {self.entity_id}'
 
 
+class AccessRuleSyncAudit(models.Model):
+    """
+    Immutable audit history for ACL sync operations.
+
+    The BG side should only insert rows when the effective active rules change.
+    Rows are never edited or deleted and are intended for troubleshooting and
+    incident review.
+    """
+
+    request_id = models.CharField(max_length=64, blank=True, default='')
+    requested_by = models.CharField(max_length=255, blank=True, default='')
+    action = models.CharField(max_length=16, default='sync', help_text='Operation that produced this record')
+    state_before = models.JSONField(blank=True, default=dict)
+    state_after = models.JSONField(blank=True, default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'bg_access_rule_audit'
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f'{self.action} ({self.requested_by or "unknown"}) @ {self.created_at}'
+
+
 class ControlChannelKey(models.Model):
     name = models.CharField(max_length=64, unique=True, default='fg_bg')
     shared_secret = models.CharField(

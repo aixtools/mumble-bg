@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+import secrets
 
 from django.contrib.auth.models import User
 
@@ -17,6 +18,16 @@ from fgbg_common.eligibility import (
     eligible_account_list,
     blocked_main_list,
 )
+from bg.passwords import build_murmur_password_record
+
+_FORBIDDEN_PASSWORD_CHARS = {"'", '"', '`', '\\'}
+_PASSWORD_CHARS = ''.join(
+    chr(code) for code in range(33, 127) if chr(code) not in _FORBIDDEN_PASSWORD_CHARS
+)
+
+
+def _new_password(length: int = 16) -> str:
+    return ''.join(secrets.choice(_PASSWORD_CHARS) for _ in range(length))
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +221,8 @@ def provision_registrations(
                     pk=user_id,
                     defaults={'username': username},
                 )
+                password = _new_password()
+                password_record = build_murmur_password_record(password)
                 MumbleUser.objects.create(
                     user=auth_user,
                     server=server,
@@ -218,6 +231,10 @@ def provision_registrations(
                     alliance_id=main.get('alliance_id'),
                     username=username,
                     display_name=username,
+                    pwhash=password_record['pwhash'],
+                    hashfn=password_record['hashfn'],
+                    pw_salt=password_record['pw_salt'],
+                    kdf_iterations=password_record['kdf_iterations'],
                     is_active=True,
                 )
             result.created += 1

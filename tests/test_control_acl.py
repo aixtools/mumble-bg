@@ -10,7 +10,7 @@ import json
 
 from django.test import TestCase, Client
 
-from bg.state.models import AccessRule
+from bg.state.models import AccessRule, AccessRuleSyncAudit
 
 
 def _post_acl_sync(client, rules, *, requested_by='test-user', is_super=True):
@@ -91,6 +91,35 @@ class AccessRulesSyncBasicTest(TestCase):
         self.assertEqual(data['deleted'], 2)
         self.assertEqual(data['total'], 0)
         self.assertEqual(AccessRule.objects.count(), 0)
+
+
+class AccessRulesSyncAuditTest(TestCase):
+    """Test append-only sync auditing behavior."""
+
+    def setUp(self):
+        self.client = Client()
+
+    def test_no_audit_when_rules_are_unchanged(self):
+        rules = [{'entity_id': 99000001, 'entity_type': 'alliance', 'deny': False}]
+        resp1 = _post_acl_sync(self.client, rules)
+        self.assertEqual(resp1.status_code, 200)
+        self.assertEqual(AccessRuleSyncAudit.objects.count(), 1)
+        _post_acl_sync(self.client, rules)
+        self.assertEqual(AccessRuleSyncAudit.objects.count(), 1)
+
+    def test_audit_written_when_acl_state_changes(self):
+        rules_v1 = [{'entity_id': 99000001, 'entity_type': 'alliance', 'deny': False}]
+        rules_v2 = [{'entity_id': 99000001, 'entity_type': 'alliance', 'deny': True}]
+        _post_acl_sync(self.client, rules_v1)
+        _post_acl_sync(self.client, rules_v2)
+        self.assertEqual(AccessRuleSyncAudit.objects.count(), 2)
+
+        audit = AccessRuleSyncAudit.objects.order_by('id').last()
+        self.assertEqual(audit.action, 'sync')
+        self.assertEqual(audit.requested_by, 'test-user')
+        self.assertEqual(audit.state_before[0]['entity_id'], 99000001)
+        self.assertEqual(audit.state_before[0]['deny'], False)
+        self.assertEqual(audit.state_after[0]['deny'], True)
 
     def test_synced_at_is_set(self):
         rules = [

@@ -21,6 +21,7 @@ from bg.pilot.registrations import (
 from bg.contracts import MurmurRegistrationContractPatch, MurmurRegistrationSnapshot
 from bg.state.models import (
     AccessRule,
+    AccessRuleSyncAudit,
     ENTITY_TYPE_ALLIANCE,
     ENTITY_TYPE_CORPORATION,
     ENTITY_TYPE_PILOT,
@@ -166,6 +167,65 @@ def _extract_payload_envelope(payload: dict[str, Any]) -> tuple[dict[str, Any], 
             raise _BadRequest('payload must be an object')
         return payload, nested
     return payload, payload
+
+
+def _snapshot_access_rules() -> list[dict[str, Any]]:
+    rows = list(
+        AccessRule.objects.values(
+            'entity_id',
+            'entity_type',
+            'deny',
+            'note',
+            'created_by',
+        ).order_by('entity_id')
+    )
+    return [
+        {
+            'entity_id': int(row['entity_id']),
+            'entity_type': str(row['entity_type']),
+            'deny': bool(row['deny']),
+            'note': str(row['note'] or ''),
+            'created_by': str(row['created_by'] or ''),
+        }
+        for row in rows
+    ]
+
+
+def _normalize_access_rule_map(rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized = []
+    for rule in rules:
+        normalized.append({
+            'entity_id': int(rule['entity_id']),
+            'entity_type': str(rule['entity_type']),
+            'deny': bool(rule['deny']),
+            'note': str(rule.get('note') or ''),
+            'created_by': str(rule.get('created_by') or ''),
+        })
+    return sorted(normalized, key=lambda entry: entry['entity_id'])
+
+
+def _rules_changed(
+    incoming: list[dict[str, Any]],
+    before: list[dict[str, Any]],
+) -> tuple[bool, list[dict[str, Any]]]:
+    before_by_id = {row['entity_id']: row for row in before}
+    after = _normalize_access_rule_map(incoming)
+
+    changed = False
+    for row in after:
+        prior = before_by_id.pop(row['entity_id'], None)
+        if prior is None:
+            changed = True
+            continue
+        for field in ('entity_type', 'deny', 'note', 'created_by'):
+            if prior.get(field) != row[field]:
+                changed = True
+                break
+
+    if before_by_id:
+        changed = True
+
+    return changed, after
 
 
 def _coerce_int(value: Any, *, field: str) -> int:
@@ -926,9 +986,7 @@ def access_rules_sync(request):
 
     This is a full-table sync: BG's access rules are replaced entirely by
     whatever FG sends. Rules not in the payload are deleted.
-
-    TODO(bg): when BG-side access-rule sync auditing is added, only append a new
-    audit row if this sync actually changes BG state.
+    Sync actions are audited only when the effective rule state changes.
     """
     try:
         auth_source = _require_control_auth(request)
@@ -951,10 +1009,12 @@ def access_rules_sync(request):
     incoming_ids = set()
     created_count = 0
     updated_count = 0
+    before_rules = _snapshot_access_rules()
+    state_changed, after_rules = _rules_changed(validated, before_rules)
 
     for rule in validated:
         incoming_ids.add(rule['entity_id'])
-        obj, created = AccessRule.objects.update_or_create(
+        _, created = AccessRule.objects.update_or_create(
             entity_id=rule['entity_id'],
             defaults={
                 'entity_type': rule['entity_type'],
@@ -970,7 +1030,17 @@ def access_rules_sync(request):
             updated_count += 1
 
     deleted_count, _ = AccessRule.objects.exclude(entity_id__in=incoming_ids).delete()
+    if deleted_count:
+        state_changed = True
 
+    if state_changed:
+        AccessRuleSyncAudit.objects.create(
+            request_id=request_id,
+            requested_by=requested_by,
+            action='sync',
+            state_before=before_rules,
+            state_after=after_rules,
+        )
     return _response(
         request_id,
         'completed',
