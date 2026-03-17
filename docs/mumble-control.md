@@ -387,6 +387,8 @@ Meaning:
 - FG pushes the full eligibility decision table to BG
 - this is a full-table sync: rules not in the payload are deleted from BG
 - superuser-gated (`is_super` required)
+- TODO: when BG-side sync auditing is added, append a sync audit record only if
+  the incoming rule set actually changes BG state
 
 ### `GET /v1/access-rules`
 

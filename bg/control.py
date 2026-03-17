@@ -871,6 +871,9 @@ def access_rules_sync(request):
 
     This is a full-table sync: BG's access rules are replaced entirely by
     whatever FG sends. Rules not in the payload are deleted.
+
+    TODO(bg): when BG-side access-rule sync auditing is added, only append a new
+    audit row if this sync actually changes BG state.
     """
     try:
         auth_source = _require_control_auth(request)
