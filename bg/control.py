@@ -6,7 +6,7 @@ import secrets
 from http import HTTPStatus
 from typing import Any
 
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.utils.timezone import now
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -618,6 +618,7 @@ def password_reset(request):
         server = _SERVER_RESOLVER.resolve(payload)
         mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
         desired_password = _read_preferred_password(payload)
+        encrypted_password = payload.get('encrypted_password')
         del auth_source  # validated, reserved for future audit logging
     except _BadRequest as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
@@ -627,6 +628,27 @@ def password_reset(request):
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
     except _NotFound as exc:
         return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
+
+    # Decrypt encrypted_password if provided (FG encrypts with BG's public key)
+    if encrypted_password and desired_password is None:
+        from bg.crypto import can_decrypt, decrypt_password
+        if not can_decrypt():
+            return _response(
+                request_id,
+                'failed',
+                message='Encrypted password provided but BG crypto is not configured',
+                code=HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+        try:
+            desired_password = decrypt_password(encrypted_password)
+            _validate_password(desired_password, field_name='encrypted_password (decrypted)')
+        except Exception as exc:
+            return _response(
+                request_id,
+                'failed',
+                message=f'Failed to decrypt password: {exc}',
+                code=HTTPStatus.BAD_REQUEST,
+            )
 
     requested = desired_password is None
     password = desired_password if desired_password is not None else _new_password()
@@ -780,6 +802,9 @@ def health(request):
     except Exception as exc:  # noqa: BLE001
         status = 'error'
         details['bg_db'] = f'error: {exc}'
+
+    from bg.crypto import status as crypto_status
+    details['crypto'] = crypto_status()
 
     return JsonResponse(
         {
@@ -946,3 +971,18 @@ def access_rules(request):
         'rules': rows,
         'rule_count': len(rows),
     })
+
+
+@require_http_methods(['GET'])
+def public_key(request):
+    """Serve BG's public key for FG to encrypt passwords."""
+    from bg.crypto import is_available, get_public_key_pem
+    if not is_available():
+        return JsonResponse(
+            {'status': 'not_configured', 'message': 'No public key available'},
+            status=503,
+        )
+    return HttpResponse(
+        get_public_key_pem(),
+        content_type='application/x-pem-file',
+    )

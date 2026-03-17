@@ -1,0 +1,16 @@
+[Unit]
+Description=mumble-bg HTTP control server
+After=network.target postgresql.service
+
+[Service]
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=__ENV_FILE__
+Environment=BG_KEY_DIR=__KEY_DIR__
+ExecStart=__VENV_DIR__/bin/python manage.py runserver __BIND_ADDR__
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

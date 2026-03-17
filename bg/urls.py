@@ -27,4 +27,5 @@ urlpatterns = [
     path('v1/servers', control.servers),
     path('v1/access-rules/sync', control.access_rules_sync),
     path('v1/access-rules', control.access_rules),
+    path('v1/public-key', control.public_key),
 ]
