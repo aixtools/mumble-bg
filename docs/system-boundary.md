@@ -115,12 +115,13 @@ Rules:
 
 FG pushes access-control decision tables to BG via the control channel:
 
-- **allowed_access**: alliance IDs (in or out)
-- **blocked_access**: corp IDs, pilot IDs (within allowed alliances)
+- **Allowed alliances** — unlisted alliances are implicitly denied.
+- **Denied corps/pilots** — within or overriding allowed alliances.
+- **Allowed pilots** — individual overrides that rescue access.
 
 Precedence: pilot > corp > alliance (most specific wins). A pilot-level allow
-overrides a corp block. Block checks are account-wide — if the main or any alt
-matches a block, the entire account is denied unless a pilot-level allow
+overrides a corp deny. Deny checks are account-wide — if the main or any alt
+matches a deny rule, the entire account is denied unless a pilot-level allow
 overrides it.
 
 BG stores its own copy of these tables and autonomously provisions accounts.

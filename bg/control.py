@@ -850,13 +850,13 @@ def _validate_access_rules(rules: list[Any]) -> list[dict[str, Any]]:
             raise _BadRequest(
                 f'rules[{idx}].entity_type must be one of: {", ".join(sorted(_VALID_ENTITY_TYPES))}'
             )
-        block = rule.get('block', False)
-        if not isinstance(block, bool):
-            raise _BadRequest(f'rules[{idx}].block must be a boolean')
+        deny = rule.get('deny', False)
+        if not isinstance(deny, bool):
+            raise _BadRequest(f'rules[{idx}].deny must be a boolean')
         validated.append({
             'entity_id': entity_id,
             'entity_type': entity_type,
-            'block': block,
+            'deny': deny,
             'note': str(rule.get('note', '') or '').strip(),
             'created_by': str(rule.get('created_by', '') or '').strip(),
         })
@@ -903,7 +903,7 @@ def access_rules_sync(request):
             entity_id=rule['entity_id'],
             defaults={
                 'entity_type': rule['entity_type'],
-                'block': rule['block'],
+                'deny': rule['deny'],
                 'note': rule['note'],
                 'created_by': rule['created_by'],
                 'synced_at': synced_at,
@@ -932,7 +932,7 @@ def access_rules(request):
     """Return the current access rule set."""
     rows = list(
         AccessRule.objects.values(
-            'entity_id', 'entity_type', 'block', 'note', 'created_by', 'synced_at', 'updated_at',
+            'entity_id', 'entity_type', 'deny', 'note', 'created_by', 'synced_at', 'updated_at',
         ).order_by('entity_type', 'entity_id')
     )
     for row in rows:
