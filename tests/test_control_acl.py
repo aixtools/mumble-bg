@@ -7,10 +7,26 @@ Run with:
 """
 
 import json
+from unittest.mock import Mock, patch
 
 from django.test import TestCase, Client
 
 from bg.state.models import AccessRule, AccessRuleSyncAudit
+from bg.provisioner import ProvisionResult
+
+
+def _post_provision(client, payload, *, requested_by='test-user', is_super=True):
+    body = {
+        'request_id': 'test-request-2',
+        'requested_by': requested_by,
+        'is_super': is_super,
+    }
+    body.update({'payload': payload})
+    return client.post(
+        '/v1/provision',
+        data=json.dumps(body),
+        content_type='application/json',
+    )
 
 
 def _post_acl_sync(client, rules, *, requested_by='test-user', is_super=True):
@@ -321,3 +337,55 @@ class AccessRulesReadEndpointTest(TestCase):
         rule_map = {r['entity_id']: r for r in data['rules']}
         self.assertFalse(rule_map[99000001]['deny'])
         self.assertTrue(rule_map[98000001]['deny'])
+
+
+class ProvisionEndpointTest(TestCase):
+    """Test /v1/provision orchestration options."""
+
+    def setUp(self):
+        self.client = Client()
+
+    def test_provision_without_reconcile_only_updates_local(self):
+        with patch('bg.authd.service.get_pilot_db_connection') as get_conn:
+            with patch('bg.provisioner.provision_registrations', return_value=ProvisionResult()) as provision_rows:
+                with patch('bg.pulse.reconciler.MurmurRegistrationReconciler') as reconciler:
+                    get_conn.return_value = Mock()
+                    resp = _post_provision(self.client, {'dry_run': True})
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertFalse(data['reconcile'])
+        self.assertEqual(data['murmur_reconcile'], [])
+        self.assertEqual(data['dry_run'], True)
+        provision_rows.assert_called_once_with(get_conn.return_value, dry_run=True)
+        reconciler.assert_not_called()
+
+    def test_provision_with_reconcile_calls_reconciler(self):
+        reconcile_result = Mock()
+        reconcile_result.to_dict.return_value = {'server_id': 1, 'server_name': 'Main', 'changed_count': 0}
+
+        reconciler_instance = Mock()
+        reconciler_instance.reconcile.return_value = [reconcile_result]
+
+        with patch('bg.authd.service.get_pilot_db_connection') as get_conn:
+            with patch('bg.provisioner.provision_registrations', return_value=ProvisionResult()) as provision_rows:
+                with patch(
+                    'bg.pulse.reconciler.MurmurRegistrationReconciler',
+                    return_value=reconciler_instance,
+                ) as reconciler_ctor:
+                    get_conn.return_value = Mock()
+                    resp = _post_provision(self.client, {'dry_run': True, 'reconcile': True, 'server_id': 7})
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data['reconcile'])
+        self.assertEqual(data['server_id'], 7)
+        self.assertEqual(data['murmur_reconcile'][0]['server_id'], 1)
+        provision_rows.assert_called_once_with(get_conn.return_value, dry_run=True)
+        reconciler_ctor.assert_called_once_with(server_id=7)
+        reconciler_instance.reconcile.assert_called_once_with(dry_run=True)
+
+    def test_provision_rejects_invalid_reconcile_value(self):
+        resp = _post_provision(self.client, {'reconcile': 'yes'})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['status'], 'rejected')

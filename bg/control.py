@@ -545,7 +545,7 @@ def registrations_sync(request):
 def registration_contract_sync(request):
     try:
         auth_source = _require_control_auth(request)
-        payload, request_id, requested_by, is_super = _sync_context(request)
+        payload, request_id, requested_by, _is_super = _sync_context(request)
         _require_requested_by(requested_by)
         _require_super(is_super)
         server = _SERVER_RESOLVER.resolve(payload)
@@ -781,7 +781,7 @@ def password_reset(request):
 def control_key_bootstrap(request):
     try:
         auth_source = _require_control_auth(request)
-        payload, request_id, requested_by, is_super = _sync_context(request)
+        payload, request_id, requested_by, _is_super = _sync_context(request)
         _require_requested_by(requested_by)
         _require_super(is_super)
         new_secret = _read_new_control_secret(payload)
@@ -1081,13 +1081,16 @@ def provision(request):
         auth_source = _require_control_auth(request)
         payload, request_id, requested_by, is_super = _sync_context(request)
         _require_requested_by(requested_by)
+        dry_run = _coerce_bool(payload.get('dry_run', False), field='dry_run')
+        reconcile = _coerce_bool(payload.get('reconcile', False), field='reconcile')
+        server_id = payload.get('server_id')
+        if server_id is not None:
+            server_id = _coerce_int(server_id, field='server_id')
         del auth_source
     except _BadRequest as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
     except _Unauthorized as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
-
-    dry_run = payload.get('dry_run', False)
 
     from bg.authd.service import get_pilot_db_connection
     from bg.db import PilotDBError
@@ -1113,10 +1116,36 @@ def provision(request):
     finally:
         conn.close()
 
+    reconcile_results: list[dict[str, object]] = []
+    if reconcile:
+        from bg.pulse.reconciler import MurmurRegistrationReconciler, MurmurReconcileError
+
+        try:
+            reconciler = MurmurRegistrationReconciler(server_id=server_id)
+            murmur_results = reconciler.reconcile(dry_run=dry_run)
+            reconcile_results = [item.to_dict() for item in murmur_results]
+        except MurmurReconcileError as exc:
+            return _response(
+                request_id,
+                'failed',
+                message=f'Reconciliation failed: {exc}',
+                code=HTTPStatus.BAD_GATEWAY,
+            )
+        except Exception as exc:
+            return _response(
+                request_id,
+                'failed',
+                message=f'Reconciliation failed: {exc}',
+                code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
+
     return _response(
         request_id, 'completed',
         message='Provisioning complete',
         dry_run=dry_run,
+        reconcile=reconcile,
+        server_id=server_id,
+        murmur_reconcile=reconcile_results,
         **result.to_dict(),
     )
 
