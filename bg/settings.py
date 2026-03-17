@@ -54,31 +54,46 @@ def _detect_database_engine(host):
     return 'postgresql'
 
 
-BG_DATABASE = db_config_from_env(
-    'DATABASES',
-    'bg',
-    default_database='MMBL_BG',
-    default_host='localhost',
-    default_username='cube',
-)
+# BG_USE_SQLITE: use sqlite for BG's own state tables (MumbleUser, AccessRule,
+# MumbleServer, etc.) while keeping the pilot source DB connection to PostgreSQL/MySQL
+# for character data.  Set to a file path, e.g. /tmp/bg-test.sqlite3.
+# The pilot source is accessed via PilotDBA (raw SQL, not Django ORM) and is
+# configured separately via the DATABASES env var's "pilot" key.
+_BG_SQLITE_PATH = os.environ.get('BG_USE_SQLITE', '').strip()
 
-DATABASE_HOST = BG_DATABASE.host
-DATABASE_ENGINE = _detect_database_engine(DATABASE_HOST)
-
-if DATABASE_ENGINE.startswith('mysql'):
-    DB_ENGINE = 'django.db.backends.mysql'
-else:
-    DB_ENGINE = 'django.db.backends.postgresql'
-
-DATABASES = {
-    'default': {
-        'ENGINE': DB_ENGINE,
-        'NAME': BG_DATABASE.name,
-        'HOST': DATABASE_HOST,
-        'USER': BG_DATABASE.user,
-        'PASSWORD': BG_DATABASE.password,
+if _BG_SQLITE_PATH:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': _BG_SQLITE_PATH,
+        }
     }
-}
+else:
+    BG_DATABASE = db_config_from_env(
+        'DATABASES',
+        'bg',
+        default_database='MMBL_BG',
+        default_host='localhost',
+        default_username='cube',
+    )
+
+    DATABASE_HOST = BG_DATABASE.host
+    DATABASE_ENGINE = _detect_database_engine(DATABASE_HOST)
+
+    if DATABASE_ENGINE.startswith('mysql'):
+        DB_ENGINE = 'django.db.backends.mysql'
+    else:
+        DB_ENGINE = 'django.db.backends.postgresql'
+
+    DATABASES = {
+        'default': {
+            'ENGINE': DB_ENGINE,
+            'NAME': BG_DATABASE.name,
+            'HOST': DATABASE_HOST,
+            'USER': BG_DATABASE.user,
+            'PASSWORD': BG_DATABASE.password,
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = []
 LANGUAGE_CODE = 'en-us'
