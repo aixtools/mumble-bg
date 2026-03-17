@@ -615,8 +615,24 @@ def password_reset(request):
         auth_source = _require_control_auth(request)
         payload, request_id, requested_by, _ = _sync_context(request)
         _require_requested_by(requested_by)
-        server = _SERVER_RESOLVER.resolve(payload)
-        mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
+
+        # Server is optional — if not provided, find the user's registration on any server
+        has_server = payload.get('server_name') or payload.get('server_id')
+        if has_server:
+            server = _SERVER_RESOLVER.resolve(payload)
+            mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
+        else:
+            pkid = payload.get('pkid')
+            if pkid is None:
+                raise _BadRequest('pkid is required')
+            pkid_value = _coerce_int(pkid, field='pkid')
+            mumble_user = MumbleUser.objects.filter(
+                user_id=pkid_value, is_active=True, server__is_active=True,
+            ).select_related('server').first()
+            if not mumble_user:
+                raise _NotFound('Mumble registration not found')
+            server = mumble_user.server
+
         desired_password = _read_preferred_password(payload)
         encrypted_password = payload.get('encrypted_password')
         del auth_source  # validated, reserved for future audit logging
@@ -659,15 +675,28 @@ def password_reset(request):
     mumble_user.pw_salt = record['pw_salt']
     mumble_user.kdf_iterations = record['kdf_iterations']
 
-    try:
-        murmur_userid = sync_murmur_registration(mumble_user, password=password)
-    except MurmurSyncError as exc:
-        return _response(
-            request_id,
-            'failed',
-            message=f'Failed to reset password: {exc}',
-            code=HTTPStatus.BAD_GATEWAY,
-        )
+    skip_ice = payload.get('skip_murmur_sync', False)
+    murmur_userid = None
+    ice_synced = False
+
+    if not skip_ice:
+        try:
+            murmur_userid = sync_murmur_registration(mumble_user, password=password)
+            ice_synced = True
+        except MurmurSyncError as exc:
+            # Store the hash locally even if ICE sync fails
+            mumble_user.save(update_fields=['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations', 'updated_at'])
+            return _response(
+                request_id,
+                'partial',
+                message=f'Password hash stored but Murmur sync failed: {exc}',
+                user_id=mumble_user.user_id,
+                server_name=server.name,
+                password=password,
+                password_generated=requested,
+                ice_synced=False,
+                code=HTTPStatus.OK,
+            )
 
     if murmur_userid is not None:
         mumble_user.mumble_userid = murmur_userid
@@ -677,12 +706,13 @@ def password_reset(request):
     return _response(
         request_id,
         'completed',
-        message='Password set and registration synchronized',
+        message='Password set and registration synchronized' if ice_synced else 'Password hash stored (Murmur sync skipped)',
         user_id=mumble_user.user_id,
         server_name=server.name,
         murmur_userid=murmur_userid,
         password=password,
         password_generated=requested,
+        ice_synced=ice_synced,
     )
 
 
@@ -971,6 +1001,54 @@ def access_rules(request):
         'rules': rows,
         'rule_count': len(rows),
     })
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def provision(request):
+    """Evaluate eligibility and provision MumbleUser rows."""
+    try:
+        auth_source = _require_control_auth(request)
+        payload, request_id, requested_by, is_super = _sync_context(request)
+        _require_requested_by(requested_by)
+        del auth_source
+    except _BadRequest as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
+    except _Unauthorized as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+
+    dry_run = payload.get('dry_run', False)
+
+    from bg.authd.service import get_pilot_db_connection
+    from bg.db import PilotDBError
+    from bg.provisioner import provision_registrations
+
+    try:
+        conn = get_pilot_db_connection()
+    except PilotDBError as exc:
+        return _response(
+            request_id, 'failed',
+            message=f'Cannot connect to pilot source: {exc}',
+            code=HTTPStatus.BAD_GATEWAY,
+        )
+
+    try:
+        result = provision_registrations(conn, dry_run=dry_run)
+    except Exception as exc:
+        return _response(
+            request_id, 'failed',
+            message=f'Provisioning failed: {exc}',
+            code=HTTPStatus.INTERNAL_SERVER_ERROR,
+        )
+    finally:
+        conn.close()
+
+    return _response(
+        request_id, 'completed',
+        message='Provisioning complete',
+        dry_run=dry_run,
+        **result.to_dict(),
+    )
 
 
 @require_http_methods(['GET'])
