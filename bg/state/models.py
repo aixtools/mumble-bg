@@ -254,13 +254,17 @@ class ControlChannelKey(models.Model):
 
 
 BG_AUDIT_ACTION_ACL_SYNC = 'acl_sync'
-BG_AUDIT_ACTION_MURMUR_USER_CREATED = 'murmur_user_created'
-BG_AUDIT_ACTION_PASSWORD_CHANGED = 'password_changed'
+BG_AUDIT_ACTION_PILOT_CREATE = 'pilot_create'
+BG_AUDIT_ACTION_PILOT_DISABLE = 'pilot_disable'
+BG_AUDIT_ACTION_PILOT_ENABLE = 'pilot_enable'
+BG_AUDIT_ACTION_PILOT_PWRESET = 'pilot_pwreset'
 
 BG_AUDIT_ACTION_CHOICES = [
     (BG_AUDIT_ACTION_ACL_SYNC, 'ACL Sync'),
-    (BG_AUDIT_ACTION_MURMUR_USER_CREATED, 'Murmur User Created'),
-    (BG_AUDIT_ACTION_PASSWORD_CHANGED, 'Password Changed'),
+    (BG_AUDIT_ACTION_PILOT_CREATE, 'Pilot Created'),
+    (BG_AUDIT_ACTION_PILOT_DISABLE, 'Pilot Disabled'),
+    (BG_AUDIT_ACTION_PILOT_ENABLE, 'Pilot Enabled'),
+    (BG_AUDIT_ACTION_PILOT_PWRESET, 'Pilot Password Reset'),
 ]
 
 
