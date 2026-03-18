@@ -90,7 +90,7 @@ def _find_existing_userid(server_proxy, username, preferred_userid=None):
     return None
 
 
-def sync_murmur_registration(mumble_user, password=None):
+def sync_murmur_registration(mumble_user, password=None, *, return_details=False):
     try:
         communicator, M, server_proxy = _open_target_server(mumble_user.server)
         try:
@@ -99,6 +99,7 @@ def sync_murmur_registration(mumble_user, password=None):
                 mumble_user.username,
                 preferred_userid=mumble_user.mumble_userid,
             )
+            created = target_userid is None
             info = _build_registration_info(M, mumble_user, password=password)
             if target_userid is None:
                 target_userid = server_proxy.registerUser(info)
@@ -108,6 +109,11 @@ def sync_murmur_registration(mumble_user, password=None):
                     )
             else:
                 server_proxy.updateRegistration(target_userid, info)
+            if return_details:
+                return {
+                    'murmur_userid': int(target_userid),
+                    'created': bool(created),
+                }
             return int(target_userid)
         finally:
             communicator.destroy()

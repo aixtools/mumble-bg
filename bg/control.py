@@ -6,6 +6,7 @@ import secrets
 from http import HTTPStatus
 from typing import Any
 
+from django.db import transaction
 from django.http import HttpResponse, JsonResponse
 from django.utils.timezone import now
 from django.views.decorators.csrf import csrf_exempt
@@ -21,6 +22,9 @@ from bg.pilot.registrations import (
 from bg.contracts import MurmurRegistrationContractPatch, MurmurRegistrationSnapshot
 from bg.state.models import (
     AccessRule,
+    BG_AUDIT_ACTION_ACL_SYNC,
+    BG_AUDIT_ACTION_MURMUR_USER_CREATED,
+    BG_AUDIT_ACTION_PASSWORD_CHANGED,
     ENTITY_TYPE_ALLIANCE,
     ENTITY_TYPE_CORPORATION,
     ENTITY_TYPE_PILOT,
@@ -28,6 +32,7 @@ from bg.state.models import (
     MumbleServer,
     MumbleSession,
     MumbleUser,
+    append_bg_audit,
 )
 
 _PilotRegistrationSnapshot = MurmurRegistrationSnapshot
@@ -457,7 +462,9 @@ def registrations_sync(request):
     password = _read_preferred_password(payload)
 
     try:
-        murmur_userid = sync_murmur_registration(mumble_user, password=password)
+        sync_result = sync_murmur_registration(mumble_user, password=password, return_details=True)
+        murmur_userid = int(sync_result.get('murmur_userid'))
+        created_in_murmur = bool(sync_result.get('created', False))
     except MurmurSyncError as exc:
         return _response(
             request_id,
@@ -469,6 +476,20 @@ def registrations_sync(request):
     if murmur_userid is not None and mumble_user.mumble_userid != murmur_userid:
         mumble_user.mumble_userid = murmur_userid
         mumble_user.save(update_fields=['mumble_userid', 'updated_at'])
+
+    if created_in_murmur:
+        append_bg_audit(
+            action=BG_AUDIT_ACTION_MURMUR_USER_CREATED,
+            request_id=request_id,
+            requested_by=requested_by,
+            source='registrations_sync',
+            user_id=mumble_user.user_id,
+            server_name=server.name,
+            metadata={
+                'murmur_userid': murmur_userid,
+                'username': mumble_user.username,
+            },
+        )
 
     return _response(
         request_id,
@@ -679,13 +700,34 @@ def password_reset(request):
     murmur_userid = None
     ice_synced = False
 
+    created_in_murmur = False
     if not skip_ice:
         try:
-            murmur_userid = sync_murmur_registration(mumble_user, password=password)
+            sync_result = sync_murmur_registration(
+                mumble_user,
+                password=password,
+                return_details=True,
+            )
+            murmur_userid = int(sync_result.get('murmur_userid'))
+            created_in_murmur = bool(sync_result.get('created', False))
             ice_synced = True
         except MurmurSyncError as exc:
             # Store the hash locally even if ICE sync fails
             mumble_user.save(update_fields=['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations', 'updated_at'])
+            append_bg_audit(
+                action=BG_AUDIT_ACTION_PASSWORD_CHANGED,
+                request_id=request_id,
+                requested_by=requested_by,
+                source='password_reset',
+                user_id=mumble_user.user_id,
+                server_name=server.name,
+                metadata={
+                    'status': 'partial',
+                    'ice_synced': False,
+                    'password_generated': requested,
+                    'reason': str(exc),
+                },
+            )
             return _response(
                 request_id,
                 'partial',
@@ -702,6 +744,35 @@ def password_reset(request):
         mumble_user.mumble_userid = murmur_userid
 
     mumble_user.save(update_fields=['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations', 'mumble_userid', 'updated_at'])
+
+    append_bg_audit(
+        action=BG_AUDIT_ACTION_PASSWORD_CHANGED,
+        request_id=request_id,
+        requested_by=requested_by,
+        source='password_reset',
+        user_id=mumble_user.user_id,
+        server_name=server.name,
+        metadata={
+            'status': 'completed',
+            'ice_synced': bool(ice_synced),
+            'password_generated': requested,
+            'skip_murmur_sync': bool(skip_ice),
+            'murmur_userid': murmur_userid,
+        },
+    )
+    if created_in_murmur:
+        append_bg_audit(
+            action=BG_AUDIT_ACTION_MURMUR_USER_CREATED,
+            request_id=request_id,
+            requested_by=requested_by,
+            source='password_reset',
+            user_id=mumble_user.user_id,
+            server_name=server.name,
+            metadata={
+                'murmur_userid': murmur_userid,
+                'username': mumble_user.username,
+            },
+        )
 
     return _response(
         request_id,
@@ -947,38 +1018,87 @@ def access_rules_sync(request):
     except _Forbidden as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
 
-    synced_at = now()
-    incoming_ids = set()
-    created_count = 0
-    updated_count = 0
+    existing = {
+        row['entity_id']: row
+        for row in AccessRule.objects.values('entity_id', 'entity_type', 'deny', 'note', 'created_by')
+    }
+    incoming = {rule['entity_id']: rule for rule in validated}
 
-    for rule in validated:
-        incoming_ids.add(rule['entity_id'])
-        obj, created = AccessRule.objects.update_or_create(
-            entity_id=rule['entity_id'],
-            defaults={
-                'entity_type': rule['entity_type'],
-                'deny': rule['deny'],
-                'note': rule['note'],
-                'created_by': rule['created_by'],
-                'synced_at': synced_at,
+    created_ids = sorted(set(incoming) - set(existing))
+    deleted_ids = sorted(set(existing) - set(incoming))
+    updated_ids = sorted(
+        entity_id
+        for entity_id in (set(existing) & set(incoming))
+        if (
+            existing[entity_id]['entity_type'] != incoming[entity_id]['entity_type']
+            or bool(existing[entity_id]['deny']) != bool(incoming[entity_id]['deny'])
+            or str(existing[entity_id]['note'] or '') != str(incoming[entity_id]['note'] or '')
+            or str(existing[entity_id]['created_by'] or '') != str(incoming[entity_id]['created_by'] or '')
+        )
+    )
+
+    if not created_ids and not updated_ids and not deleted_ids:
+        return _response(
+            request_id,
+            'completed',
+            message='Access rules already synchronized (no changes)',
+            created=0,
+            updated=0,
+            deleted=0,
+            total=len(validated),
+            noop=True,
+        )
+
+    synced_at = now()
+    with transaction.atomic():
+        for entity_id in created_ids:
+            rule = incoming[entity_id]
+            AccessRule.objects.create(
+                entity_id=rule['entity_id'],
+                entity_type=rule['entity_type'],
+                deny=rule['deny'],
+                note=rule['note'],
+                created_by=rule['created_by'],
+                synced_at=synced_at,
+            )
+
+        for entity_id in updated_ids:
+            rule = incoming[entity_id]
+            AccessRule.objects.filter(entity_id=entity_id).update(
+                entity_type=rule['entity_type'],
+                deny=rule['deny'],
+                note=rule['note'],
+                created_by=rule['created_by'],
+                synced_at=synced_at,
+            )
+
+        deleted_count, _ = AccessRule.objects.filter(entity_id__in=deleted_ids).delete()
+
+        append_bg_audit(
+            action=BG_AUDIT_ACTION_ACL_SYNC,
+            request_id=request_id,
+            requested_by=requested_by,
+            source='access_rules_sync',
+            metadata={
+                'created': len(created_ids),
+                'updated': len(updated_ids),
+                'deleted': int(deleted_count),
+                'total': len(validated),
+                'created_ids': created_ids,
+                'updated_ids': updated_ids,
+                'deleted_ids': deleted_ids,
             },
         )
-        if created:
-            created_count += 1
-        else:
-            updated_count += 1
-
-    deleted_count, _ = AccessRule.objects.exclude(entity_id__in=incoming_ids).delete()
 
     return _response(
         request_id,
         'completed',
         message='Access rules synchronized',
-        created=created_count,
-        updated=updated_count,
-        deleted=deleted_count,
+        created=len(created_ids),
+        updated=len(updated_ids),
+        deleted=int(deleted_count),
         total=len(validated),
+        noop=False,
     )
 
 
