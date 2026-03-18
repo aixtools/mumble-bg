@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mumble-bg"
-version = "0.3.1.dev1"
+version = "0.3.1.dev2"
 description = "Background Murmur service and control API paired with mumble-fg."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -20,7 +20,7 @@ dependencies = [
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["bg*"]
+include = ["bg*", "fgbg_common*"]
 
 [tool.setuptools.package-data]
 "bg.ice" = ["MumbleServer.ice", "README.md"]
