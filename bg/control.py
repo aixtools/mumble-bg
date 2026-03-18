@@ -25,6 +25,7 @@ from bg.state.models import (
     BG_AUDIT_ACTION_ACL_SYNC,
     BG_AUDIT_ACTION_PILOT_CREATE,
     BG_AUDIT_ACTION_PILOT_DISABLE,
+    BG_AUDIT_ACTION_PILOT_DISPLAY_NAME_UPDATE,
     BG_AUDIT_ACTION_PILOT_ENABLE,
     BG_AUDIT_ACTION_PILOT_PWRESET,
     ENTITY_TYPE_ALLIANCE,
@@ -1320,6 +1321,30 @@ def provision(request):
             request_id=request_id,
             requested_by=requested_by,
         )
+
+    if not dry_run:
+        for profile_update in result.to_dict().get('profile_updates', []):
+            if not isinstance(profile_update, dict):
+                continue
+            if 'display_name_to' not in profile_update:
+                continue
+            append_bg_audit(
+                action=BG_AUDIT_ACTION_PILOT_DISPLAY_NAME_UPDATE,
+                request_id=request_id,
+                requested_by=requested_by,
+                source='provision_sync',
+                user_id=profile_update.get('user_id'),
+                server_name=str(profile_update.get('server_name') or ''),
+                metadata={
+                    'status': 'completed',
+                    'display_name_from': profile_update.get('display_name_from'),
+                    'display_name_to': profile_update.get('display_name_to'),
+                    'evepilot_id_from': profile_update.get('evepilot_id_from'),
+                    'evepilot_id_to': profile_update.get('evepilot_id_to'),
+                    'username_from': profile_update.get('username_from'),
+                    'username_to': profile_update.get('username_to'),
+                },
+            )
 
     return _response(
         request_id, 'completed',

@@ -64,7 +64,7 @@ This document captures explicit contracts and implicit conventions between:
 - FG ACL audit is append-only.
 - BG audit is append-only.
 - Audit rows are not editable/deletable by normal admin flows.
-- Pilot-related BG audit actions are: `pilot_create`, `pilot_disable`, `pilot_enable`, `pilot_pwreset`.
+- Pilot-related BG audit actions are: `pilot_create`, `pilot_disable`, `pilot_enable`, `pilot_pwreset`, `pilot_login`, `pilot_display_name_update`.
 
 ### 2.3 Sync UX
 - Sync is non-blocking from UI perspective.
@@ -89,6 +89,7 @@ This document captures explicit contracts and implicit conventions between:
 ### 4.1 Identity Convention
 - Runtime key is Eve account/user identity (`user_id`/`pkid` in control payloads), not display name.
 - Character names are presentation values and can drift from stored runtime usernames.
+- Registration login name should remain stable per account (`pkid` identity); main-character changes update `display_name`.
 
 ### 4.2 Specificity Convention for ACL
 - Precedence is most-specific wins:
