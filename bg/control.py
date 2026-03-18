@@ -6,6 +6,7 @@ import secrets
 from http import HTTPStatus
 from typing import Any
 
+from django.db import transaction
 from django.http import HttpResponse, JsonResponse
 from django.utils.timezone import now
 from django.views.decorators.csrf import csrf_exempt
@@ -13,14 +14,19 @@ from django.views.decorators.http import require_http_methods
 
 from bg.passwords import build_murmur_password_record
 from bg.pilot.registrations import (
+    disable_murmur_registration,
     MurmurSyncError,
     sync_live_admin_membership,
     sync_murmur_registration,
-    unregister_murmur_registration,
 )
 from bg.contracts import MurmurRegistrationContractPatch, MurmurRegistrationSnapshot
 from bg.state.models import (
     AccessRule,
+    BG_AUDIT_ACTION_ACL_SYNC,
+    BG_AUDIT_ACTION_PILOT_CREATE,
+    BG_AUDIT_ACTION_PILOT_DISABLE,
+    BG_AUDIT_ACTION_PILOT_ENABLE,
+    BG_AUDIT_ACTION_PILOT_PWRESET,
     ENTITY_TYPE_ALLIANCE,
     ENTITY_TYPE_CORPORATION,
     ENTITY_TYPE_PILOT,
@@ -28,6 +34,7 @@ from bg.state.models import (
     MumbleServer,
     MumbleSession,
     MumbleUser,
+    append_bg_audit,
 )
 
 _PilotRegistrationSnapshot = MurmurRegistrationSnapshot
@@ -457,7 +464,9 @@ def registrations_sync(request):
     password = _read_preferred_password(payload)
 
     try:
-        murmur_userid = sync_murmur_registration(mumble_user, password=password)
+        sync_result = sync_murmur_registration(mumble_user, password=password, return_details=True)
+        murmur_userid = int(sync_result.get('murmur_userid'))
+        created_in_murmur = bool(sync_result.get('created', False))
     except MurmurSyncError as exc:
         return _response(
             request_id,
@@ -469,6 +478,34 @@ def registrations_sync(request):
     if murmur_userid is not None and mumble_user.mumble_userid != murmur_userid:
         mumble_user.mumble_userid = murmur_userid
         mumble_user.save(update_fields=['mumble_userid', 'updated_at'])
+
+    if created_in_murmur:
+        append_bg_audit(
+            action=BG_AUDIT_ACTION_PILOT_CREATE,
+            request_id=request_id,
+            requested_by=requested_by,
+            source='registrations_sync',
+            user_id=mumble_user.user_id,
+            server_name=server.name,
+            metadata={
+                'murmur_userid': murmur_userid,
+                'username': mumble_user.username,
+            },
+        )
+
+    if bool(sync_result.get('reenabled', False)):
+        append_bg_audit(
+            action=BG_AUDIT_ACTION_PILOT_ENABLE,
+            request_id=request_id,
+            requested_by=requested_by,
+            source='registrations_sync',
+            user_id=mumble_user.user_id,
+            server_name=server.name,
+            metadata={
+                'murmur_userid': murmur_userid,
+                'username': mumble_user.username,
+            },
+        )
 
     return _response(
         request_id,
@@ -532,7 +569,7 @@ def registrations_disable(request):
         return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
 
     try:
-        disabled = unregister_murmur_registration(mumble_user)
+        disabled_result = disable_murmur_registration(mumble_user)
     except MurmurSyncError as exc:
         return _response(
             request_id,
@@ -540,16 +577,31 @@ def registrations_disable(request):
             message=f'Failed to disable registration: {exc}',
             code=HTTPStatus.BAD_GATEWAY,
         )
-
-    if disabled:
-        mumble_user.mumble_userid = None
+    disabled = bool(disabled_result.get('changed', False))
+    murmur_userid = disabled_result.get('murmur_userid')
+    if murmur_userid is not None and mumble_user.mumble_userid != int(murmur_userid):
+        mumble_user.mumble_userid = int(murmur_userid)
         mumble_user.save(update_fields=['mumble_userid', 'updated_at'])
+    if disabled:
+        append_bg_audit(
+            action=BG_AUDIT_ACTION_PILOT_DISABLE,
+            request_id=request_id,
+            requested_by=requested_by,
+            source='registrations_disable',
+            user_id=mumble_user.user_id,
+            server_name=server.name,
+            metadata={
+                'murmur_userid': murmur_userid,
+                'username': mumble_user.username,
+            },
+        )
 
     return _response(
         request_id,
         'completed',
-        message='Registration disabled' if disabled else 'No active Murmur registration found',
+        message='Registration disabled' if disabled else 'Registration already disabled or missing',
         disabled=disabled,
+        murmur_userid=murmur_userid,
         user_id=mumble_user.user_id,
         server_name=server.name,
     )
@@ -679,13 +731,34 @@ def password_reset(request):
     murmur_userid = None
     ice_synced = False
 
+    created_in_murmur = False
     if not skip_ice:
         try:
-            murmur_userid = sync_murmur_registration(mumble_user, password=password)
+            sync_result = sync_murmur_registration(
+                mumble_user,
+                password=password,
+                return_details=True,
+            )
+            murmur_userid = int(sync_result.get('murmur_userid'))
+            created_in_murmur = bool(sync_result.get('created', False))
             ice_synced = True
         except MurmurSyncError as exc:
             # Store the hash locally even if ICE sync fails
             mumble_user.save(update_fields=['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations', 'updated_at'])
+            append_bg_audit(
+                action=BG_AUDIT_ACTION_PILOT_PWRESET,
+                request_id=request_id,
+                requested_by=requested_by,
+                source='password_reset',
+                user_id=mumble_user.user_id,
+                server_name=server.name,
+                metadata={
+                    'status': 'partial',
+                    'ice_synced': False,
+                    'password_generated': requested,
+                    'reason': str(exc),
+                },
+            )
             return _response(
                 request_id,
                 'partial',
@@ -702,6 +775,35 @@ def password_reset(request):
         mumble_user.mumble_userid = murmur_userid
 
     mumble_user.save(update_fields=['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations', 'mumble_userid', 'updated_at'])
+
+    append_bg_audit(
+        action=BG_AUDIT_ACTION_PILOT_PWRESET,
+        request_id=request_id,
+        requested_by=requested_by,
+        source='password_reset',
+        user_id=mumble_user.user_id,
+        server_name=server.name,
+        metadata={
+            'status': 'completed',
+            'ice_synced': bool(ice_synced),
+            'password_generated': requested,
+            'skip_murmur_sync': bool(skip_ice),
+            'murmur_userid': murmur_userid,
+        },
+    )
+    if created_in_murmur:
+        append_bg_audit(
+            action=BG_AUDIT_ACTION_PILOT_CREATE,
+            request_id=request_id,
+            requested_by=requested_by,
+            source='password_reset',
+            user_id=mumble_user.user_id,
+            server_name=server.name,
+            metadata={
+                'murmur_userid': murmur_userid,
+                'username': mumble_user.username,
+            },
+        )
 
     return _response(
         request_id,
@@ -927,8 +1029,7 @@ def access_rules_sync(request):
     This is a full-table sync: BG's access rules are replaced entirely by
     whatever FG sends. Rules not in the payload are deleted.
 
-    TODO(bg): when BG-side access-rule sync auditing is added, only append a new
-    audit row if this sync actually changes BG state.
+    BG ACL audit rows are appended only when the incoming rules produce a state delta.
     """
     try:
         auth_source = _require_control_auth(request)
@@ -947,38 +1048,87 @@ def access_rules_sync(request):
     except _Forbidden as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
 
-    synced_at = now()
-    incoming_ids = set()
-    created_count = 0
-    updated_count = 0
+    existing = {
+        row['entity_id']: row
+        for row in AccessRule.objects.values('entity_id', 'entity_type', 'deny', 'note', 'created_by')
+    }
+    incoming = {rule['entity_id']: rule for rule in validated}
 
-    for rule in validated:
-        incoming_ids.add(rule['entity_id'])
-        obj, created = AccessRule.objects.update_or_create(
-            entity_id=rule['entity_id'],
-            defaults={
-                'entity_type': rule['entity_type'],
-                'deny': rule['deny'],
-                'note': rule['note'],
-                'created_by': rule['created_by'],
-                'synced_at': synced_at,
+    created_ids = sorted(set(incoming) - set(existing))
+    deleted_ids = sorted(set(existing) - set(incoming))
+    updated_ids = sorted(
+        entity_id
+        for entity_id in (set(existing) & set(incoming))
+        if (
+            existing[entity_id]['entity_type'] != incoming[entity_id]['entity_type']
+            or bool(existing[entity_id]['deny']) != bool(incoming[entity_id]['deny'])
+            or str(existing[entity_id]['note'] or '') != str(incoming[entity_id]['note'] or '')
+            or str(existing[entity_id]['created_by'] or '') != str(incoming[entity_id]['created_by'] or '')
+        )
+    )
+
+    if not created_ids and not updated_ids and not deleted_ids:
+        return _response(
+            request_id,
+            'completed',
+            message='Access rules already synchronized (no changes)',
+            created=0,
+            updated=0,
+            deleted=0,
+            total=len(validated),
+            noop=True,
+        )
+
+    synced_at = now()
+    with transaction.atomic():
+        for entity_id in created_ids:
+            rule = incoming[entity_id]
+            AccessRule.objects.create(
+                entity_id=rule['entity_id'],
+                entity_type=rule['entity_type'],
+                deny=rule['deny'],
+                note=rule['note'],
+                created_by=rule['created_by'],
+                synced_at=synced_at,
+            )
+
+        for entity_id in updated_ids:
+            rule = incoming[entity_id]
+            AccessRule.objects.filter(entity_id=entity_id).update(
+                entity_type=rule['entity_type'],
+                deny=rule['deny'],
+                note=rule['note'],
+                created_by=rule['created_by'],
+                synced_at=synced_at,
+            )
+
+        deleted_count, _ = AccessRule.objects.filter(entity_id__in=deleted_ids).delete()
+
+        append_bg_audit(
+            action=BG_AUDIT_ACTION_ACL_SYNC,
+            request_id=request_id,
+            requested_by=requested_by,
+            source='access_rules_sync',
+            metadata={
+                'created': len(created_ids),
+                'updated': len(updated_ids),
+                'deleted': int(deleted_count),
+                'total': len(validated),
+                'created_ids': created_ids,
+                'updated_ids': updated_ids,
+                'deleted_ids': deleted_ids,
             },
         )
-        if created:
-            created_count += 1
-        else:
-            updated_count += 1
-
-    deleted_count, _ = AccessRule.objects.exclude(entity_id__in=incoming_ids).delete()
 
     return _response(
         request_id,
         'completed',
         message='Access rules synchronized',
-        created=created_count,
-        updated=updated_count,
-        deleted=deleted_count,
+        created=len(created_ids),
+        updated=len(updated_ids),
+        deleted=int(deleted_count),
         total=len(validated),
+        noop=False,
     )
 
 
@@ -1003,6 +1153,118 @@ def access_rules(request):
     })
 
 
+def _reconcile_murmur_with_bg_state(*, request_id: str, requested_by: str) -> dict[str, Any]:
+    """Converge Murmur registrations to BG active/inactive state."""
+    summary: dict[str, Any] = {
+        'enabled': True,
+        'created': 0,
+        'disabled': 0,
+        'enabled_count': 0,
+        'already_present': 0,
+        'already_disabled': 0,
+        'missing': 0,
+        'errors': [],
+    }
+
+    rows = list(
+        MumbleUser.objects.select_related('server').filter(server__is_active=True).order_by('server_id', 'user_id')
+    )
+    for mumble_user in rows:
+        server_name = mumble_user.server.name
+        if mumble_user.is_active:
+            create_password = _new_password()
+            try:
+                sync_result = sync_murmur_registration(
+                    mumble_user,
+                    create_password=create_password,
+                    return_details=True,
+                )
+            except MurmurSyncError as exc:
+                summary['errors'].append(f'active user_id={mumble_user.user_id}: {exc}')
+                continue
+
+            murmur_userid = sync_result.get('murmur_userid')
+            created = bool(sync_result.get('created', False))
+            reenabled = bool(sync_result.get('reenabled', False))
+            update_fields: list[str] = []
+            if murmur_userid is not None and mumble_user.mumble_userid != int(murmur_userid):
+                mumble_user.mumble_userid = int(murmur_userid)
+                update_fields.append('mumble_userid')
+
+            if created:
+                password_record = build_murmur_password_record(create_password)
+                mumble_user.pwhash = password_record['pwhash']
+                mumble_user.hashfn = password_record['hashfn']
+                mumble_user.pw_salt = password_record['pw_salt']
+                mumble_user.kdf_iterations = password_record['kdf_iterations']
+                update_fields.extend(['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations'])
+                summary['created'] += 1
+                append_bg_audit(
+                    action=BG_AUDIT_ACTION_PILOT_CREATE,
+                    request_id=request_id,
+                    requested_by=requested_by,
+                    source='provision_reconcile',
+                    user_id=mumble_user.user_id,
+                    server_name=server_name,
+                    metadata={
+                        'murmur_userid': murmur_userid,
+                        'username': mumble_user.username,
+                    },
+                )
+            else:
+                summary['already_present'] += 1
+            if update_fields:
+                mumble_user.save(update_fields=[*update_fields, 'updated_at'])
+            if reenabled:
+                summary['enabled_count'] += 1
+                append_bg_audit(
+                    action=BG_AUDIT_ACTION_PILOT_ENABLE,
+                    request_id=request_id,
+                    requested_by=requested_by,
+                    source='provision_reconcile',
+                    user_id=mumble_user.user_id,
+                    server_name=server_name,
+                    metadata={
+                        'murmur_userid': murmur_userid,
+                        'username': mumble_user.username,
+                    },
+                )
+            continue
+
+        try:
+            disabled_result = disable_murmur_registration(mumble_user)
+        except MurmurSyncError as exc:
+            summary['errors'].append(f'inactive user_id={mumble_user.user_id}: {exc}')
+            continue
+
+        murmur_userid = disabled_result.get('murmur_userid')
+        if murmur_userid is None:
+            summary['missing'] += 1
+            continue
+        if mumble_user.mumble_userid != int(murmur_userid):
+            mumble_user.mumble_userid = int(murmur_userid)
+            mumble_user.save(update_fields=['mumble_userid', 'updated_at'])
+
+        if bool(disabled_result.get('changed', False)):
+            summary['disabled'] += 1
+            append_bg_audit(
+                action=BG_AUDIT_ACTION_PILOT_DISABLE,
+                request_id=request_id,
+                requested_by=requested_by,
+                source='provision_reconcile',
+                user_id=mumble_user.user_id,
+                server_name=server_name,
+                metadata={
+                    'murmur_userid': murmur_userid,
+                    'username': mumble_user.username,
+                },
+            )
+        else:
+            summary['already_disabled'] += 1
+
+    return summary
+
+
 @csrf_exempt
 @require_http_methods(['POST'])
 def provision(request):
@@ -1017,7 +1279,8 @@ def provision(request):
     except _Unauthorized as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
 
-    dry_run = payload.get('dry_run', False)
+    dry_run = bool(payload.get('dry_run', False))
+    reconcile_murmur = bool(payload.get('reconcile', True))
 
     from bg.authd.service import get_pilot_db_connection
     from bg.db import PilotDBError
@@ -1043,10 +1306,26 @@ def provision(request):
     finally:
         conn.close()
 
+    murmur_reconcile: dict[str, Any] = {
+        'enabled': bool(reconcile_murmur),
+        'created': 0,
+        'disabled': 0,
+        'already_present': 0,
+        'already_disabled': 0,
+        'missing': 0,
+        'errors': [],
+    }
+    if not dry_run and reconcile_murmur:
+        murmur_reconcile = _reconcile_murmur_with_bg_state(
+            request_id=request_id,
+            requested_by=requested_by,
+        )
+
     return _response(
         request_id, 'completed',
         message='Provisioning complete',
         dry_run=dry_run,
+        murmur_reconcile=murmur_reconcile,
         **result.to_dict(),
     )
 

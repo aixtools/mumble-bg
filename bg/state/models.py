@@ -251,3 +251,64 @@ class ControlChannelKey(models.Model):
 
     def __str__(self):
         return self.name
+
+
+BG_AUDIT_ACTION_ACL_SYNC = 'acl_sync'
+BG_AUDIT_ACTION_PILOT_CREATE = 'pilot_create'
+BG_AUDIT_ACTION_PILOT_DISABLE = 'pilot_disable'
+BG_AUDIT_ACTION_PILOT_ENABLE = 'pilot_enable'
+BG_AUDIT_ACTION_PILOT_PWRESET = 'pilot_pwreset'
+
+BG_AUDIT_ACTION_CHOICES = [
+    (BG_AUDIT_ACTION_ACL_SYNC, 'ACL Sync'),
+    (BG_AUDIT_ACTION_PILOT_CREATE, 'Pilot Created'),
+    (BG_AUDIT_ACTION_PILOT_DISABLE, 'Pilot Disabled'),
+    (BG_AUDIT_ACTION_PILOT_ENABLE, 'Pilot Enabled'),
+    (BG_AUDIT_ACTION_PILOT_PWRESET, 'Pilot Password Reset'),
+]
+
+
+class BgAudit(models.Model):
+    """Append-only BG audit log for control mutations and Murmur operations."""
+
+    action = models.CharField(max_length=64, choices=BG_AUDIT_ACTION_CHOICES)
+    request_id = models.CharField(max_length=64, blank=True, default='')
+    requested_by = models.CharField(max_length=255, blank=True, default='')
+    source = models.CharField(max_length=64, blank=True, default='')
+    user_id = models.BigIntegerField(null=True, blank=True)
+    server_name = models.CharField(max_length=255, blank=True, default='')
+    metadata = models.JSONField(blank=True, default=dict)
+    occurred_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'bg_audit'
+        ordering = ['-occurred_at', '-id']
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise RuntimeError('BgAudit entries are append-only.')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise RuntimeError('BgAudit entries are append-only.')
+
+
+def append_bg_audit(
+    *,
+    action: str,
+    request_id: str = '',
+    requested_by: str = '',
+    source: str = '',
+    user_id: int | None = None,
+    server_name: str = '',
+    metadata: dict | None = None,
+) -> BgAudit:
+    return BgAudit.objects.create(
+        action=str(action),
+        request_id=str(request_id or ''),
+        requested_by=str(requested_by or ''),
+        source=str(source or ''),
+        user_id=int(user_id) if user_id is not None else None,
+        server_name=str(server_name or ''),
+        metadata=metadata or {},
+    )
