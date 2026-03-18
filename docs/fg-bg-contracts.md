@@ -42,7 +42,8 @@ This document captures explicit contracts and implicit conventions between:
 ### 1.5 Password Reset Contract
 - FG reset/set actions target BG by `pkid` (BG-side user identity).
 - In mock UI mode, FG maps selected `character_id` to Eve `user_id` before BG call.
-- BG updates password hash state and attempts Murmur sync.
+- BG generates password hash material (`pwhash`, `pw_salt`, `kdf_iterations`) in BG and uses the same plaintext password for Murmur update.
+- Default password KDF iterations are `16000` unless explicitly overridden.
 - BG audits password change attempts/outcomes.
 
 ### 1.6 Murmur Registration Contract
@@ -50,6 +51,7 @@ This document captures explicit contracts and implicit conventions between:
 - Disable endpoint keeps registration present and sets disabled state (does not delete row).
 - BG audits Murmur user creation events.
 - BG sync/reconcile ensures all active BG users are present in Murmur (except unmanaged Murmur SuperUser).
+- When reconcile creates a new Murmur user, BG stores matching password hash material from that same generated password.
 - Inactive BG users are kept in Murmur but forced into disabled state; disable transitions are audited.
 
 ## 2) Explicit Admin Contracts

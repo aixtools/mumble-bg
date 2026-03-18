@@ -1172,10 +1172,11 @@ def _reconcile_murmur_with_bg_state(*, request_id: str, requested_by: str) -> di
     for mumble_user in rows:
         server_name = mumble_user.server.name
         if mumble_user.is_active:
+            create_password = _new_password()
             try:
                 sync_result = sync_murmur_registration(
                     mumble_user,
-                    create_password=_new_password(),
+                    create_password=create_password,
                     return_details=True,
                 )
             except MurmurSyncError as exc:
@@ -1185,11 +1186,18 @@ def _reconcile_murmur_with_bg_state(*, request_id: str, requested_by: str) -> di
             murmur_userid = sync_result.get('murmur_userid')
             created = bool(sync_result.get('created', False))
             reenabled = bool(sync_result.get('reenabled', False))
+            update_fields: list[str] = []
             if murmur_userid is not None and mumble_user.mumble_userid != int(murmur_userid):
                 mumble_user.mumble_userid = int(murmur_userid)
-                mumble_user.save(update_fields=['mumble_userid', 'updated_at'])
+                update_fields.append('mumble_userid')
 
             if created:
+                password_record = build_murmur_password_record(create_password)
+                mumble_user.pwhash = password_record['pwhash']
+                mumble_user.hashfn = password_record['hashfn']
+                mumble_user.pw_salt = password_record['pw_salt']
+                mumble_user.kdf_iterations = password_record['kdf_iterations']
+                update_fields.extend(['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations'])
                 summary['created'] += 1
                 append_bg_audit(
                     action=BG_AUDIT_ACTION_PILOT_CREATE,
@@ -1205,6 +1213,8 @@ def _reconcile_murmur_with_bg_state(*, request_id: str, requested_by: str) -> di
                 )
             else:
                 summary['already_present'] += 1
+            if update_fields:
+                mumble_user.save(update_fields=[*update_fields, 'updated_at'])
             if reenabled:
                 summary['enabled_count'] += 1
                 append_bg_audit(
