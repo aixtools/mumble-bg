@@ -434,6 +434,31 @@ def _sync_context(request):
     return payload, request_id, requested_by, is_super
 
 
+def _append_profile_update_audits(*, request_id: str, requested_by: str, profile_updates: list[dict[str, Any]]):
+    for profile_update in profile_updates:
+        if not isinstance(profile_update, dict):
+            continue
+        if 'display_name_to' not in profile_update:
+            continue
+        append_bg_audit(
+            action=BG_AUDIT_ACTION_PILOT_DISPLAY_NAME_UPDATE,
+            request_id=request_id,
+            requested_by=requested_by,
+            source='provision_sync',
+            user_id=profile_update.get('user_id'),
+            server_name=str(profile_update.get('server_name') or ''),
+            metadata={
+                'status': 'completed',
+                'display_name_from': profile_update.get('display_name_from'),
+                'display_name_to': profile_update.get('display_name_to'),
+                'evepilot_id_from': profile_update.get('evepilot_id_from'),
+                'evepilot_id_to': profile_update.get('evepilot_id_to'),
+                'username_from': profile_update.get('username_from'),
+                'username_to': profile_update.get('username_to'),
+            },
+        )
+
+
 @csrf_exempt
 @require_http_methods(['POST'])
 def registrations_sync(request):
@@ -1068,68 +1093,121 @@ def access_rules_sync(request):
         )
     )
 
-    if not created_ids and not updated_ids and not deleted_ids:
+    deleted_count = 0
+    noop = not created_ids and not updated_ids and not deleted_ids
+
+    if not noop:
+        synced_at = now()
+        with transaction.atomic():
+            for entity_id in created_ids:
+                rule = incoming[entity_id]
+                AccessRule.objects.create(
+                    entity_id=rule['entity_id'],
+                    entity_type=rule['entity_type'],
+                    deny=rule['deny'],
+                    note=rule['note'],
+                    created_by=rule['created_by'],
+                    synced_at=synced_at,
+                )
+
+            for entity_id in updated_ids:
+                rule = incoming[entity_id]
+                AccessRule.objects.filter(entity_id=entity_id).update(
+                    entity_type=rule['entity_type'],
+                    deny=rule['deny'],
+                    note=rule['note'],
+                    created_by=rule['created_by'],
+                    synced_at=synced_at,
+                )
+
+            deleted_count, _ = AccessRule.objects.filter(entity_id__in=deleted_ids).delete()
+
+            append_bg_audit(
+                action=BG_AUDIT_ACTION_ACL_SYNC,
+                request_id=request_id,
+                requested_by=requested_by,
+                source='access_rules_sync',
+                metadata={
+                    'created': len(created_ids),
+                    'updated': len(updated_ids),
+                    'deleted': int(deleted_count),
+                    'total': len(validated),
+                    'created_ids': created_ids,
+                    'updated_ids': updated_ids,
+                    'deleted_ids': deleted_ids,
+                },
+            )
+
+    reconcile_murmur = bool(payload.get('reconcile', True))
+    from bg.authd.service import get_pilot_db_connection
+    from bg.db import PilotDBError
+    from bg.provisioner import provision_registrations
+
+    try:
+        conn = get_pilot_db_connection()
+    except PilotDBError as exc:
         return _response(
             request_id,
-            'completed',
-            message='Access rules already synchronized (no changes)',
-            created=0,
-            updated=0,
-            deleted=0,
+            'failed',
+            message=f'Access rules synchronized but pilot-source provision failed to connect: {exc}',
+            code=HTTPStatus.BAD_GATEWAY,
+            created=len(created_ids),
+            updated=len(updated_ids),
+            deleted=int(deleted_count),
             total=len(validated),
-            noop=True,
+            noop=noop,
         )
 
-    synced_at = now()
-    with transaction.atomic():
-        for entity_id in created_ids:
-            rule = incoming[entity_id]
-            AccessRule.objects.create(
-                entity_id=rule['entity_id'],
-                entity_type=rule['entity_type'],
-                deny=rule['deny'],
-                note=rule['note'],
-                created_by=rule['created_by'],
-                synced_at=synced_at,
-            )
+    try:
+        provision_result = provision_registrations(conn, dry_run=False)
+    except Exception as exc:  # noqa: BLE001
+        return _response(
+            request_id,
+            'failed',
+            message=f'Access rules synchronized but provisioning failed: {exc}',
+            code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            created=len(created_ids),
+            updated=len(updated_ids),
+            deleted=int(deleted_count),
+            total=len(validated),
+            noop=noop,
+        )
+    finally:
+        conn.close()
 
-        for entity_id in updated_ids:
-            rule = incoming[entity_id]
-            AccessRule.objects.filter(entity_id=entity_id).update(
-                entity_type=rule['entity_type'],
-                deny=rule['deny'],
-                note=rule['note'],
-                created_by=rule['created_by'],
-                synced_at=synced_at,
-            )
+    provision_payload = provision_result.to_dict()
+    _append_profile_update_audits(
+        request_id=request_id,
+        requested_by=requested_by,
+        profile_updates=provision_payload.get('profile_updates', []),
+    )
 
-        deleted_count, _ = AccessRule.objects.filter(entity_id__in=deleted_ids).delete()
-
-        append_bg_audit(
-            action=BG_AUDIT_ACTION_ACL_SYNC,
+    murmur_reconcile: dict[str, Any] = {
+        'enabled': bool(reconcile_murmur),
+        'created': 0,
+        'disabled': 0,
+        'already_present': 0,
+        'already_disabled': 0,
+        'missing': 0,
+        'errors': [],
+    }
+    if reconcile_murmur:
+        murmur_reconcile = _reconcile_murmur_with_bg_state(
             request_id=request_id,
             requested_by=requested_by,
-            source='access_rules_sync',
-            metadata={
-                'created': len(created_ids),
-                'updated': len(updated_ids),
-                'deleted': int(deleted_count),
-                'total': len(validated),
-                'created_ids': created_ids,
-                'updated_ids': updated_ids,
-                'deleted_ids': deleted_ids,
-            },
         )
 
     return _response(
         request_id,
         'completed',
-        message='Access rules synchronized',
+        message='Access rules synchronized and provisioning reconciled' if not noop else 'Access rules unchanged; provisioning reconciled',
         created=len(created_ids),
         updated=len(updated_ids),
         deleted=int(deleted_count),
         total=len(validated),
-        noop=False,
+        noop=noop,
+        murmur_reconcile=murmur_reconcile,
+        **provision_payload,
     )
 
 
@@ -1323,28 +1401,11 @@ def provision(request):
         )
 
     if not dry_run:
-        for profile_update in result.to_dict().get('profile_updates', []):
-            if not isinstance(profile_update, dict):
-                continue
-            if 'display_name_to' not in profile_update:
-                continue
-            append_bg_audit(
-                action=BG_AUDIT_ACTION_PILOT_DISPLAY_NAME_UPDATE,
-                request_id=request_id,
-                requested_by=requested_by,
-                source='provision_sync',
-                user_id=profile_update.get('user_id'),
-                server_name=str(profile_update.get('server_name') or ''),
-                metadata={
-                    'status': 'completed',
-                    'display_name_from': profile_update.get('display_name_from'),
-                    'display_name_to': profile_update.get('display_name_to'),
-                    'evepilot_id_from': profile_update.get('evepilot_id_from'),
-                    'evepilot_id_to': profile_update.get('evepilot_id_to'),
-                    'username_from': profile_update.get('username_from'),
-                    'username_to': profile_update.get('username_to'),
-                },
-            )
+        _append_profile_update_audits(
+            request_id=request_id,
+            requested_by=requested_by,
+            profile_updates=result.to_dict().get('profile_updates', []),
+        )
 
     return _response(
         request_id, 'completed',
