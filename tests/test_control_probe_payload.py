@@ -25,7 +25,7 @@ class ProbePayloadShapeTest(TestCase):
             pwhash='hash',
         )
 
-    def test_pilot_probe_payload_includes_user_id(self):
+    def test_pilot_probe_payload_includes_pkid(self):
         response = self.client.get(f'/v1/pilots/{self.user.pk}')
         self.assertEqual(response.status_code, 200)
 
@@ -34,11 +34,11 @@ class ProbePayloadShapeTest(TestCase):
         self.assertEqual(len(registrations), 1)
         registration = registrations[0]
 
-        self.assertEqual(registration.get('user_id'), self.user.pk)
         self.assertEqual(registration.get('pkid'), self.user.pk)
         self.assertEqual(registration.get('server_id'), self.server.pk)
+        self.assertNotIn('user_id', registration)
 
-    def test_registrations_payload_includes_user_id(self):
+    def test_registrations_payload_includes_pkid(self):
         response = self.client.get('/v1/registrations')
         self.assertEqual(response.status_code, 200)
 
@@ -47,6 +47,6 @@ class ProbePayloadShapeTest(TestCase):
         self.assertEqual(len(registrations), 1)
         registration = registrations[0]
 
-        self.assertEqual(registration.get('user_id'), self.user.pk)
         self.assertEqual(registration.get('pkid'), self.user.pk)
         self.assertEqual(registration.get('server_id'), self.server.pk)
+        self.assertNotIn('user_id', registration)
