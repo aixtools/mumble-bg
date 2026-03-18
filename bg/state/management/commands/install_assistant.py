@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+import textwrap
 from typing import Any
 
 from django.core.management.base import BaseCommand
@@ -56,27 +57,52 @@ class Command(BaseCommand):
             self.stdout.write(json.dumps(report, indent=2))
             return
 
-        self.stdout.write(f"overall: {report['status']}")
-        self.stdout.write(
-            f"control_psk: {report['checks']['control_psk']['status']} "
-            f"({report['checks']['control_psk']['message']})"
+        summary_message = "all checks passed" if report["status"] == "ok" else "one or more checks failed"
+        rows = [
+            ("Overall", report["status"], summary_message),
+            (
+                "Control PSK",
+                report["checks"]["control_psk"]["status"],
+                report["checks"]["control_psk"]["message"],
+            ),
+            (
+                "Pilot DB",
+                report["checks"]["pilot_db"]["status"],
+                report["checks"]["pilot_db"]["message"],
+            ),
+            (
+                "BG DB",
+                report["checks"]["bg_db"]["status"],
+                report["checks"]["bg_db"]["message"],
+            ),
+            (
+                "ICE",
+                report["checks"]["ice"]["status"],
+                report["checks"]["ice"]["message"],
+            ),
+        ]
+        self._print_table(
+            headers=("Check", "Status", "Details"),
+            rows=[(name, self._format_status(status), detail) for name, status, detail in rows],
+            max_widths=(16, 10, 90),
         )
-        self.stdout.write(
-            f"pilot_db: {report['checks']['pilot_db']['status']} "
-            f"({report['checks']['pilot_db']['message']})"
-        )
-        self.stdout.write(
-            f"bg_db: {report['checks']['bg_db']['status']} "
-            f"({report['checks']['bg_db']['message']})"
-        )
-        self.stdout.write(
-            f"ice: {report['checks']['ice']['status']} "
-            f"({report['checks']['ice']['message']})"
-        )
-        for endpoint in report["checks"]["ice"].get("endpoints", []):
-            self.stdout.write(
-                f"  - {endpoint['name']} [{endpoint['source']}] "
-                f"{endpoint['ice_host']}:{endpoint['ice_port']} -> {endpoint['status']}"
+
+        endpoint_rows = report["checks"]["ice"].get("endpoints", [])
+        if endpoint_rows:
+            self.stdout.write("")
+            self._print_table(
+                headers=("ICE Source", "Name", "Endpoint", "Status", "Detail"),
+                rows=[
+                    (
+                        endpoint.get("source", ""),
+                        endpoint.get("name", ""),
+                        f"{endpoint.get('ice_host', '')}:{endpoint.get('ice_port', '')}",
+                        self._format_status(endpoint.get("status", "error")),
+                        endpoint.get("detail", ""),
+                    )
+                    for endpoint in endpoint_rows
+                ],
+                max_widths=(10, 28, 24, 10, 64),
             )
 
     def _check_control_psk(self) -> dict[str, Any]:
@@ -196,3 +222,67 @@ class Command(BaseCommand):
             "message": "one or more ICE endpoints are unreachable" if any_failed else "all endpoints reachable",
             "endpoints": endpoints,
         }
+
+    def _format_status(self, status: str) -> str:
+        value = (status or "").strip().lower()
+        label = value.upper() if value else "UNKNOWN"
+        if value == "ok":
+            return self.style.SUCCESS(label)
+        if value in {"warning", "none_defined"}:
+            return self.style.WARNING(label)
+        return self.style.ERROR(label)
+
+    def _print_table(
+        self,
+        *,
+        headers: tuple[str, ...],
+        rows: list[tuple[str, ...]],
+        max_widths: tuple[int, ...] | None = None,
+    ) -> None:
+        all_rows = [headers, *rows]
+        widths = [max(len(str(row[idx])) for row in all_rows) for idx in range(len(headers))]
+        if max_widths:
+            widths = [min(widths[idx], int(max_widths[idx])) for idx in range(len(widths))]
+
+        def border() -> str:
+            return "+" + "+".join("-" * (width + 2) for width in widths) + "+"
+
+        def wrap_cell(text: str, width: int) -> list[str]:
+            lines = []
+            for segment in str(text).splitlines() or [""]:
+                wrapped = textwrap.wrap(
+                    segment,
+                    width=width,
+                    break_long_words=True,
+                    break_on_hyphens=False,
+                    replace_whitespace=False,
+                    drop_whitespace=False,
+                )
+                lines.extend(wrapped or [""])
+            return lines or [""]
+
+        def render(row: tuple[str, ...]) -> list[str]:
+            wrapped_cells = [wrap_cell(str(row[idx]), widths[idx]) for idx in range(len(widths))]
+            height = max(len(cell_lines) for cell_lines in wrapped_cells)
+            rendered = []
+            for line_idx in range(height):
+                rendered.append(
+                    "| "
+                    + " | ".join(
+                        (wrapped_cells[col_idx][line_idx] if line_idx < len(wrapped_cells[col_idx]) else "").ljust(
+                            widths[col_idx]
+                        )
+                        for col_idx in range(len(widths))
+                    )
+                    + " |"
+                )
+            return rendered
+
+        self.stdout.write(border())
+        for line in render(headers):
+            self.stdout.write(line)
+        self.stdout.write(border())
+        for row in rows:
+            for line in render(row):
+                self.stdout.write(line)
+        self.stdout.write(border())
