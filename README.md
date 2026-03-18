@@ -103,6 +103,49 @@ python manage.py migrate
 
 uses `DATABASES.bg` and keeps local schema independent of the pilot source DB.
 
+### ICE Inventory Sync
+
+`mumble-bg` keeps runtime ICE targets in `mumble_server` rows. The `ICE` env var
+is now a sync source for that inventory:
+
+- `bg.authd` automatically performs additive sync from `ICE` into `mumble_server`
+  on startup.
+- manual operator sync is available via:
+
+```bash
+python manage.py sync_ice_inventory
+```
+
+Useful command variants:
+
+```bash
+python manage.py sync_ice_inventory --dry-run --show-env
+python manage.py sync_ice_inventory --show-current
+python manage.py sync_ice_inventory --replace
+```
+
+`--show-current` prints active and inactive `mumble_server` rows as JSON.
+
+### Install/Deployment Assistant
+
+Run the no-argument preflight assistant:
+
+```bash
+python manage.py install_assistant
+```
+
+It reports:
+- pilot DB connectivity
+- bg DB connectivity
+- ICE endpoint connectivity (from `ICE` env, or active `mumble_server` rows if `ICE` is empty)
+- `none_defined` when no ICE endpoints exist
+
+JSON output is available with:
+
+```bash
+python manage.py install_assistant --json
+```
+
 ## Release Cleanup Note
 
 Before the first real release, remove historical references to the old table names

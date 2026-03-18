@@ -31,6 +31,7 @@ from bg.db import (
     MmblBgDBA,
     db_config_from_env,
 )
+from bg.ice_inventory import sync_ice_inventory_from_env
 from bg.ice import load_ice_module
 from bg.passwords import verify_murmur_password
 
@@ -470,6 +471,19 @@ def main():
     except Exception:
         logger.exception('Failed to load bundled ICE slice definition')
         sys.exit(1)
+
+    try:
+        sync_result = sync_ice_inventory_from_env(additive=True, dry_run=False)
+        if sync_result.get('env_entries', 0):
+            logger.info(
+                'ICE env sync completed (created=%d updated=%d unchanged=%d disabled=%d)',
+                int(sync_result.get('created', 0)),
+                int(sync_result.get('updated', 0)),
+                int(sync_result.get('unchanged', 0)),
+                int(sync_result.get('disabled', 0)),
+            )
+    except Exception:
+        logger.exception('Failed to sync ICE env inventory into mumble_server; continuing with existing DB rows')
 
     server_configs = wait_for_server_configs(retry_interval=30)
 
