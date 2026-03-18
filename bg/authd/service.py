@@ -446,7 +446,11 @@ def wait_for_server_configs(retry_interval=30):
     This keeps authd non-fatal while bg runtime tables exist but have not yet been
     populated with the server inventory it needs to attach to Murmur over ICE.
     """
-    server_configs = get_active_servers()
+    try:
+        server_configs = get_active_servers()
+    except Exception as exc:  # noqa: BLE001
+        result['errors'].append({'error': f'Failed to load active server configs: {exc}'})
+        return result
     while not server_configs:
         logger.info(
             'No active MumbleServer configs found; waiting for mumble-fg or provisioning '
@@ -456,6 +460,104 @@ def wait_for_server_configs(retry_interval=30):
         time.sleep(retry_interval)
         server_configs = get_active_servers()
     return server_configs
+
+
+def probe_authenticator_registration():
+    """Attempt authenticator registration once and return structured results.
+
+    This verifies the same registration path used by authd (including ICE secret
+    validity) without entering the long-running wait loop.
+    """
+    result = {
+        'registered': 0,
+        'errors': [],
+    }
+    try:
+        import Ice
+    except ImportError as exc:
+        result['errors'].append({'error': f'ZeroC ICE is not installed: {exc}'})
+        return result
+
+    try:
+        M = load_ice_module()
+    except Exception as exc:  # noqa: BLE001
+        result['errors'].append({'error': f'Failed to load bundled ICE slice: {exc}'})
+        return result
+
+    try:
+        sync_ice_inventory_from_env(additive=True, dry_run=False)
+    except Exception:
+        logger.exception('Failed to sync ICE env inventory during authd probe')
+
+    server_configs = get_active_servers()
+    if not server_configs:
+        result['errors'].append({'error': 'No active MumbleServer configs found'})
+        return result
+
+    with Ice.initialize(['--Ice.ImplicitContext=Shared', '--Ice.Default.EncodingVersion=1.0']) as communicator:
+        adapter = communicator.createObjectAdapterWithEndpoints('MumbleBgAuthProbe', 'tcp -h 0.0.0.0')
+        adapter.activate()
+
+        for server_id, ice_host, ice_port, ice_secret, virtual_server_id in server_configs:
+            try:
+                class ProbeAuthenticator(M.ServerAuthenticator):
+                    def authenticate(self, name, pw, certificates, certhash, certstrong, current=None):
+                        return (-2, None, None)
+
+                    def getInfo(self, id, current=None):
+                        return (False, {})
+
+                    def nameToId(self, name, current=None):
+                        return -2
+
+                    def idToName(self, id, current=None):
+                        return ''
+
+                    def idToTexture(self, id, current=None):
+                        return bytes()
+
+                if ice_secret:
+                    communicator.getImplicitContext().put('secret', ice_secret)
+
+                proxy = communicator.stringToProxy(f'Meta:tcp -h {ice_host} -p {ice_port}')
+                meta = M.MetaPrx.checkedCast(proxy)
+                if not meta:
+                    result['errors'].append(
+                        {
+                            'server_id': int(server_id),
+                            'endpoint': f'{ice_host}:{ice_port}',
+                            'error': 'Failed to connect to ICE meta',
+                        }
+                    )
+                    continue
+
+                servers = meta.getBootedServers()
+                if not servers:
+                    result['errors'].append(
+                        {
+                            'server_id': int(server_id),
+                            'endpoint': f'{ice_host}:{ice_port}',
+                            'error': 'No booted Murmur servers found',
+                        }
+                    )
+                    continue
+
+                auth_obj = ProbeAuthenticator()
+                auth_proxy = adapter.addWithUUID(auth_obj)
+                target_servers = select_target_servers(servers, virtual_server_id)
+                for srv in target_servers:
+                    srv.setAuthenticator(M.ServerAuthenticatorPrx.uncheckedCast(auth_proxy))
+                    result['registered'] += 1
+            except Exception as exc:  # noqa: BLE001
+                result['errors'].append(
+                    {
+                        'server_id': int(server_id),
+                        'endpoint': f'{ice_host}:{ice_port}',
+                        'error': str(exc),
+                    }
+                )
+
+    return result
 
 
 def main():

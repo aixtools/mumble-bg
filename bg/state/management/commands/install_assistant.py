@@ -44,8 +44,9 @@ class Command(BaseCommand):
         report["checks"]["pilot_db"] = self._check_pilot_db()
         report["checks"]["bg_db"] = self._check_bg_db()
         report["checks"]["ice"] = self._check_ice_endpoints()
+        report["checks"]["authd_registration"] = self._check_authd_registration()
 
-        for key in ("pilot_db", "bg_db"):
+        for key in ("pilot_db", "bg_db", "authd_registration"):
             if report["checks"][key]["status"] != "ok":
                 report["status"] = "error"
 
@@ -79,6 +80,11 @@ class Command(BaseCommand):
                 "ICE",
                 report["checks"]["ice"]["status"],
                 report["checks"]["ice"]["message"],
+            ),
+            (
+                "Authd Registration",
+                report["checks"]["authd_registration"]["status"],
+                report["checks"]["authd_registration"]["message"],
             ),
         ]
         self._print_table(
@@ -222,6 +228,28 @@ class Command(BaseCommand):
             "message": "one or more ICE endpoints are unreachable" if any_failed else "all endpoints reachable",
             "endpoints": endpoints,
         }
+
+    def _check_authd_registration(self) -> dict[str, Any]:
+        try:
+            from bg.authd.service import probe_authenticator_registration
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "message": f"failed to load authd probe: {exc}"}
+
+        result = probe_authenticator_registration()
+        registered = int(result.get("registered", 0))
+        errors = result.get("errors") or []
+        if registered > 0 and not errors:
+            return {"status": "ok", "message": f"registered on {registered} target server(s)"}
+        if registered > 0 and errors:
+            return {
+                "status": "warning",
+                "message": f"partially registered ({registered} success, {len(errors)} error)",
+            }
+        if errors:
+            first = errors[0]
+            detail = first.get("error") if isinstance(first, dict) else str(first)
+            return {"status": "error", "message": f"registration failed: {detail}"}
+        return {"status": "error", "message": "no authenticators registered"}
 
     def _format_status(self, status: str) -> str:
         value = (status or "").strip().lower()
