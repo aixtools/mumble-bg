@@ -26,6 +26,18 @@ source ~/.env/mumble-bg
 set +a
 ```
 
+Default command pattern after loading env:
+
+```bash
+python -m django <command>
+```
+
+Fallback one-off pattern (if env is not loaded):
+
+```bash
+python -m django <command> --settings=bg.settings
+```
+
 For values with difficult shell characters, generate safe export lines with:
 
 ```bash
@@ -49,9 +61,9 @@ bash installation/scripts/bg_preflight.sh
 ```
 
 This runs:
-- `python -m django check --settings=bg.settings`
-- `python -m django install_assistant --settings=bg.settings`
-- `python -m django showmigrations state --settings=bg.settings`
+- `python -m django check`
+- `python -m django install_assistant`
+- `python -m django showmigrations state`
 
 Required env at this stage includes your DB/ICE/control settings.  
 For first-time installs that will use encrypted BG keys, set:
@@ -65,7 +77,7 @@ export BG_KEY_PASSPHRASE='<passphrase>'
 From BG repo root:
 
 ```bash
-python -m django migrate --settings=bg.settings
+python -m django migrate
 ```
 
 ## 5. First-time key generation (required before FG encrypted password flow)
@@ -81,19 +93,19 @@ sudo chmod 700 /etc/mumble-bg /etc/mumble-bg/keys
 Generate BG keypair:
 
 ```bash
-python -m django generate_bg_keypair --settings=bg.settings --key-dir /etc/mumble-bg/keys
+python -m django generate_bg_keypair --key-dir /etc/mumble-bg/keys
 ```
 
 If the private key is encrypted (recommended), `BG_KEY_PASSPHRASE` must be set for:
-- `python -m django check --settings=bg.settings`
-- `python -m django install_assistant --settings=bg.settings`
-- `python -m django runserver ... --settings=bg.settings`
+- `python -m django check`
+- `python -m django install_assistant`
+- `python -m django runserver ...`
 - runtime control operations requiring decryption
 
 ## 6. Start BG HTTP control runtime
 
 ```bash
-python -m django runserver 127.0.0.1:18080 --settings=bg.settings
+python -m django runserver 127.0.0.1:18080
 ```
 
 ## 7. Verify BG runtime and ICE visibility
@@ -107,7 +119,7 @@ bash installation/scripts/bg_runtime_verify.sh
 This checks:
 - `GET /v1/health`
 - `GET /v1/public-key`
-- `python -m django list_ice_users --settings=bg.settings`
+- `python -m django list_ice_users`
 
 Health output should report crypto readiness when configured:
 - `has_public_key=true`
