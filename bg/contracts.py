@@ -178,6 +178,7 @@ class MurmurRegistrationSnapshot:
 
     server_id: int
     server_name: str
+    pkid: int
     username: str
     display_name: str
     mumble_userid: int | None
@@ -215,7 +216,9 @@ class MurmurRegistrationSnapshot:
     ) -> "MurmurRegistrationSnapshot":
         session_ids = tuple(sorted(int(value) for value in active_session_ids if value is not None))
         server = getattr(row, "server", None)
+        row_user_id = int(getattr(row, "user_id"))
         return cls(
+            pkid=row_user_id,
             server_id=int(getattr(row, "server_id")),
             server_name=str(getattr(server, "name", "") or getattr(row, "server_name", "")),
             username=str(getattr(row, "username", "")).strip(),
@@ -261,6 +264,7 @@ class MurmurRegistrationSnapshot:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "pkid": self.pkid,
             "server_id": self.server_id,
             "server_name": self.server_name,
             "username": self.username,

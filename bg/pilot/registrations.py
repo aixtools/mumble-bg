@@ -1,8 +1,12 @@
 from bg.ice import load_ice_module
+import hashlib
 
 
 class MurmurSyncError(RuntimeError):
     pass
+
+
+_DISABLED_COMMENT_MARKER = '[bg-disabled]'
 
 
 def _load_slice():
@@ -90,7 +94,7 @@ def _find_existing_userid(server_proxy, username, preferred_userid=None):
     return None
 
 
-def sync_murmur_registration(mumble_user, password=None):
+def sync_murmur_registration(mumble_user, password=None, *, create_password=None, return_details=False):
     try:
         communicator, M, server_proxy = _open_target_server(mumble_user.server)
         try:
@@ -99,7 +103,12 @@ def sync_murmur_registration(mumble_user, password=None):
                 mumble_user.username,
                 preferred_userid=mumble_user.mumble_userid,
             )
-            info = _build_registration_info(M, mumble_user, password=password)
+            created = target_userid is None
+            effective_password = password
+            if target_userid is None and effective_password is None:
+                effective_password = create_password
+            info = _build_registration_info(M, mumble_user, password=effective_password)
+            reenabled = False
             if target_userid is None:
                 target_userid = server_proxy.registerUser(info)
                 if target_userid < 0:
@@ -107,7 +116,20 @@ def sync_murmur_registration(mumble_user, password=None):
                         f'Failed to register Murmur user {mumble_user.username} on {mumble_user.server.name}'
                     )
             else:
+                try:
+                    current = server_proxy.getRegistration(int(target_userid))
+                except Exception:  # noqa: BLE001
+                    current = {}
+                current_comment = str(current.get(M.UserInfo.UserComment, '') or '')
+                if current_comment == _DISABLED_COMMENT_MARKER:
+                    reenabled = True
                 server_proxy.updateRegistration(target_userid, info)
+            if return_details:
+                return {
+                    'murmur_userid': int(target_userid),
+                    'created': bool(created),
+                    'reenabled': bool(reenabled),
+                }
             return int(target_userid)
         finally:
             communicator.destroy()
@@ -116,6 +138,58 @@ def sync_murmur_registration(mumble_user, password=None):
     except Exception as exc:
         raise MurmurSyncError(
             f'Failed to sync Murmur registration for {mumble_user.username} on {mumble_user.server.name}: {exc}'
+        ) from exc
+
+
+def _disabled_password_for(mumble_user) -> str:
+    material = f'{mumble_user.user_id}:{mumble_user.server_id}:{mumble_user.pwhash or ""}'
+    digest = hashlib.sha256(material.encode('utf-8')).hexdigest()
+    return f'dis-{digest[:28]}'
+
+
+def disable_murmur_registration(mumble_user):
+    """Keep a Murmur registration row but move it to disabled state."""
+    try:
+        communicator, M, server_proxy = _open_target_server(mumble_user.server)
+        try:
+            target_userid = _find_existing_userid(
+                server_proxy,
+                mumble_user.username,
+                preferred_userid=mumble_user.mumble_userid,
+            )
+            if target_userid is None:
+                return {'changed': False, 'murmur_userid': None, 'already_disabled': False}
+
+            try:
+                current = server_proxy.getRegistration(int(target_userid))
+            except Exception:  # noqa: BLE001
+                current = {}
+
+            current_comment = str(current.get(M.UserInfo.UserComment, '') or '')
+            current_hash = str(current.get(M.UserInfo.UserHash, '') or '')
+            already_disabled = (
+                current_comment == _DISABLED_COMMENT_MARKER
+                and not current_hash
+            )
+            if already_disabled:
+                return {'changed': False, 'murmur_userid': int(target_userid), 'already_disabled': True}
+
+            disabled_password = _disabled_password_for(mumble_user)
+            info = {
+                M.UserInfo.UserName: mumble_user.username,
+                M.UserInfo.UserPassword: disabled_password,
+                M.UserInfo.UserHash: '',
+                M.UserInfo.UserComment: _DISABLED_COMMENT_MARKER,
+            }
+            server_proxy.updateRegistration(int(target_userid), info)
+            return {'changed': True, 'murmur_userid': int(target_userid), 'already_disabled': False}
+        finally:
+            communicator.destroy()
+    except MurmurSyncError:
+        raise
+    except Exception as exc:
+        raise MurmurSyncError(
+            f'Failed to disable Murmur registration for {mumble_user.username} on {mumble_user.server.name}: {exc}'
         ) from exc
 
 

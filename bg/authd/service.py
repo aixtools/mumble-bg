@@ -13,6 +13,9 @@ import os
 import sys
 import time
 import logging
+import json
+import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -28,6 +31,7 @@ from bg.db import (
     MmblBgDBA,
     db_config_from_env,
 )
+from bg.ice_inventory import sync_ice_inventory_from_env
 from bg.ice import load_ice_module
 from bg.passwords import verify_murmur_password
 
@@ -70,6 +74,7 @@ LEGACY_SERVERS_QUERY = """
 AUTH_QUERY = """
     SELECT
         mu.id,
+        mu.user_id,
         mu.mumble_userid,
         mu.pwhash,
         mu.hashfn,
@@ -101,6 +106,12 @@ ID_TO_NAME_QUERY = """
       AND mu.is_active = true
 """
 
+SERVER_NAME_QUERY = """
+    SELECT name
+    FROM mumble_server
+    WHERE id = %s
+"""
+
 PILOT_IDENTITY_QUERY = """
     SELECT
         ec.character_id,
@@ -128,7 +139,7 @@ def list_pilot_identities():
     try:
         conn = get_pilot_db_connection()
         try:
-            with conn.cursor() as cur:
+            with _cursor(conn) as cur:
                 cur.execute(PILOT_IDENTITY_QUERY)
                 rows = cur.fetchall()
         finally:
@@ -163,7 +174,36 @@ def get_pilot_db_connection():
         raise PilotDBError('Could not connect to pilot source DB') from exc
 
 
+def _is_sqlite_connection(conn):
+    return isinstance(conn, sqlite3.Connection)
+
+
+def _adapt_query_for_connection(conn, query):
+    if _is_sqlite_connection(conn):
+        return query.replace('%s', '?')
+    return query
+
+
+def _execute(cur, conn, query, params=()):
+    cur.execute(_adapt_query_for_connection(conn, query), params)
+
+
+@contextmanager
+def _cursor(conn):
+    cur = conn.cursor()
+    try:
+        yield cur
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+
+
 def get_db_connection():
+    sqlite_path = (os.environ.get('BG_USE_SQLITE') or '').strip()
+    if sqlite_path:
+        return sqlite3.connect(sqlite_path)
     try:
         return BG_DB_ADAPTER.connect()
     except Exception as exc:
@@ -174,9 +214,9 @@ def get_active_servers():
     """Fetch all active MumbleServer configs from the database."""
     conn = get_db_connection()
     try:
-        with conn.cursor() as cur:
+        with _cursor(conn) as cur:
             try:
-                cur.execute(SERVERS_QUERY)
+                _execute(cur, conn, SERVERS_QUERY)
             except Exception as exc:
                 if not _is_missing_virtual_server_id_column(exc):
                     raise
@@ -184,7 +224,7 @@ def get_active_servers():
                     'mumble_server.virtual_server_id is missing; '
                     'falling back to legacy compatibility mode with default virtual_server_id=1'
                 )
-                cur.execute(LEGACY_SERVERS_QUERY)
+                _execute(cur, conn, LEGACY_SERVERS_QUERY)
             return cur.fetchall()
     finally:
         conn.close()
@@ -223,13 +263,16 @@ def authenticate(username, password, server_id, certhash=''):
     """
     Authenticate a user against the database for a specific server.
 
-    Returns (bg_row_id, auth_user_id, display_name, groups) or None.
+    Returns (bg_row_id, auth_user_id, display_name, groups, pilot_user_id, auth_method) or None.
     """
+    if os.environ.get('BG_AUTHD_ALWAYS_PASS_THROUGH', '').strip() == '1':
+        return _USER_NOT_FOUND
+
     try:
         conn = get_db_connection()
         try:
-            with conn.cursor() as cur:
-                cur.execute(AUTH_QUERY, (username, server_id))
+            with _cursor(conn) as cur:
+                _execute(cur, conn, AUTH_QUERY, (username, server_id))
                 row = cur.fetchone()
         finally:
             conn.close()
@@ -240,7 +283,7 @@ def authenticate(username, password, server_id, certhash=''):
     if row is None:
         return _USER_NOT_FOUND
 
-    bg_row_id, mumble_userid, pwhash, hashfn, pw_salt, kdf_iterations, stored_certhash, groups, display_name = row
+    bg_row_id, pilot_user_id, mumble_userid, pwhash, hashfn, pw_salt, kdf_iterations, stored_certhash, groups, display_name = row
     password_ok = False
 
     if password:
@@ -262,13 +305,19 @@ def authenticate(username, password, server_id, certhash=''):
 
     group_list = [g for g in groups.split(',') if g] if groups else []
     auth_user_id = mumble_userid if mumble_userid is not None else bg_row_id
+    if password_ok and cert_ok:
+        auth_method = 'password+cert'
+    elif password_ok:
+        auth_method = 'password'
+    else:
+        auth_method = 'cert'
     if mumble_userid is None:
         logger.warning(
             'User %s on server_id=%s is missing mumble_userid; returning local row id temporarily',
             username,
             server_id,
         )
-    return bg_row_id, auth_user_id, display_name or username, group_list
+    return bg_row_id, auth_user_id, display_name or username, group_list, pilot_user_id, auth_method
 
 
 def authenticate_user(username, password, server_id, certhash):
@@ -279,8 +328,8 @@ def name_to_id(name, server_id):
     try:
         conn = get_db_connection()
         try:
-            with conn.cursor() as cur:
-                cur.execute(NAME_TO_ID_QUERY, (name, server_id))
+            with _cursor(conn) as cur:
+                _execute(cur, conn, NAME_TO_ID_QUERY, (name, server_id))
                 row = cur.fetchone()
         finally:
             conn.close()
@@ -296,8 +345,8 @@ def id_to_name(user_id, server_id):
     try:
         conn = get_db_connection()
         try:
-            with conn.cursor() as cur:
-                cur.execute(ID_TO_NAME_QUERY, (server_id, user_id, user_id))
+            with _cursor(conn) as cur:
+                _execute(cur, conn, ID_TO_NAME_QUERY, (server_id, user_id, user_id))
                 row = cur.fetchone()
         finally:
             conn.close()
@@ -315,6 +364,13 @@ UPDATE_CONNECTION_QUERY = """
     WHERE id = %s
 """
 
+INSERT_AUDIT_QUERY = """
+    INSERT INTO bg_audit (action, request_id, requested_by, source, user_id, server_name, metadata, occurred_at)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+BG_AUDIT_ACTION_PILOT_LOGIN = "pilot_login"
+
 
 def update_connection_info(bg_row_id, certhash):
     """Store the client certificate hash and last successful auth time."""
@@ -322,13 +378,65 @@ def update_connection_info(bg_row_id, certhash):
     try:
         conn = get_db_connection()
         try:
-            with conn.cursor() as cur:
-                cur.execute(UPDATE_CONNECTION_QUERY, (certhash or '', now, now, bg_row_id))
+            with _cursor(conn) as cur:
+                _execute(cur, conn, UPDATE_CONNECTION_QUERY, (certhash or '', now, now, bg_row_id))
             conn.commit()
         finally:
             conn.close()
     except Exception:
         logger.exception('Failed to update connection info for bg_row_id=%s', bg_row_id)
+
+
+def _server_name(server_id):
+    try:
+        conn = get_db_connection()
+        try:
+            with _cursor(conn) as cur:
+                _execute(cur, conn, SERVER_NAME_QUERY, (server_id,))
+                row = cur.fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception('Failed to resolve server name for server_id=%s', server_id)
+        return f'server-{server_id}'
+    if not row:
+        return f'server-{server_id}'
+    return str(row[0] or f'server-{server_id}')
+
+
+def append_auth_success_audit(*, user_id, server_id, username, auth_method, certhash):
+    now = datetime.now(timezone.utc)
+    metadata = {
+        'status': 'completed',
+        'username': str(username or ''),
+        'auth_method': str(auth_method or ''),
+        'certhash_present': bool(certhash),
+    }
+    request_id = now.strftime('%Y%m%dT%H%M%SZ')
+    try:
+        conn = get_db_connection()
+        try:
+            with _cursor(conn) as cur:
+                _execute(
+                    cur,
+                    conn,
+                    INSERT_AUDIT_QUERY,
+                    (
+                        BG_AUDIT_ACTION_PILOT_LOGIN,
+                        request_id,
+                        'authd',
+                        'authd_ice',
+                        int(user_id) if user_id is not None else None,
+                        _server_name(server_id),
+                        json.dumps(metadata),
+                        now,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception('Failed to append auth success audit for user_id=%s server_id=%s', user_id, server_id)
 
 
 def wait_for_server_configs(retry_interval=30):
@@ -338,7 +446,11 @@ def wait_for_server_configs(retry_interval=30):
     This keeps authd non-fatal while bg runtime tables exist but have not yet been
     populated with the server inventory it needs to attach to Murmur over ICE.
     """
-    server_configs = get_active_servers()
+    try:
+        server_configs = get_active_servers()
+    except Exception as exc:  # noqa: BLE001
+        result['errors'].append({'error': f'Failed to load active server configs: {exc}'})
+        return result
     while not server_configs:
         logger.info(
             'No active MumbleServer configs found; waiting for mumble-fg or provisioning '
@@ -348,6 +460,104 @@ def wait_for_server_configs(retry_interval=30):
         time.sleep(retry_interval)
         server_configs = get_active_servers()
     return server_configs
+
+
+def probe_authenticator_registration():
+    """Attempt authenticator registration once and return structured results.
+
+    This verifies the same registration path used by authd (including ICE secret
+    validity) without entering the long-running wait loop.
+    """
+    result = {
+        'registered': 0,
+        'errors': [],
+    }
+    try:
+        import Ice
+    except ImportError as exc:
+        result['errors'].append({'error': f'ZeroC ICE is not installed: {exc}'})
+        return result
+
+    try:
+        M = load_ice_module()
+    except Exception as exc:  # noqa: BLE001
+        result['errors'].append({'error': f'Failed to load bundled ICE slice: {exc}'})
+        return result
+
+    try:
+        sync_ice_inventory_from_env(additive=True, dry_run=False)
+    except Exception:
+        logger.exception('Failed to sync ICE env inventory during authd probe')
+
+    server_configs = get_active_servers()
+    if not server_configs:
+        result['errors'].append({'error': 'No active MumbleServer configs found'})
+        return result
+
+    with Ice.initialize(['--Ice.ImplicitContext=Shared', '--Ice.Default.EncodingVersion=1.0']) as communicator:
+        adapter = communicator.createObjectAdapterWithEndpoints('MumbleBgAuthProbe', 'tcp -h 0.0.0.0')
+        adapter.activate()
+
+        for server_id, ice_host, ice_port, ice_secret, virtual_server_id in server_configs:
+            try:
+                class ProbeAuthenticator(M.ServerAuthenticator):
+                    def authenticate(self, name, pw, certificates, certhash, certstrong, current=None):
+                        return (-2, None, None)
+
+                    def getInfo(self, id, current=None):
+                        return (False, {})
+
+                    def nameToId(self, name, current=None):
+                        return -2
+
+                    def idToName(self, id, current=None):
+                        return ''
+
+                    def idToTexture(self, id, current=None):
+                        return bytes()
+
+                if ice_secret:
+                    communicator.getImplicitContext().put('secret', ice_secret)
+
+                proxy = communicator.stringToProxy(f'Meta:tcp -h {ice_host} -p {ice_port}')
+                meta = M.MetaPrx.checkedCast(proxy)
+                if not meta:
+                    result['errors'].append(
+                        {
+                            'server_id': int(server_id),
+                            'endpoint': f'{ice_host}:{ice_port}',
+                            'error': 'Failed to connect to ICE meta',
+                        }
+                    )
+                    continue
+
+                servers = meta.getBootedServers()
+                if not servers:
+                    result['errors'].append(
+                        {
+                            'server_id': int(server_id),
+                            'endpoint': f'{ice_host}:{ice_port}',
+                            'error': 'No booted Murmur servers found',
+                        }
+                    )
+                    continue
+
+                auth_obj = ProbeAuthenticator()
+                auth_proxy = adapter.addWithUUID(auth_obj)
+                target_servers = select_target_servers(servers, virtual_server_id)
+                for srv in target_servers:
+                    srv.setAuthenticator(M.ServerAuthenticatorPrx.uncheckedCast(auth_proxy))
+                    result['registered'] += 1
+            except Exception as exc:  # noqa: BLE001
+                result['errors'].append(
+                    {
+                        'server_id': int(server_id),
+                        'endpoint': f'{ice_host}:{ice_port}',
+                        'error': str(exc),
+                    }
+                )
+
+    return result
 
 
 def main():
@@ -363,6 +573,19 @@ def main():
     except Exception:
         logger.exception('Failed to load bundled ICE slice definition')
         sys.exit(1)
+
+    try:
+        sync_result = sync_ice_inventory_from_env(additive=True, dry_run=False)
+        if sync_result.get('env_entries', 0):
+            logger.info(
+                'ICE env sync completed (created=%d updated=%d unchanged=%d disabled=%d)',
+                int(sync_result.get('created', 0)),
+                int(sync_result.get('updated', 0)),
+                int(sync_result.get('unchanged', 0)),
+                int(sync_result.get('disabled', 0)),
+            )
+    except Exception:
+        logger.exception('Failed to sync ICE env inventory into mumble_server; continuing with existing DB rows')
 
     server_configs = wait_for_server_configs(retry_interval=30)
 
@@ -389,8 +612,15 @@ def main():
                         if result is None:
                             # Known user, wrong password -- hard reject.
                             return (-1, None, None)
-                        bg_row_id, auth_user_id, display_name, groups = result
+                        bg_row_id, auth_user_id, display_name, groups, pilot_user_id, auth_method = result
                         update_connection_info(bg_row_id, certhash)
+                        append_auth_success_audit(
+                            user_id=pilot_user_id,
+                            server_id=self._server_id,
+                            username=name,
+                            auth_method=auth_method,
+                            certhash=certhash,
+                        )
                         return (auth_user_id, display_name, groups)
 
                     def getInfo(self, id, current=None):
