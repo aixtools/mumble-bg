@@ -38,7 +38,7 @@ class Migration(migrations.Migration):
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('request_id', models.CharField(blank=True, default='', max_length=64)),
                 ('requested_by', models.CharField(blank=True, default='', max_length=255)),
-                ('action', models.CharField(default='sync', max_length=16)),
+                ('action', models.CharField(default='sync', help_text='Operation that produced this record', max_length=16)),
                 ('state_before', models.JSONField(blank=True, default=dict)),
                 ('state_after', models.JSONField(blank=True, default=dict)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
