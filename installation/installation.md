@@ -10,7 +10,37 @@ From the BG host:
 pip install --upgrade --force-reinstall mumble_bg-<version>-py3-none-any.whl
 ```
 
-## 2. Run BG preflight checks
+## 2. Create and load BG env file (first-time recommended)
+
+From BG repo root:
+
+```bash
+bash installation/scripts/init_bg_env.sh
+```
+
+Edit `~/.env/mumble-bg`, then load it:
+
+```bash
+set -a
+source ~/.env/mumble-bg
+set +a
+```
+
+For values with difficult shell characters, generate safe export lines with:
+
+```bash
+bash installation/scripts/shell_export.sh ICE_SECRET "'CubeiNive'"
+```
+
+Then paste the output into your env file.
+
+To scan a completed env file and propose shell-safe rewrites for tricky values:
+
+```bash
+bash installation/scripts/scan_env_values.sh ~/.env/mumble-bg
+```
+
+## 3. Run BG preflight checks
 
 From BG repo root:
 
@@ -30,7 +60,7 @@ For first-time installs that will use encrypted BG keys, set:
 export BG_KEY_PASSPHRASE='<passphrase>'
 ```
 
-## 3. Apply BG migrations
+## 4. Apply BG migrations
 
 From BG repo root:
 
@@ -38,7 +68,7 @@ From BG repo root:
 python -m django migrate --settings=bg.settings
 ```
 
-## 4. First-time key generation (required before FG encrypted password flow)
+## 5. First-time key generation (required before FG encrypted password flow)
 
 Create key directory (one-time):
 
@@ -60,13 +90,13 @@ If the private key is encrypted (recommended), `BG_KEY_PASSPHRASE` must be set f
 - `python -m django runserver ... --settings=bg.settings`
 - runtime control operations requiring decryption
 
-## 5. Start BG HTTP control runtime
+## 6. Start BG HTTP control runtime
 
 ```bash
 python -m django runserver 127.0.0.1:18080 --settings=bg.settings
 ```
 
-## 6. Verify BG runtime and ICE visibility
+## 7. Verify BG runtime and ICE visibility
 
 From BG repo root:
 
@@ -83,7 +113,7 @@ Health output should report crypto readiness when configured:
 - `has_public_key=true`
 - `can_decrypt=true` (when passphrase/private key are loaded)
 
-## 7. Install or upgrade FG wheel in Cube venv
+## 8. Install or upgrade FG wheel in Cube venv
 
 From the Cube host:
 
@@ -91,7 +121,7 @@ From the Cube host:
 pip install --upgrade --force-reinstall mumble_fg-<version>-py3-none-any.whl
 ```
 
-## 8. Validate FG control env vars in Cube shell
+## 9. Validate FG control env vars in Cube shell
 
 From Cube repo root:
 
@@ -104,7 +134,7 @@ Required runtime env:
 - `MURMUR_CONTROL_URL` points to BG control endpoint
 - `MURMUR_CONTROL_PSK` matches BG control secret
 
-## 9. Apply FG migration and restart Cube
+## 10. Apply FG migration and restart Cube
 
 ```bash
 python manage.py migrate mumble_fg
@@ -113,7 +143,7 @@ python manage.py collectstatic
 
 Restart Cube runtime (service or runserver for your environment).
 
-## 10. First control sync from FG
+## 11. First control sync from FG
 
 From FG ACL UI, run `Sync BG`.
 
@@ -124,7 +154,7 @@ Expected behavior:
 
 Even if ACL rules are unchanged, provisioning/reconcile can still run.
 
-## 11. Validate end state
+## 12. Validate end state
 
 Check three surfaces:
 - FG UI (`/mumble-ui/acl/`, `/profile/`)
