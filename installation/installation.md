@@ -2,14 +2,7 @@
 
 This is the recommended sequence for installing `mumble-fg` (in Cube) and `mumble-bg` (standalone).
 
-## 1. Stop running dev processes before upgrade
-
-Do this first to avoid autoreload noise during `pip install`:
-
-- stop Cube dev runserver / service for this upgrade window
-- stop BG runserver / authd
-
-## 2. Install or upgrade BG wheel in BG venv
+## 1. Install or upgrade BG wheel in BG venv
 
 From the BG host:
 
@@ -17,7 +10,7 @@ From the BG host:
 pip install --upgrade --force-reinstall mumble_bg-<version>-py3-none-any.whl
 ```
 
-## 3. Run BG preflight checks
+## 2. Run BG preflight checks
 
 From BG repo root:
 
@@ -37,7 +30,7 @@ For first-time installs that will use encrypted BG keys, set:
 export BG_KEY_PASSPHRASE='<passphrase>'
 ```
 
-## 4. Apply BG migrations
+## 3. Apply BG migrations
 
 From BG repo root:
 
@@ -45,7 +38,7 @@ From BG repo root:
 python -m django migrate --settings=bg.settings
 ```
 
-## 5. First-time key generation (required before FG encrypted password flow)
+## 4. First-time key generation (required before FG encrypted password flow)
 
 Create key directory (one-time):
 
@@ -67,13 +60,13 @@ If the private key is encrypted (recommended), `BG_KEY_PASSPHRASE` must be set f
 - `python -m django runserver ... --settings=bg.settings`
 - runtime control operations requiring decryption
 
-## 6. Start BG HTTP control runtime
+## 5. Start BG HTTP control runtime
 
 ```bash
 python -m django runserver 127.0.0.1:18080 --settings=bg.settings
 ```
 
-## 7. Verify BG runtime and ICE visibility
+## 6. Verify BG runtime and ICE visibility
 
 From BG repo root:
 
@@ -90,7 +83,7 @@ Health output should report crypto readiness when configured:
 - `has_public_key=true`
 - `can_decrypt=true` (when passphrase/private key are loaded)
 
-## 8. Install or upgrade FG wheel in Cube venv
+## 7. Install or upgrade FG wheel in Cube venv
 
 From the Cube host:
 
@@ -98,7 +91,7 @@ From the Cube host:
 pip install --upgrade --force-reinstall mumble_fg-<version>-py3-none-any.whl
 ```
 
-## 9. Validate FG control env vars in Cube shell
+## 8. Validate FG control env vars in Cube shell
 
 From Cube repo root:
 
@@ -111,7 +104,7 @@ Required runtime env:
 - `MURMUR_CONTROL_URL` points to BG control endpoint
 - `MURMUR_CONTROL_PSK` matches BG control secret
 
-## 10. Apply FG migration and restart Cube
+## 9. Apply FG migration and restart Cube
 
 ```bash
 python manage.py migrate mumble_fg
@@ -120,7 +113,7 @@ python manage.py collectstatic
 
 Restart Cube runtime (service or runserver for your environment).
 
-## 11. First control sync from FG
+## 10. First control sync from FG
 
 From FG ACL UI, run `Sync BG`.
 
@@ -131,7 +124,7 @@ Expected behavior:
 
 Even if ACL rules are unchanged, provisioning/reconcile can still run.
 
-## 12. Validate end state
+## 11. Validate end state
 
 Check three surfaces:
 - FG UI (`/mumble-ui/acl/`, `/profile/`)
@@ -141,4 +134,4 @@ Check three surfaces:
 ## Notes
 
 - `python -m django help <command>` only confirms registration; it does not execute the command.
-- If `pip install` runs while dev `runserver` is active, autoreload can produce transient command errors. Restart cleanly after install.
+- Update-only note: if `pip install` runs while a dev `runserver` is active, autoreload can produce transient command errors. Stop services first during updates, then restart cleanly after install.
