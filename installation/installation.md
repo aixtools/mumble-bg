@@ -57,6 +57,7 @@ python -m django install_assistant
 ```
 
 On first install, `install_assistant` is expected to show `Encryption` as inactive/partial.
+`BG_KEY_PASSPHRASE` should ideally already be defined in `~/.env/mumble-bg` before this step.
 
 Create key directory and generate keypair:
 
