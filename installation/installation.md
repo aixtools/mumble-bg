@@ -133,7 +133,29 @@ sudo systemctl enable --now mumble-bg-control mumble-bg-auth
 
 ## 6. Install or upgrade FG wheel in Cube venv
 
-From the Cube host:
+From the Cube host, in Cube checkout, activate the Cube venv first:
+
+```bash
+source venv/bin/activate
+```
+
+Optional dry-run check:
+
+```bash
+pip install --dry-run /home/cube/mumble_fg-<version>-py3-none-any.whl
+```
+
+Example dry-run output:
+
+```text
+Processing /home/cube/mumble_fg-0.3.1.dev5-py3-none-any.whl
+Requirement already satisfied: django<5.0,>=4.2 in ./venv/lib/python3.12/site-packages (from mumble-fg==0.3.1.dev5) (4.2.28)
+Requirement already satisfied: asgiref<4,>=3.6.0 in ./venv/lib/python3.12/site-packages (from django<5.0,>=4.2->mumble-fg==0.3.1.dev5) (3.11.1)
+Requirement already satisfied: sqlparse>=0.3.1 in ./venv/lib/python3.12/site-packages (from django<5.0,>=4.2->mumble-fg==0.3.1.dev5) (0.5.5)
+Would install mumble-fg-0.3.1.dev5
+```
+
+Then install:
 
 ```bash
 pip install --upgrade --force-reinstall mumble_fg-<version>-py3-none-any.whl
@@ -151,6 +173,19 @@ Required runtime env:
 - `OPTIONAL_APPS` includes `mumble_ui.apps.MumbleUiConfig`
 - `MURMUR_CONTROL_URL` points to BG control endpoint
 - `MURMUR_CONTROL_PSK` matches BG control secret
+
+Copy from BG-side config:
+- Default BG control URL is `http://127.0.0.1:18080` (adjust if BG is on another host/port).
+- `MURMUR_CONTROL_PSK` in Cube/FG must exactly match BG `MURMUR_CONTROL_PSK`.
+- If FG reads BG public key from file, set `BG_PUBLIC_KEY_PATH` to BG public key path (default `/etc/mumble-bg/keys/public_key.pem`).
+
+Quick BG URL check from Cube host:
+
+```bash
+curl -sS -m 3 http://127.0.0.1:18080/v1/health | python3 -m json.tool
+```
+
+If this fails, `MURMUR_CONTROL_URL` is wrong for the current deployment (or BG is not reachable).
 
 ## 8. Apply FG migration and restart Cube
 
