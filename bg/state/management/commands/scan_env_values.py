@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,37 +46,6 @@ def _has_raw_risk(raw_block: str) -> bool:
     return False
 
 
-def _json_suggest(value: str) -> str | None:
-    try:
-        payload = json.loads(value)
-    except Exception:
-        return None
-
-    changed = False
-
-    def walk(node):
-        nonlocal changed
-        if isinstance(node, dict):
-            out = {}
-            for k, v in node.items():
-                if isinstance(v, str):
-                    nv = v.replace("'", "\\u0027")
-                    if nv != v:
-                        changed = True
-                    out[k] = nv
-                else:
-                    out[k] = walk(v)
-            return out
-        if isinstance(node, list):
-            return [walk(item) for item in node]
-        return node
-
-    escaped = walk(payload)
-    if not changed:
-        return None
-    return json.dumps(escaped, indent=2)
-
-
 class Command(BaseCommand):
     help = (
         "Scan env file for potentially unsafe quote/escape patterns and optionally "
@@ -116,12 +84,7 @@ class Command(BaseCommand):
             raw_block = "\n".join(block_lines)
             parsed_value = values.get(key, "")
             raw_risk = _has_raw_risk(raw_block)
-            json_suggestion = _json_suggest(parsed_value)
-
-            if json_suggestion is not None:
-                reason = "json quote/escape normalization suggested"
-                replacement = f"{key}={shell_single_quote(json_suggestion)}"
-            elif raw_risk:
+            if raw_risk:
                 reason = "raw quote/backslash pattern may be interpreted unexpectedly"
                 replacement = f"{key}={shell_single_quote(parsed_value)}"
             elif SENSITIVE_KEY_RE.search(key) and any(ch in parsed_value for ch in "'\"\\"):
