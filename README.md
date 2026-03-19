@@ -27,6 +27,13 @@ The explicit fg/bg control path is documented in
 
 See [docs/extraction-inventory.md](/home/michael/prj/mumble-bg/docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
 
+## Installation Guides
+
+Use the repo-local installation materials:
+
+- `installation/README.md`
+- `installation/installation.md`
+- `installation/scripts/` (optional wrappers for source-checkout operators)
 ## Standalone Deploy Defaults
 
 For the current standalone background-service phase, the default layout is:

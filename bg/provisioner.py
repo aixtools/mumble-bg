@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+import secrets
 
 from django.contrib.auth.models import User
 
@@ -17,6 +18,16 @@ from fgbg_common.eligibility import (
     eligible_account_list,
     blocked_main_list,
 )
+from bg.passwords import build_murmur_password_record
+
+_FORBIDDEN_PASSWORD_CHARS = {"'", '"', '`', '\\'}
+_PASSWORD_CHARS = ''.join(
+    chr(code) for code in range(33, 127) if chr(code) not in _FORBIDDEN_PASSWORD_CHARS
+)
+
+
+def _new_password(length: int = 16) -> str:
+    return ''.join(secrets.choice(_PASSWORD_CHARS) for _ in range(length))
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +38,6 @@ class ProvisionResult:
     activated: int = 0
     deactivated: int = 0
     unchanged: int = 0
-    profile_updates: list[dict] | None = None
     errors: list[str] | None = None
 
     def to_dict(self):
@@ -36,7 +46,6 @@ class ProvisionResult:
             'activated': self.activated,
             'deactivated': self.deactivated,
             'unchanged': self.unchanged,
-            'profile_updates': self.profile_updates or [],
             'errors': self.errors or [],
         }
 
@@ -110,8 +119,6 @@ def _query_main_rows(pilot_db_conn, user_ids):
             ec.user_id,
             ec.character_id,
             ec.character_name,
-            ec.corporation_id,
-            ec.alliance_id,
             COALESCE(ec.corporation_name, '') AS corporation_name,
             COALESCE(ec.alliance_name, '') AS alliance_name,
             ec.is_main
@@ -131,25 +138,6 @@ def _query_main_rows(pilot_db_conn, user_ids):
     return mains
 
 
-def _query_login_names(pilot_db_conn, user_ids):
-    """Resolve stable pilot login names (auth_user.username) keyed by user_id."""
-    if not user_ids:
-        return {}
-
-    placeholders = ','.join(['%s'] * len(user_ids))
-    query = f"""
-        SELECT id, username
-        FROM auth_user
-        WHERE id IN ({placeholders})
-    """
-    resolved = {}
-    with pilot_db_conn.cursor() as cur:
-        cur.execute(query, list(user_ids))
-        for user_id, username in cur.fetchall():
-            resolved[int(user_id)] = str(username or '').strip()
-    return resolved
-
-
 def provision_registrations(
     pilot_db_conn,
     *,
@@ -162,7 +150,7 @@ def provision_registrations(
     - Eligible accounts with inactive MumbleUser → reactivate
     - Blocked accounts with active MumbleUser → deactivate
     """
-    result = ProvisionResult(errors=[], profile_updates=[])
+    result = ProvisionResult(errors=[])
 
     if server is None:
         server = MumbleServer.objects.filter(is_active=True).order_by('display_order', 'name').first()
@@ -180,7 +168,6 @@ def provision_registrations(
 
     user_ids = list({r['user_id'] for r in char_rows})
     main_rows = _query_main_rows(pilot_db_conn, user_ids)
-    login_names = _query_login_names(pilot_db_conn, user_ids)
 
     eligible = eligible_account_list(char_rows, main_rows, rs)
     blocked = blocked_main_list(char_rows, main_rows, rs)
@@ -215,78 +202,43 @@ def provision_registrations(
         if main is None:
             continue
 
-        display_name = str(main['character_name'] or '').strip()
-        login_name = str(login_names.get(user_id) or '').strip() or display_name
+        username = main['character_name']
 
         if user_id in existing:
             mu = existing[user_id]
-            profile_fields = []
-            profile_change = {}
-            if mu.username != login_name:
-                logger.warning(
-                    'Username drift detected for stable pkid=%d: existing username=%r, source username=%r. '
-                    'Keeping existing username.',
-                    user_id,
-                    mu.username,
-                    login_name,
-                )
-                profile_change['username_from'] = mu.username
-                profile_change['username_to'] = login_name
-            if mu.display_name != display_name:
-                profile_fields.append('display_name')
-                profile_change['display_name_from'] = mu.display_name
-                profile_change['display_name_to'] = display_name
-                mu.display_name = display_name
-            if mu.evepilot_id != main['character_id']:
-                profile_fields.append('evepilot_id')
-                profile_change['evepilot_id_from'] = mu.evepilot_id
-                profile_change['evepilot_id_to'] = main['character_id']
-                mu.evepilot_id = main['character_id']
-            if mu.corporation_id != main.get('corporation_id'):
-                profile_fields.append('corporation_id')
-                mu.corporation_id = main.get('corporation_id')
-            if mu.alliance_id != main.get('alliance_id'):
-                profile_fields.append('alliance_id')
-                mu.alliance_id = main.get('alliance_id')
-
             if not mu.is_active:
                 if not dry_run:
                     mu.is_active = True
-                    update_fields = ['is_active', *profile_fields, 'updated_at']
-                    mu.save(update_fields=update_fields)
+                    mu.save(update_fields=['is_active', 'updated_at'])
                 result.activated += 1
-                logger.info('Activated %s (user_id=%d)', login_name, user_id)
+                logger.info('Activated %s (user_id=%d)', username, user_id)
             else:
-                if profile_fields:
-                    if not dry_run:
-                        mu.save(update_fields=[*profile_fields, 'updated_at'])
-                    result.profile_updates.append({
-                        'user_id': int(user_id),
-                        'server_name': server.name,
-                        **profile_change,
-                    })
-                    logger.info('Updated pilot profile fields for user_id=%d: %s', user_id, ','.join(profile_fields))
-                else:
-                    result.unchanged += 1
+                result.unchanged += 1
         else:
             if not dry_run:
                 # Ensure auth.User exists
                 auth_user, _ = User.objects.get_or_create(
                     pk=user_id,
-                    defaults={'username': login_name},
+                    defaults={'username': username},
                 )
+                password = _new_password()
+                password_record = build_murmur_password_record(password)
                 MumbleUser.objects.create(
                     user=auth_user,
                     server=server,
                     evepilot_id=main['character_id'],
                     corporation_id=main.get('corporation_id'),
                     alliance_id=main.get('alliance_id'),
-                    username=login_name,
-                    display_name=display_name,
+                    username=username,
+                    display_name=username,
+                    pwhash=password_record['pwhash'],
+                    hashfn=password_record['hashfn'],
+                    pw_salt=password_record['pw_salt'],
+                    kdf_iterations=password_record['kdf_iterations'],
                     is_active=True,
                 )
             result.created += 1
-            logger.info('Created %s (user_id=%d)', login_name, user_id)
+            logger.info('Created %s (user_id=%d)', username, user_id)
 
     # Deactivate blocked accounts
     for user_id in blocked_user_ids:

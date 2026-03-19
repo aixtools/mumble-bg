@@ -41,6 +41,7 @@ class Command(BaseCommand):
         }
 
         report["checks"]["control_psk"] = self._check_control_psk()
+        report["checks"]["encryption"] = self._check_encryption()
         report["checks"]["pilot_db"] = self._check_pilot_db()
         report["checks"]["bg_db"] = self._check_bg_db()
         report["checks"]["ice"] = self._check_ice_endpoints()
@@ -65,6 +66,11 @@ class Command(BaseCommand):
                 "Control PSK",
                 report["checks"]["control_psk"]["status"],
                 report["checks"]["control_psk"]["message"],
+            ),
+            (
+                "Encryption",
+                report["checks"]["encryption"]["status"],
+                report["checks"]["encryption"]["message"],
             ),
             (
                 "Pilot DB",
@@ -118,6 +124,36 @@ class Command(BaseCommand):
         if value:
             return {"status": "ok", "message": "set"}
         return {"status": "warning", "message": "MURMUR_CONTROL_PSK is not set"}
+
+    def _check_encryption(self) -> dict[str, Any]:
+        try:
+            from bg import crypto
+            status = crypto.status()
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "warning", "message": f"unable to read crypto status: {exc}"}
+
+        if status.get("has_public_key") and status.get("can_decrypt") and status.get("can_store_encrypted"):
+            return {"status": "ok", "message": "active (public/decrypt/storage all ready)"}
+
+        if not status.get("has_public_key"):
+            return {
+                "status": "warning",
+                "message": "inactive: no BG keypair loaded (run generate_bg_keypair)",
+            }
+
+        if status.get("has_public_key") and not status.get("can_decrypt"):
+            return {
+                "status": "warning",
+                "message": "partial: public key loaded, decrypt unavailable (check BG_KEY_PASSPHRASE/private key)",
+            }
+
+        if status.get("has_public_key") and status.get("can_decrypt") and not status.get("can_store_encrypted"):
+            return {
+                "status": "warning",
+                "message": "partial: decrypt works, storage encryption unavailable (ensure passphrase-backed key)",
+            }
+
+        return {"status": "warning", "message": "inactive: crypto not fully initialized"}
 
     def _check_pilot_db(self) -> dict[str, Any]:
         adapter = PilotDBA(
