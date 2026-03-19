@@ -113,7 +113,25 @@ To keep `authd` running while continuing in the same shell, press `Ctrl-Z` and t
 bg
 ```
 
-## 5. Install or upgrade FG wheel in Cube venv
+## 5. Generate systemd units for BG control and authd (optional)
+
+Use the helpers to generate unit files from the active installation context (including venv path). Run these commands from the BG venv that will run the services.
+
+```bash
+python -m django print_systemd_bg_control --env-file ~/.env/mumble-bg > /tmp/mumble-bg-control.service
+python -m django print_systemd_bg_authd --env-file ~/.env/mumble-bg > /tmp/mumble-bg-auth.service
+```
+
+Install and enable with systemd:
+
+```bash
+sudo install -m 0644 /tmp/mumble-bg-control.service /etc/systemd/system/mumble-bg-control.service
+sudo install -m 0644 /tmp/mumble-bg-auth.service /etc/systemd/system/mumble-bg-auth.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now mumble-bg-control mumble-bg-auth
+```
+
+## 6. Install or upgrade FG wheel in Cube venv
 
 From the Cube host:
 
@@ -121,7 +139,7 @@ From the Cube host:
 pip install --upgrade --force-reinstall mumble_fg-<version>-py3-none-any.whl
 ```
 
-## 6. Validate FG control env vars in Cube shell
+## 7. Validate FG control env vars in Cube shell
 
 ```bash
 env | rg '^OPTIONAL_APPS='
@@ -134,7 +152,7 @@ Required runtime env:
 - `MURMUR_CONTROL_URL` points to BG control endpoint
 - `MURMUR_CONTROL_PSK` matches BG control secret
 
-## 7. Apply FG migration and restart Cube
+## 8. Apply FG migration and restart Cube
 
 ```bash
 python manage.py migrate mumble_fg
@@ -143,7 +161,7 @@ python manage.py collectstatic
 
 Restart Cube runtime (service or runserver for your environment).
 
-## 8. First control sync from FG
+## 9. First control sync from FG
 
 From FG ACL UI, run `Sync BG`.
 
@@ -154,7 +172,7 @@ Expected behavior:
 
 Even if ACL rules are unchanged, provisioning/reconcile can still run.
 
-## 9. Validate end state
+## 10. Validate end state
 
 Check three surfaces:
 - FG UI (`/mumble-ui/acl/`, `/profile/`)

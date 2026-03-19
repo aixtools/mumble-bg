@@ -7,6 +7,8 @@ Preferred install/ops flow is wheel-first with Django management commands:
 - `python -m django shell_export KEY VALUE...`
 - `python -m django install_assistant`
 - `python -m django list_ice_users`
+- `python -m django print_systemd_bg_control --env-file ~/.env/mumble-bg`
+- `python -m django print_systemd_bg_authd --env-file ~/.env/mumble-bg`
 
 JSON env note: if a value must contain a literal apostrophe, encode it as `\\u0027` in JSON. Example: `"'MyPrettyS3rcet'"` should be `"\\u0027MyPrettyS3rcet\\u0027"`.
 
