@@ -92,7 +92,7 @@ python -m django runserver 127.0.0.1:18080
 In a second shell, verify BG:
 
 ```bash
-curl -s http://127.0.0.1:18080/v1/health | python -m json.tool
+curl -s http://127.0.0.1:18080/v1/health | python3 -m json.tool
 curl -s http://127.0.0.1:18080/v1/public-key
 python -m django list_ice_users
 ```
