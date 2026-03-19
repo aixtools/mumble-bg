@@ -55,11 +55,7 @@ python -m django shell_export ICE_SECRET "'CubeiNive'"
 
 Then paste the output into your env file.
 
-To scan a completed env file and propose shell-safe rewrites for tricky values:
-
-```bash
-python -m django scan_env_values --file ~/.env/mumble-bg
-```
+Env formatting rule for JSON variables (`DATABASES`, `ICE`, `MURMUR_PROBE`): keep them valid JSON and shell-parseable. If a JSON string value must include a literal apostrophe, encode it as `\\u0027` inside JSON. Example: `"'MyPrettyS3rcet'"` must be represented as `"\\u0027MyPrettyS3rcet\\u0027"`. This avoids shell quote parsing issues in `.env`.
 
 ## 3. Run BG preflight checks
 

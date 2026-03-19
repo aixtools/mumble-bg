@@ -5,9 +5,10 @@ Canonical sequence is in `installation/installation.md`.
 Preferred install/ops flow is wheel-first with Django management commands:
 - `python -m django init_bg_env`
 - `python -m django shell_export KEY VALUE...`
-- `python -m django scan_env_values --file ~/.env/mumble-bg`
 - `python -m django install_assistant`
 - `python -m django list_ice_users`
+
+JSON env note: if a value must contain a literal apostrophe, encode it as `\\u0027` in JSON. Example: `"'MyPrettyS3rcet'"` should be `"\\u0027MyPrettyS3rcet\\u0027"`.
 
 Optional source-checkout helper wrappers are in `installation/scripts/`:
 
