@@ -47,7 +47,7 @@ def _has_raw_risk(raw_block: str) -> bool:
     return False
 
 
-def _json_suggest(value: str, *, raw_risk: bool) -> str | None:
+def _json_suggest(value: str) -> str | None:
     try:
         payload = json.loads(value)
     except Exception:
@@ -64,10 +64,6 @@ def _json_suggest(value: str, *, raw_risk: bool) -> str | None:
                     nv = v.replace("'", "\\u0027")
                     if nv != v:
                         changed = True
-                    if raw_risk and re.search(r"(pass|secret|key|token|icewrite|iceread)", str(k), re.IGNORECASE):
-                        if "\\u0027" not in nv:
-                            nv = "\\u0027" + nv + "\\u0027"
-                            changed = True
                     out[k] = nv
                 else:
                     out[k] = walk(v)
@@ -120,7 +116,7 @@ class Command(BaseCommand):
             raw_block = "\n".join(block_lines)
             parsed_value = values.get(key, "")
             raw_risk = _has_raw_risk(raw_block)
-            json_suggestion = _json_suggest(parsed_value, raw_risk=raw_risk)
+            json_suggestion = _json_suggest(parsed_value)
 
             if json_suggestion is not None:
                 reason = "json quote/escape normalization suggested"
