@@ -72,6 +72,8 @@ For first-time installs that will use encrypted BG keys, set:
 export BG_KEY_PASSPHRASE='<passphrase>'
 ```
 
+On first install, `install_assistant` is expected to show `Encryption` as inactive/partial until keys are generated.
+
 ## 4. Apply BG migrations
 
 ```bash
@@ -94,16 +96,37 @@ Generate BG keypair:
 python -m django generate_bg_keypair --key-dir /etc/mumble-bg/keys
 ```
 
+`generate_bg_keypair` behavior:
+- If `BG_KEY_PASSPHRASE` is set and non-empty, an encrypted private key is generated.
+- If `BG_KEY_PASSPHRASE` is missing/empty, command prompts: `Generate passwordless keypair? [y/N]`.
+- `N` aborts key generation. `y` creates a passwordless private key.
+
+After key generation, re-run:
+
+```bash
+python -m django install_assistant
+```
+
+`Encryption` should now report active.
+
 If the private key is encrypted (recommended), `BG_KEY_PASSPHRASE` must be set for:
 - `python -m django check`
 - `python -m django install_assistant`
 - `python -m django runserver ...`
 - runtime control operations requiring decryption
 
-## 6. Start BG HTTP control runtime
+## 6. Start BG services before FG install
 
 ```bash
 python -m django runserver 127.0.0.1:18080
+python -m bg.authd
+```
+
+To keep `authd` running while continuing in the same shell, use:
+
+```bash
+# press Ctrl-Z while authd is in foreground
+bg
 ```
 
 ## 7. Verify BG runtime and ICE visibility

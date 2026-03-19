@@ -3,10 +3,10 @@
 Usage:
     python manage.py generate_bg_keypair [--key-dir /etc/mumble-bg/keys]
 
-Passphrase is read from BG_KEY_PASSPHRASE env var or prompted interactively.
+Passphrase is read from BG_KEY_PASSPHRASE env var.
+If missing/empty, command offers optional passwordless key generation.
 """
 
-import getpass
 import os
 from pathlib import Path
 
@@ -47,14 +47,27 @@ class Command(BaseCommand):
                 f'{private_path} already exists. Use --force to overwrite.'
             )
 
-        passphrase = os.environ.get('BG_KEY_PASSPHRASE', '').strip()
+        raw_passphrase = os.environ.get('BG_KEY_PASSPHRASE')
+        passphrase = (raw_passphrase or '').strip()
+        use_passwordless = False
         if not passphrase:
-            passphrase = getpass.getpass('Enter passphrase for private key: ')
-            confirm = getpass.getpass('Confirm passphrase: ')
-            if passphrase != confirm:
-                raise CommandError('Passphrases do not match.')
-        if not passphrase:
-            raise CommandError('Passphrase cannot be empty.')
+            self.stdout.write(
+                self.style.WARNING(
+                    'BG_KEY_PASSPHRASE is not set (or is empty).'
+                )
+            )
+            try:
+                answer = input('Generate passwordless keypair? [y/N]: ').strip().lower()
+            except EOFError as exc:
+                raise CommandError(
+                    'BG_KEY_PASSPHRASE is required for encrypted keys (or confirm passwordless interactively).'
+                ) from exc
+            if answer in {'y', 'yes'}:
+                use_passwordless = True
+            else:
+                raise CommandError(
+                    'Aborted: define BG_KEY_PASSPHRASE with a non-empty value and run again.'
+                )
 
         key_size = options['key_size']
         self.stdout.write(f'Generating {key_size}-bit RSA keypair...')
@@ -64,12 +77,15 @@ class Command(BaseCommand):
             key_size=key_size,
         )
 
+        if use_passwordless:
+            encryption = serialization.NoEncryption()
+        else:
+            encryption = serialization.BestAvailableEncryption(passphrase.encode('utf-8'))
+
         private_pem = private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.BestAvailableEncryption(
-                passphrase.encode('utf-8')
-            ),
+            encryption_algorithm=encryption,
         )
 
         public_pem = private_key.public_key().public_bytes(
@@ -89,4 +105,8 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f'Public key:  {public_path} (mode 0644)'))
         self.stdout.write('')
         self.stdout.write('Distribute the public key to FG for password encryption.')
-        self.stdout.write('Set BG_KEY_PASSPHRASE in the BG environment file.')
+        if use_passwordless:
+            self.stdout.write(self.style.WARNING('Generated passwordless private key (NoEncryption).'))
+            self.stdout.write('Set BG_KEY_PASSPHRASE and regenerate keys later for encrypted-at-rest support.')
+        else:
+            self.stdout.write('Set BG_KEY_PASSPHRASE in the BG environment file.')
