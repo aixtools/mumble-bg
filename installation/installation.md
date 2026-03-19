@@ -2,12 +2,23 @@
 
 This is the recommended sequence for installing `mumble-fg` (in Cube) and `mumble-bg` (standalone).
 
-## 1. Install or upgrade BG wheel in BG venv
+## 1. Create BG working directory + venv, activate, and install wheel
 
 From the BG host:
 
 ```bash
+mkdir -p ~/mumble-bg
+cd ~/mumble-bg
+python3 -m venv .venv/mumble-bg
+source .venv/mumble-bg/bin/activate
+pip install --upgrade pip
 pip install --upgrade --force-reinstall mumble_bg-<version>-py3-none-any.whl
+```
+
+Immediately set settings-module so you do not need `--settings=bg.settings` on every command:
+
+```bash
+export DJANGO_SETTINGS_MODULE=bg.settings
 ```
 
 ## 2. Create and load BG env file (first-time recommended)
