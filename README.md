@@ -34,7 +34,6 @@ Use the repo-local installation materials:
 - `installation/README.md`
 - `installation/installation.md`
 - `installation/scripts/` (optional wrappers for source-checkout operators)
-
 ## Standalone Deploy Defaults
 
 For the current standalone background-service phase, the default layout is:
