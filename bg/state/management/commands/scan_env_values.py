@@ -152,8 +152,18 @@ class Command(BaseCommand):
 
         self.stdout.write("Potential issues:")
         for item in findings:
-            self.stdout.write(f"- {item.key}: {item.reason}")
+            self.stdout.write("")
+            self.stdout.write(f"KEY: {item.key}")
+            self.stdout.write(f"REASON: {item.reason}")
+            self.stdout.write("CURRENT:")
+            if item.parsed_value:
+                self.stdout.write(item.parsed_value)
+            else:
+                self.stdout.write("<empty>")
+            self.stdout.write("PROPOSED:")
+            self.stdout.write(item.replacement)
 
+        self.stdout.write("")
         apply_updates = bool(options["yes"])
         if not apply_updates:
             answer = input("Apply inline fixes to file? [y/N]: ").strip().lower()
