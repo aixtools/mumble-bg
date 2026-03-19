@@ -12,3 +12,8 @@ Helper scripts are in `installation/scripts/`:
 - `scan_env_values.sh` - scans a completed env file and proposes shell-safe export rewrites for tricky values
 
 All scripts are check-oriented and safe to run repeatedly.
+
+Wheel-safe equivalents are also available as Django management commands:
+- `python -m django init_bg_env`
+- `python -m django shell_export KEY VALUE...`
+- `python -m django scan_env_values --file ~/.env/mumble-bg`

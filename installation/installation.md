@@ -15,7 +15,7 @@ pip install --upgrade --force-reinstall mumble_bg-<version>-py3-none-any.whl
 From BG repo root:
 
 ```bash
-bash installation/scripts/init_bg_env.sh
+python -m django init_bg_env
 ```
 
 Edit `~/.env/mumble-bg`, then load it:
@@ -41,7 +41,7 @@ python -m django <command> --settings=bg.settings
 For values with difficult shell characters, generate safe export lines with:
 
 ```bash
-bash installation/scripts/shell_export.sh ICE_SECRET "'CubeiNive'"
+python -m django shell_export ICE_SECRET "'CubeiNive'"
 ```
 
 Then paste the output into your env file.
@@ -49,7 +49,7 @@ Then paste the output into your env file.
 To scan a completed env file and propose shell-safe rewrites for tricky values:
 
 ```bash
-bash installation/scripts/scan_env_values.sh ~/.env/mumble-bg
+python -m django scan_env_values --file ~/.env/mumble-bg
 ```
 
 ## 3. Run BG preflight checks
