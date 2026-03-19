@@ -35,6 +35,8 @@ source ~/.env/mumble-bg
 set +a
 ```
 
+BG variables are maintained in `~/.env/mumble-bg`. For FG/Cube integration, treat this file as the operator source of truth for shared control values (for example `MURMUR_CONTROL_URL`, `MURMUR_CONTROL_PSK`, optional `BG_PUBLIC_KEY_PATH`) and copy/append those into Cube-side env configuration during deployment.
+
 Default command pattern after loading env:
 
 ```bash
@@ -133,7 +135,13 @@ sudo systemctl enable --now mumble-bg-control mumble-bg-auth
 
 ## 6. Install or upgrade FG wheel in Cube venv
 
-From the Cube host, in Cube checkout, activate the Cube venv first:
+From the Cube host, in Cube checkout, stop the Django service for manual installs, then activate the Cube venv:
+
+```bash
+sudo systemctl stop cube-django
+```
+
+Then:
 
 ```bash
 source venv/bin/activate
@@ -160,6 +168,8 @@ Then install:
 ```bash
 pip install --upgrade --force-reinstall mumble_fg-<version>-py3-none-any.whl
 ```
+
+After install/migrate/collectstatic, start `cube-django` again.
 
 ## 7. Validate FG control env vars in Cube shell
 
@@ -219,3 +229,4 @@ Check three surfaces:
 - `python -m django help <command>` only confirms registration; it does not execute the command.
 - Update-only note: if `pip install` runs while a dev `runserver` is active, autoreload can produce transient command errors. Stop services first during updates, then restart cleanly after install.
 - Source-checkout helpers still exist under `installation/scripts/` for operators who prefer wrapper scripts, but they are optional.
+- CI/CD workflow note: deploy workflow already handles its own service restart sequence; do not add an extra explicit stop there.
