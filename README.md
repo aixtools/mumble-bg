@@ -33,7 +33,7 @@ Use the repo-local installation materials:
 
 - `installation/README.md`
 - `installation/installation.md`
-- `installation/scripts/`
+- `installation/scripts/` (optional wrappers for source-checkout operators)
 
 ## Standalone Deploy Defaults
 

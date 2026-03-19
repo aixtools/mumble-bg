@@ -2,7 +2,14 @@
 
 Canonical sequence is in `installation/installation.md`.
 
-Helper scripts are in `installation/scripts/`:
+Preferred install/ops flow is wheel-first with Django management commands:
+- `python -m django init_bg_env`
+- `python -m django shell_export KEY VALUE...`
+- `python -m django scan_env_values --file ~/.env/mumble-bg`
+- `python -m django install_assistant`
+- `python -m django list_ice_users`
+
+Optional source-checkout helper wrappers are in `installation/scripts/`:
 
 - `bg_preflight.sh` - validates BG config, checks, and migration state
 - `bg_runtime_verify.sh` - validates BG runtime endpoints and ICE user listing
@@ -12,8 +19,3 @@ Helper scripts are in `installation/scripts/`:
 - `scan_env_values.sh` - scans a completed env file and proposes shell-safe export rewrites for tricky values
 
 All scripts are check-oriented and safe to run repeatedly.
-
-Wheel-safe equivalents are also available as Django management commands:
-- `python -m django init_bg_env`
-- `python -m django shell_export KEY VALUE...`
-- `python -m django scan_env_values --file ~/.env/mumble-bg`

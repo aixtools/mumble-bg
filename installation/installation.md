@@ -23,8 +23,6 @@ export DJANGO_SETTINGS_MODULE=bg.settings
 
 ## 2. Create and load BG env file (first-time recommended)
 
-From BG repo root:
-
 ```bash
 python -m django init_bg_env
 ```
@@ -65,16 +63,11 @@ python -m django scan_env_values --file ~/.env/mumble-bg
 
 ## 3. Run BG preflight checks
 
-From BG repo root:
-
 ```bash
-bash installation/scripts/bg_preflight.sh
+python -m django check
+python -m django install_assistant
+python -m django showmigrations state
 ```
-
-This runs:
-- `python -m django check`
-- `python -m django install_assistant`
-- `python -m django showmigrations state`
 
 Required env at this stage includes your DB/ICE/control settings.  
 For first-time installs that will use encrypted BG keys, set:
@@ -84,8 +77,6 @@ export BG_KEY_PASSPHRASE='<passphrase>'
 ```
 
 ## 4. Apply BG migrations
-
-From BG repo root:
 
 ```bash
 python -m django migrate
@@ -121,16 +112,11 @@ python -m django runserver 127.0.0.1:18080
 
 ## 7. Verify BG runtime and ICE visibility
 
-From BG repo root:
-
 ```bash
-bash installation/scripts/bg_runtime_verify.sh
+curl -s http://127.0.0.1:18080/v1/health | python -m json.tool
+curl -s http://127.0.0.1:18080/v1/public-key
+python -m django list_ice_users
 ```
-
-This checks:
-- `GET /v1/health`
-- `GET /v1/public-key`
-- `python -m django list_ice_users`
 
 Health output should report crypto readiness when configured:
 - `has_public_key=true`
@@ -146,10 +132,10 @@ pip install --upgrade --force-reinstall mumble_fg-<version>-py3-none-any.whl
 
 ## 9. Validate FG control env vars in Cube shell
 
-From Cube repo root:
-
 ```bash
-bash ../mumble-bg/installation/scripts/fg_env_check.sh
+env | rg '^OPTIONAL_APPS='
+env | rg '^MURMUR_CONTROL_URL='
+env | rg '^MURMUR_CONTROL_PSK='
 ```
 
 Required runtime env:
@@ -188,3 +174,4 @@ Check three surfaces:
 
 - `python -m django help <command>` only confirms registration; it does not execute the command.
 - Update-only note: if `pip install` runs while a dev `runserver` is active, autoreload can produce transient command errors. Stop services first during updates, then restart cleanly after install.
+- Source-checkout helpers still exist under `installation/scripts/` for operators who prefer wrapper scripts, but they are optional.
