@@ -10,6 +10,7 @@ from typing import Any
 from django.core.management.base import BaseCommand
 
 from bg.db import MmblBgDBA, PilotDBA, PilotDBError, db_config_from_env
+from bg.envtools import resolve_bg_bind
 from bg.ice_inventory import list_current_ice_inventory, parse_ice_env
 
 
@@ -42,6 +43,7 @@ class Command(BaseCommand):
 
         report["checks"]["control_psk"] = self._check_control_psk()
         report["checks"]["control_url"] = self._check_control_url()
+        report["checks"]["control_bind"] = self._check_control_bind()
         report["checks"]["encryption"] = self._check_encryption()
         report["checks"]["pilot_db"] = self._check_pilot_db()
         report["checks"]["bg_db"] = self._check_bg_db()
@@ -72,6 +74,11 @@ class Command(BaseCommand):
                 "Control URL",
                 report["checks"]["control_url"]["status"],
                 report["checks"]["control_url"]["message"],
+            ),
+            (
+                "Control Bind",
+                report["checks"]["control_bind"]["status"],
+                report["checks"]["control_bind"]["message"],
             ),
             (
                 "Encryption",
@@ -138,6 +145,21 @@ class Command(BaseCommand):
         if value:
             return {"status": "ok", "message": value}
         return {"status": "warning", "message": "MURMUR_CONTROL_URL is not set"}
+
+    def _check_control_bind(self) -> dict[str, Any]:
+        import os
+
+        env = {
+            "BG_BIND": os.environ.get("BG_BIND"),
+            "MURMUR_CONTROL_URL": os.environ.get("MURMUR_CONTROL_URL"),
+        }
+        resolved = resolve_bg_bind(env)
+        source = resolved.get("source", "unknown")
+        bind = resolved.get("bind", "")
+        detail = resolved.get("detail", "")
+        status = "warning" if source == "default" else "ok"
+        message = f"{bind} (source={source}; {detail})" if detail else f"{bind} (source={source})"
+        return {"status": status, "message": message}
 
     def _check_encryption(self) -> dict[str, Any]:
         try:

@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import re
+import socket
 import subprocess
+from typing import Any, Mapping
+from urllib.parse import urlparse
 from pathlib import Path
 
 
 ENV_KEYS = [
     "DJANGO_SETTINGS_MODULE",
     "BG_KEY_PASSPHRASE",
+    "BG_BIND",
     "MURMUR_CONTROL_PSK",
     "MURMUR_CONTROL_URL",
     "DATABASES",
@@ -66,3 +71,91 @@ def count_ice_entries(ice_raw: str) -> int:
     if isinstance(payload, list):
         return len(payload)
     return 0
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(str(host))
+        return True
+    except ValueError:
+        return False
+
+
+def _format_bind_host(host: str) -> str:
+    return f"[{host}]" if ":" in host else host
+
+
+def _pick_resolved_address(host: str, port: int) -> str:
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    if not infos:
+        raise OSError(f"no DNS records for {host}")
+
+    ipv4 = [info for info in infos if info[0] == socket.AF_INET]
+    ipv6 = [info for info in infos if info[0] == socket.AF_INET6]
+    chosen = ipv4[0] if ipv4 else (ipv6[0] if ipv6 else infos[0])
+    return str(chosen[4][0])
+
+
+def resolve_bg_bind(
+    env: Mapping[str, Any] | None = None,
+    *,
+    default_bind: str = "127.0.0.1:18080",
+) -> dict[str, str]:
+    """
+    Resolve the runserver bind address from environment contract:
+      1) BG_BIND
+      2) MURMUR_CONTROL_URL host:port (hostname resolved to concrete IP)
+      3) default_bind
+    """
+    values = env or {}
+    bg_bind = str(values.get("BG_BIND") or "").strip()
+    if bg_bind:
+        return {
+            "bind": bg_bind,
+            "source": "BG_BIND",
+            "detail": "explicit override",
+        }
+
+    control_url = str(values.get("MURMUR_CONTROL_URL") or "").strip()
+    if not control_url:
+        return {
+            "bind": default_bind,
+            "source": "default",
+            "detail": "MURMUR_CONTROL_URL not set",
+        }
+
+    parsed = urlparse(control_url)
+    host = str(parsed.hostname or "").strip()
+    if not host:
+        return {
+            "bind": default_bind,
+            "source": "default",
+            "detail": "MURMUR_CONTROL_URL has no hostname",
+        }
+
+    if parsed.port is not None:
+        port = int(parsed.port)
+    elif parsed.scheme == "https":
+        port = 443
+    else:
+        port = 80
+
+    if _is_ip_literal(host):
+        bind_host = host
+        detail = "MURMUR_CONTROL_URL literal IP"
+    else:
+        try:
+            bind_host = _pick_resolved_address(host, port)
+            detail = f"MURMUR_CONTROL_URL host resolved: {host} -> {bind_host}"
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "bind": default_bind,
+                "source": "default",
+                "detail": f"failed to resolve {host}: {exc}",
+            }
+
+    return {
+        "bind": f"{_format_bind_host(bind_host)}:{port}",
+        "source": "MURMUR_CONTROL_URL",
+        "detail": detail,
+    }
