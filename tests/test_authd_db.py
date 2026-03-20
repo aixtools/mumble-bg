@@ -63,7 +63,7 @@ def test_list_pilot_identities_loads_from_query(monkeypatch):
             (1234, "Pilot One", 77, 88, "Corp Name", "Alliance Name", "", ""),
         ])
 
-    monkeypatch.setattr(authd, "get_pilot_db_connection", fake_connection)
+    monkeypatch.setattr(authd, "get_db_connection", fake_connection)
 
     identities = authd.list_pilot_identities()
     assert identities
@@ -82,7 +82,7 @@ def test_list_pilot_identities_normalizes_optional_identity_fields(monkeypatch):
             (1234, "Pilot One", None, None, None, None, None, None),
         ])
 
-    monkeypatch.setattr(authd, "get_pilot_db_connection", fake_connection)
+    monkeypatch.setattr(authd, "get_db_connection", fake_connection)
 
     identities = authd.list_pilot_identities()
     identity = identities[0]
@@ -98,7 +98,7 @@ def test_list_pilot_identities_returns_empty_on_query_error(monkeypatch):
     def failing_connection():
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(authd, "get_pilot_db_connection", failing_connection)
+    monkeypatch.setattr(authd, "get_db_connection", failing_connection)
 
     assert authd.list_pilot_identities() == []
 

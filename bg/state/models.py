@@ -257,6 +257,79 @@ class AccessRuleSyncAudit(models.Model):
         return f'{self.action} ({self.requested_by or "unknown"}) @ {self.created_at}'
 
 
+class PilotAccountCache(models.Model):
+    pkid = models.BigIntegerField(
+        unique=True,
+        help_text='Stable FG/BG account identity key.',
+    )
+    main_character_id = models.BigIntegerField(
+        null=True,
+        blank=True,
+        help_text='Main character ID from the latest FG snapshot.',
+    )
+    main_character_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text='Main character name from the latest FG snapshot.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'bg_pilot_account'
+        ordering = ['pkid']
+
+    def __str__(self):
+        return str(self.pkid)
+
+
+class PilotCharacterCache(models.Model):
+    account = models.ForeignKey(
+        PilotAccountCache,
+        on_delete=models.CASCADE,
+        related_name='characters',
+    )
+    character_id = models.BigIntegerField(unique=True)
+    character_name = models.CharField(max_length=255)
+    corporation_id = models.BigIntegerField(null=True, blank=True)
+    corporation_name = models.CharField(max_length=255, blank=True, default='')
+    alliance_id = models.BigIntegerField(null=True, blank=True)
+    alliance_name = models.CharField(max_length=255, blank=True, default='')
+    is_main = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'bg_pilot_character'
+        ordering = ['account__pkid', '-is_main', 'character_name', 'character_id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['account', 'character_id'],
+                name='bg_pilot_character_unique_account_character',
+            ),
+        ]
+
+    def __str__(self):
+        return self.character_name
+
+
+class PilotSnapshotSyncAudit(models.Model):
+    request_id = models.CharField(max_length=64, blank=True, default='')
+    requested_by = models.CharField(max_length=255, blank=True, default='')
+    action = models.CharField(max_length=16, default='sync', help_text='Operation that produced this record')
+    summary_before = models.JSONField(blank=True, default=dict)
+    summary_after = models.JSONField(blank=True, default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'bg_pilot_snapshot_audit'
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f'{self.action} ({self.requested_by or "unknown"}) @ {self.created_at}'
+
+
 class ControlChannelKey(models.Model):
     name = models.CharField(max_length=64, unique=True, default='fg_bg')
     shared_secret = models.CharField(

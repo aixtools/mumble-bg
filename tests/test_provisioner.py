@@ -1,121 +1,97 @@
-"""
-Provisioner behavior tests.
-
-Run with:
-    cd /home/michael/prj/mumble-bg-ice-connections
-    DJANGO_SETTINGS_MODULE=tests.test_settings /home/michael/.venv/mumble-bg/bin/python -m django test tests.test_provisioner -v 2
-"""
-
-from unittest.mock import patch
-
 from django.contrib.auth.models import User
 from django.test import TestCase
 
+from bg.passwords import build_murmur_password_record
 from bg.provisioner import provision_registrations
-from bg.state.models import AccessRule, MumbleServer, MumbleUser
+from bg.state.models import (
+    AccessRule,
+    MumbleServer,
+    MumbleUser,
+    PilotAccountCache,
+    PilotCharacterCache,
+)
 
 
-class ProvisionerPasswordCreationTest(TestCase):
-    """Provisioning should generate hash data for newly created rows."""
-
+class ProvisionerSnapshotTest(TestCase):
     def setUp(self):
         self.server = MumbleServer.objects.create(
-            name='Test Server',
-            address='127.0.0.1:64738',
+            name='Main',
+            address='voice.example.com:64738',
             ice_host='127.0.0.1',
             ice_port=6502,
+            is_active=True,
         )
-        AccessRule.objects.create(entity_id=99000001, entity_type='alliance', deny=False)
-        self.char_rows = [
-            {
-                'user_id': 1001,
-                'character_id': 90000001,
-                'character_name': 'Test Pilot',
-                'corporation_id': 111,
-                'corporation_name': 'Test Corp',
-                'alliance_id': 99000001,
-                'alliance_name': 'Alliance',
-            },
-        ]
-        self.main_rows = {
-            1001: {
-                'user_id': 1001,
-                'character_id': 90000001,
-                'character_name': 'Test Pilot',
-                'corporation_name': 'Test Corp',
-                'alliance_name': 'Alliance',
-                'is_main': True,
-            },
-        }
 
-    def test_create_row_generates_password_hash(self):
-        with patch('bg.provisioner._query_character_rows', return_value=self.char_rows):
-            with patch('bg.provisioner._query_main_rows', return_value=self.main_rows):
-                result = provision_registrations(None, server=self.server, dry_run=False)
+    def _seed_snapshot(self, *, pkid, character_id, character_name, corporation_id=None, corporation_name='', alliance_id=None, alliance_name=''):
+        account = PilotAccountCache.objects.create(
+            pkid=pkid,
+            main_character_id=character_id,
+            main_character_name=character_name,
+        )
+        PilotCharacterCache.objects.create(
+            account=account,
+            character_id=character_id,
+            character_name=character_name,
+            corporation_id=corporation_id,
+            corporation_name=corporation_name,
+            alliance_id=alliance_id,
+            alliance_name=alliance_name,
+            is_main=True,
+        )
+        return account
+
+    def test_provision_creates_registration_for_eligible_snapshot_account(self):
+        AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
+        self._seed_snapshot(
+            pkid=42,
+            character_id=9001,
+            character_name='Pilot One',
+            alliance_id=9901,
+            alliance_name='Alliance One',
+            corporation_id=8801,
+            corporation_name='Corp One',
+        )
+
+        result = provision_registrations(dry_run=False)
+
         self.assertEqual(result.created, 1)
-        user = MumbleUser.objects.get(user__id=1001, server=self.server)
-        self.assertTrue(user.is_active)
-        self.assertNotEqual(user.pwhash, '')
-        self.assertNotEqual(user.pw_salt, '')
-        self.assertTrue(user.kdf_iterations > 0)
+        mumble_user = MumbleUser.objects.get(user_id=42, server=self.server)
+        self.assertTrue(mumble_user.is_active)
+        self.assertEqual(mumble_user.username, 'Pilot One')
+        self.assertEqual(mumble_user.evepilot_id, 9001)
+        self.assertEqual(mumble_user.alliance_id, 9901)
 
-
-class ProvisionerReactivationKeepsPasswordTest(TestCase):
-    """Reactivating inactive rows should not mutate existing password data."""
-
-    def setUp(self):
-        self.server = MumbleServer.objects.create(
-            name='Test Server',
-            address='127.0.0.1:64738',
-            ice_host='127.0.0.1',
-            ice_port=6502,
+    def test_provision_deactivates_blocked_registration_from_snapshot(self):
+        AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
+        AccessRule.objects.create(entity_id=8801, entity_type='corporation', deny=True)
+        self._seed_snapshot(
+            pkid=42,
+            character_id=9001,
+            character_name='Pilot One',
+            alliance_id=9901,
+            alliance_name='Alliance One',
+            corporation_id=8801,
+            corporation_name='Corp One',
         )
-        AccessRule.objects.create(entity_id=99000001, entity_type='alliance', deny=False)
-        user = User.objects.create(pk=2002, username='Another Pilot')
+
+        user = User.objects.create(pk=42, username='Pilot One')
+        password_record = build_murmur_password_record('temporary-pass')
         MumbleUser.objects.create(
             user=user,
             server=self.server,
-            evepilot_id=90000002,
-            corporation_id=111,
-            alliance_id=99000001,
-            username='Another Pilot',
-            display_name='Another Pilot',
-            pwhash='legacy-hash',
-            hashfn='legacy-hashfn',
-            pw_salt='legacy-salt',
-            kdf_iterations=2000,
-            is_active=False,
+            evepilot_id=9001,
+            corporation_id=8801,
+            alliance_id=9901,
+            username='Pilot One',
+            display_name='Pilot One',
+            pwhash=password_record['pwhash'],
+            hashfn=password_record['hashfn'],
+            pw_salt=password_record['pw_salt'],
+            kdf_iterations=password_record['kdf_iterations'],
+            is_active=True,
         )
-        self.char_rows = [
-            {
-                'user_id': 2002,
-                'character_id': 90000002,
-                'character_name': 'Another Pilot',
-                'corporation_id': 111,
-                'corporation_name': 'Test Corp',
-                'alliance_id': 99000001,
-                'alliance_name': 'Alliance',
-            },
-        ]
-        self.main_rows = {
-            2002: {
-                'user_id': 2002,
-                'character_id': 90000002,
-                'character_name': 'Another Pilot',
-                'corporation_name': 'Test Corp',
-                'alliance_name': 'Alliance',
-                'is_main': True,
-            },
-        }
 
-    def test_reactivate_keeps_existing_password_hash(self):
-        with patch('bg.provisioner._query_character_rows', return_value=self.char_rows):
-            with patch('bg.provisioner._query_main_rows', return_value=self.main_rows):
-                result = provision_registrations(None, server=self.server, dry_run=False)
-        self.assertEqual(result.activated, 1)
-        user = MumbleUser.objects.get(user__id=2002, server=self.server)
-        self.assertTrue(user.is_active)
-        self.assertEqual(user.pwhash, 'legacy-hash')
-        self.assertEqual(user.pw_salt, 'legacy-salt')
-        self.assertEqual(user.hashfn, 'legacy-hashfn')
-        self.assertEqual(user.kdf_iterations, 2000)
+        result = provision_registrations(dry_run=False)
+
+        self.assertEqual(result.deactivated, 1)
+        self.assertFalse(MumbleUser.objects.get(user_id=42, server=self.server).is_active)

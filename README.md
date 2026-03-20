@@ -55,8 +55,14 @@ Relevant files:
 
 ## Pilot Eligibility Rules
 
-BG receives access-control decision tables from FG via the control channel and
-independently provisions Mumble accounts by evaluating the pilot source against these rules.
+BG receives two inputs from FG via the control channel:
+
+- full ACL rules (`/v1/access-rules/sync`)
+- a full account-oriented pilot snapshot (`/v1/pilot-snapshot/sync`)
+
+BG then provisions Mumble accounts by evaluating its cached FG pilot snapshot
+against the synced ACL rules. BG no longer reads pilot data directly from a
+host/pilot database.
 
 ### Decision Tables (received from FG)
 
@@ -80,14 +86,15 @@ Block checks apply across the **entire account**, not just the main character.
 If the main **or any alt** matches a blocked corp or pilot ID, the whole account
 is denied — unless a pilot-level allow overrides it.
 
-## Read-only Pilot Contract
+## Cached Pilot Snapshot Contract
 
 - `bg.authd.service.PilotIdentity(character_id, character_name, corporation_id, alliance_id, corporation_name, alliance_name, corporation_ticker, alliance_ticker)`
 - `bg.authd.service.list_pilot_identities() -> list[PilotIdentity]`
 
 - `character_name` is used for display naming in Mumble.
-- `corporation_name` and `alliance_name` are now carried through from the pilot source.
-- `corporation_ticker` and `alliance_ticker` remain supported in the contract and default to empty strings when cube-core does not provide them.
+- `corporation_name` and `alliance_name` are carried through from the cached FG pilot snapshot.
+- `corporation_ticker` and `alliance_ticker` remain supported in the contract and default to empty strings when FG does not provide them.
+- BG serves this contract from BG-owned snapshot cache tables; it does not query host/pilot tables directly.
 
 This contract update aligns with Cube core behavioral changes introduced in Cube PR #74.
 
@@ -96,11 +103,11 @@ This contract update aligns with Cube core behavioral changes introduced in Cube
   - A pilot can change corporation over time.
   - A corporation can change alliance over time.
   - Therefore `alliance_id` is membership-state, not an immutable identity attribute.
-  - mumble-bg should always treat `alliance_id` as a snapshot from cube-core and refresh it whenever character org state is refreshed.
+  - mumble-bg should always treat `alliance_id` as a snapshot from FG/cube-core and refresh it whenever character org state is refreshed.
 
 ## Environment Contracts
 
-- `DATABASES` = JSON object containing the read-only `pilot` DB config and the owned `bg` DB config.
+- `DATABASES` = JSON object containing the owned `bg` DB config.
 - `ICE` = JSON list describing required ICE connectivity for `authd` and `pulse`.
 - `MURMUR_PROBE` = optional JSON list for Murmur DB probe/debug targets.
 
@@ -108,7 +115,20 @@ This contract update aligns with Cube core behavioral changes introduced in Cube
 python manage.py migrate
 ```
 
-uses `DATABASES.bg` and keeps local schema independent of the pilot source DB.
+uses `DATABASES.bg` and keeps local schema independent of FG/host databases.
+BG does not require direct pilot DB access.
+
+### Pilot Snapshot Sync
+
+FG is expected to push the pilot snapshot before reconcile/provision. In the
+normal FG path, `sync_mumble_acl` sends:
+
+1. ACL rules to `/v1/access-rules/sync`
+2. pilot snapshot to `/v1/pilot-snapshot/sync`
+3. reconcile request to `/v1/provision`
+
+If BG has no cached pilot snapshot, provisioning commands return an explicit
+error telling the operator to sync `/v1/pilot-snapshot/sync` first.
 
 ### ICE Inventory Sync
 
@@ -142,7 +162,7 @@ python manage.py install_assistant
 ```
 
 It reports:
-- pilot DB connectivity
+- cached pilot snapshot presence/count
 - bg DB connectivity
 - ICE endpoint connectivity (from `ICE` env, or active `mumble_server` rows if `ICE` is empty)
 - `none_defined` when no ICE endpoints exist

@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 from django.test import TestCase, Client
 
-from bg.state.models import AccessRule, AccessRuleSyncAudit
+from bg.state.models import AccessRule, AccessRuleSyncAudit, MumbleServer, PilotAccountCache, PilotCharacterCache, PilotSnapshotSyncAudit
 from bg.provisioner import ProvisionResult
 
 
@@ -41,6 +41,23 @@ def _post_acl_sync(client, rules, *, requested_by='test-user', is_super=True):
     }
     return client.post(
         '/v1/access-rules/sync',
+        data=json.dumps(payload),
+        content_type='application/json',
+    )
+
+
+def _post_pilot_snapshot_sync(client, accounts, *, requested_by='test-user', is_super=True, generated_at='2026-03-20T00:00:00Z'):
+    payload = {
+        'request_id': 'test-request-snapshot',
+        'requested_by': requested_by,
+        'is_super': is_super,
+        'payload': {
+            'generated_at': generated_at,
+            'accounts': accounts,
+        },
+    }
+    return client.post(
+        '/v1/pilot-snapshot/sync',
         data=json.dumps(payload),
         content_type='application/json',
     )
@@ -339,6 +356,76 @@ class AccessRulesReadEndpointTest(TestCase):
         self.assertTrue(rule_map[98000001]['deny'])
 
 
+class PilotSnapshotSyncEndpointTest(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+    def test_sync_replaces_cached_snapshot(self):
+        resp = _post_pilot_snapshot_sync(
+            self.client,
+            [
+                {
+                    'pkid': 42,
+                    'characters': [
+                        {
+                            'character_id': 9001,
+                            'character_name': 'Pilot One',
+                            'corporation_id': 77,
+                            'corporation_name': 'Corp One',
+                            'alliance_id': 88,
+                            'alliance_name': 'Alliance One',
+                            'is_main': True,
+                        },
+                        {
+                            'character_id': 9002,
+                            'character_name': 'Pilot Alt',
+                            'corporation_id': 77,
+                            'corporation_name': 'Corp One',
+                            'alliance_id': 88,
+                            'alliance_name': 'Alliance One',
+                            'is_main': False,
+                        },
+                    ],
+                }
+            ],
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['status'], 'completed')
+        self.assertTrue(data['changed'])
+        self.assertEqual(PilotAccountCache.objects.count(), 1)
+        self.assertEqual(PilotCharacterCache.objects.count(), 2)
+        self.assertEqual(PilotSnapshotSyncAudit.objects.count(), 1)
+
+    def test_sync_is_idempotent_when_snapshot_is_unchanged(self):
+        accounts = [
+            {
+                'pkid': 42,
+                'characters': [
+                    {
+                        'character_id': 9001,
+                        'character_name': 'Pilot One',
+                        'corporation_id': 77,
+                        'corporation_name': 'Corp One',
+                        'alliance_id': 88,
+                        'alliance_name': 'Alliance One',
+                        'is_main': True,
+                    }
+                ],
+            }
+        ]
+
+        first = _post_pilot_snapshot_sync(self.client, accounts)
+        second = _post_pilot_snapshot_sync(self.client, accounts)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(first.json()['changed'])
+        self.assertFalse(second.json()['changed'])
+        self.assertEqual(PilotSnapshotSyncAudit.objects.count(), 1)
+
+
 class ProvisionEndpointTest(TestCase):
     """Test /v1/provision orchestration options."""
 
@@ -346,18 +433,16 @@ class ProvisionEndpointTest(TestCase):
         self.client = Client()
 
     def test_provision_without_reconcile_only_updates_local(self):
-        with patch('bg.authd.service.get_pilot_db_connection') as get_conn:
-            with patch('bg.provisioner.provision_registrations', return_value=ProvisionResult()) as provision_rows:
-                with patch('bg.pulse.reconciler.MurmurRegistrationReconciler') as reconciler:
-                    get_conn.return_value = Mock()
-                    resp = _post_provision(self.client, {'dry_run': True})
+        with patch('bg.provisioner.provision_registrations', return_value=ProvisionResult()) as provision_rows:
+            with patch('bg.pulse.reconciler.MurmurRegistrationReconciler') as reconciler:
+                resp = _post_provision(self.client, {'dry_run': True})
 
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertFalse(data['reconcile'])
         self.assertEqual(data['murmur_reconcile'], [])
         self.assertEqual(data['dry_run'], True)
-        provision_rows.assert_called_once_with(get_conn.return_value, dry_run=True)
+        provision_rows.assert_called_once_with(server=None, dry_run=True)
         reconciler.assert_not_called()
 
     def test_provision_with_reconcile_calls_reconciler(self):
@@ -366,22 +451,31 @@ class ProvisionEndpointTest(TestCase):
 
         reconciler_instance = Mock()
         reconciler_instance.reconcile.return_value = [reconcile_result]
+        MumbleServer.objects.create(
+            id=7,
+            name='Main',
+            address='voice.example.com:64738',
+            ice_host='127.0.0.1',
+            ice_port=6502,
+            is_active=True,
+        )
 
-        with patch('bg.authd.service.get_pilot_db_connection') as get_conn:
-            with patch('bg.provisioner.provision_registrations', return_value=ProvisionResult()) as provision_rows:
-                with patch(
-                    'bg.pulse.reconciler.MurmurRegistrationReconciler',
-                    return_value=reconciler_instance,
-                ) as reconciler_ctor:
-                    get_conn.return_value = Mock()
-                    resp = _post_provision(self.client, {'dry_run': True, 'reconcile': True, 'server_id': 7})
+        with patch('bg.provisioner.provision_registrations', return_value=ProvisionResult()) as provision_rows:
+            with patch(
+                'bg.pulse.reconciler.MurmurRegistrationReconciler',
+                return_value=reconciler_instance,
+            ) as reconciler_ctor:
+                resp = _post_provision(self.client, {'dry_run': True, 'reconcile': True, 'server_id': 7})
 
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertTrue(data['reconcile'])
         self.assertEqual(data['server_id'], 7)
         self.assertEqual(data['murmur_reconcile'][0]['server_id'], 1)
-        provision_rows.assert_called_once_with(get_conn.return_value, dry_run=True)
+        provision_rows.assert_called_once()
+        _, kwargs = provision_rows.call_args
+        self.assertEqual(kwargs['dry_run'], True)
+        self.assertEqual(kwargs['server'].id, 7)
         reconciler_ctor.assert_called_once_with(server_id=7)
         reconciler_instance.reconcile.assert_called_once_with(dry_run=True)
 

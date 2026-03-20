@@ -6,77 +6,13 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
 
+from bg.pilot_snapshot import current_pilot_snapshot
 from bg.state.models import AccessRule, MumbleServer, MumbleUser
 from bg.pulse.reconciler import MurmurReconcileError, _MurmurServerAdapter
 
 
 def _load_access_rules() -> list[dict[str, Any]]:
     return list(AccessRule.objects.values("entity_id", "entity_type", "deny"))
-
-
-def _query_character_rows(pilot_db_conn, all_referenced_ids, rule_sets) -> list[dict[str, Any]]:
-    ids = all_referenced_ids(rule_sets)
-    if not ids["alliance_ids"] and not ids["corporation_ids"] and not ids["pilot_ids"]:
-        return []
-
-    conditions: list[str] = []
-    params: list[int] = []
-    if ids["alliance_ids"]:
-        placeholders = ",".join(["%s"] * len(ids["alliance_ids"]))
-        conditions.append(f"ec.alliance_id IN ({placeholders})")
-        params.extend(ids["alliance_ids"])
-    if ids["corporation_ids"]:
-        placeholders = ",".join(["%s"] * len(ids["corporation_ids"]))
-        conditions.append(f"ec.corporation_id IN ({placeholders})")
-        params.extend(ids["corporation_ids"])
-    if ids["pilot_ids"]:
-        placeholders = ",".join(["%s"] * len(ids["pilot_ids"]))
-        conditions.append(f"ec.character_id IN ({placeholders})")
-        params.extend(ids["pilot_ids"])
-
-    where = " OR ".join(conditions)
-    query = f"""
-        SELECT
-            ec.user_id,
-            ec.character_id,
-            ec.character_name,
-            ec.corporation_id,
-            COALESCE(ec.corporation_name, '') AS corporation_name,
-            ec.alliance_id,
-            COALESCE(ec.alliance_name, '') AS alliance_name
-        FROM accounts_evecharacter ec
-        WHERE ec.pending_delete = false
-          AND ({where})
-        ORDER BY ec.user_id, ec.character_name
-    """
-    with pilot_db_conn.cursor() as cur:
-        cur.execute(query, params)
-        columns = [col[0] for col in cur.description]
-        return [dict(zip(columns, row)) for row in cur.fetchall()]
-
-
-def _query_main_rows(pilot_db_conn, ids: list[int]) -> dict[int, dict[str, Any]]:
-    if not ids:
-        return {}
-    placeholders = ",".join(["%s"] * len(ids))
-    query = f"""
-        SELECT
-            ec.user_id,
-            ec.character_name,
-            ec.is_main
-        FROM accounts_evecharacter ec
-        WHERE ec.user_id IN ({placeholders})
-          AND ec.pending_delete = false
-        ORDER BY ec.user_id, ec.is_main DESC, ec.character_name
-    """
-    mains: dict[int, dict[str, Any]] = {}
-    with pilot_db_conn.cursor() as cur:
-        cur.execute(query, list(ids))
-        columns = [col[0] for col in cur.description]
-        for row_tuple in cur.fetchall():
-            row = dict(zip(columns, row_tuple))
-            mains.setdefault(int(row["user_id"]), row)
-    return mains
 
 
 def _acl_by_pkid() -> dict[int, str]:
@@ -86,47 +22,19 @@ def _acl_by_pkid() -> dict[int, str]:
     """
     try:
         from fgbg_common.eligibility import (
-            all_referenced_ids,
-            blocked_main_list,
+            account_acl_state_by_pkid,
             build_rule_sets,
-            eligible_account_list,
         )
     except Exception:
         return {}
-
-    from bg.authd.service import get_pilot_db_connection
-    from bg.db import PilotDBError
-
-    try:
-        conn = get_pilot_db_connection()
-    except PilotDBError:
+    snapshot = current_pilot_snapshot()
+    if not snapshot.accounts:
         return {}
-
-    try:
-        rule_sets = build_rule_sets(_load_access_rules())
-        char_rows = _query_character_rows(conn, all_referenced_ids, rule_sets)
-        if not char_rows:
-            return {}
-        ids = sorted({int(row["user_id"]) for row in char_rows if row.get("user_id") is not None})
-        main_rows = _query_main_rows(conn, ids)
-        char_to_ids: dict[str, list[int]] = defaultdict(list)
-        for pkid, main in main_rows.items():
-            name = str(main.get("character_name") or "")
-            if name:
-                char_to_ids[name].append(int(pkid))
-
-        acl_map: dict[int, str] = {}
-        for row in eligible_account_list(char_rows, main_rows, rule_sets):
-            name = str(row.get("character_name") or "")
-            for pkid in char_to_ids.get(name, []):
-                acl_map[int(pkid)] = "permit"
-        for row in blocked_main_list(char_rows, main_rows, rule_sets):
-            name = str(row.get("character_name") or "")
-            for pkid in char_to_ids.get(name, []):
-                acl_map[int(pkid)] = "block"
-        return acl_map
-    finally:
-        conn.close()
+    states = account_acl_state_by_pkid(snapshot, build_rule_sets(_load_access_rules()))
+    return {
+        int(pkid): ("block" if state == "deny" else "permit")
+        for pkid, state in states.items()
+    }
 
 
 def _pick_registration(rows: list[MumbleUser], username: str) -> MumbleUser | None:

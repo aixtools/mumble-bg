@@ -19,6 +19,7 @@ from bg.pilot.registrations import (
     unregister_murmur_registration,
 )
 from bg.contracts import MurmurRegistrationContractPatch, MurmurRegistrationSnapshot
+from bg.pilot_snapshot import store_pilot_snapshot
 from bg.state.models import (
     AccessRule,
     AccessRuleSyncAudit,
@@ -30,6 +31,7 @@ from bg.state.models import (
     MumbleSession,
     MumbleUser,
 )
+from fgbg_common.snapshot import PilotSnapshot
 
 _PilotRegistrationSnapshot = MurmurRegistrationSnapshot
 _RegistrationContractPatch = MurmurRegistrationContractPatch
@@ -257,6 +259,18 @@ def _coerce_session_ids(payload: dict[str, Any]) -> list[int]:
         raise _BadRequest('session_ids must be a list')
     normalized = [_coerce_int(session_id, field='session_ids') for session_id in session_ids]
     return [session_id for session_id in normalized if session_id > 0]
+
+
+def _read_pilot_snapshot(payload: dict[str, Any]) -> PilotSnapshot:
+    try:
+        return PilotSnapshot.from_mapping(
+            {
+                'generated_at': payload.get('generated_at', ''),
+                'accounts': payload.get('accounts', []),
+            }
+        )
+    except ValueError as exc:
+        raise _BadRequest(str(exc)) from exc
 
 
 def _read_requested_by(outer_payload: dict[str, Any], payload: dict[str, Any]) -> str | None:
@@ -1052,6 +1066,37 @@ def access_rules_sync(request):
     )
 
 
+@csrf_exempt
+@require_http_methods(['POST'])
+def pilot_snapshot_sync(request):
+    """Receive the full FG-owned pilot snapshot and replace BG's cached copy."""
+    try:
+        auth_source = _require_control_auth(request)
+        payload, request_id, requested_by, is_super = _sync_context(request)
+        _require_requested_by(requested_by)
+        _require_super(is_super)
+        snapshot = _read_pilot_snapshot(payload)
+        del auth_source
+    except _BadRequest as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
+    except _Unauthorized as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _Forbidden as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
+
+    result = store_pilot_snapshot(snapshot, request_id=request_id, requested_by=requested_by)
+    return _response(
+        request_id,
+        'completed',
+        message='Pilot snapshot synchronized',
+        changed=bool(result['changed']),
+        account_count=int(result['account_count']),
+        character_count=int(result['character_count']),
+        summary_before=result['summary_before'],
+        summary_after=result['summary_after'],
+    )
+
+
 @require_http_methods(['GET'])
 def access_rules(request):
     """Return the current access rule set."""
@@ -1076,7 +1121,7 @@ def access_rules(request):
 @csrf_exempt
 @require_http_methods(['POST'])
 def provision(request):
-    """Evaluate eligibility and provision MumbleUser rows."""
+    """Evaluate eligibility from BG's cached pilot snapshot and provision MumbleUser rows."""
     try:
         auth_source = _require_control_auth(request)
         payload, request_id, requested_by, is_super = _sync_context(request)
@@ -1084,37 +1129,30 @@ def provision(request):
         dry_run = _coerce_bool(payload.get('dry_run', False), field='dry_run')
         reconcile = _coerce_bool(payload.get('reconcile', False), field='reconcile')
         server_id = payload.get('server_id')
+        server = None
         if server_id is not None:
             server_id = _coerce_int(server_id, field='server_id')
+            server = MumbleServer.objects.filter(pk=server_id, is_active=True).first()
+            if server is None:
+                raise _NotFound('Server not found')
         del auth_source
     except _BadRequest as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
     except _Unauthorized as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _NotFound as exc:
+        return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
 
-    from bg.authd.service import get_pilot_db_connection
-    from bg.db import PilotDBError
     from bg.provisioner import provision_registrations
 
     try:
-        conn = get_pilot_db_connection()
-    except PilotDBError as exc:
-        return _response(
-            request_id, 'failed',
-            message=f'Cannot connect to pilot source: {exc}',
-            code=HTTPStatus.BAD_GATEWAY,
-        )
-
-    try:
-        result = provision_registrations(conn, dry_run=dry_run)
+        result = provision_registrations(server=server, dry_run=dry_run)
     except Exception as exc:
         return _response(
             request_id, 'failed',
             message=f'Provisioning failed: {exc}',
             code=HTTPStatus.INTERNAL_SERVER_ERROR,
         )
-    finally:
-        conn.close()
 
     reconcile_results: list[dict[str, object]] = []
     if reconcile:

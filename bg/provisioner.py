@@ -1,8 +1,4 @@
-"""Eligibility-driven MumbleUser provisioning.
-
-Evaluates eligibility using fgbg_common against pilot source data and
-BG access rules, then creates/activates/deactivates MumbleUser rows.
-"""
+"""Eligibility-driven MumbleUser provisioning from BG's cached FG snapshot."""
 
 from __future__ import annotations
 
@@ -12,13 +8,14 @@ import secrets
 
 from django.contrib.auth.models import User
 
+from bg.passwords import build_murmur_password_record
+from bg.pilot_snapshot import current_pilot_snapshot
 from bg.state.models import AccessRule, MumbleServer, MumbleUser
 from fgbg_common.eligibility import (
     build_rule_sets,
-    eligible_account_list,
-    blocked_main_list,
+    blocked_main_list_from_snapshot,
+    eligible_account_list_from_snapshot,
 )
-from bg.passwords import build_murmur_password_record
 
 _FORBIDDEN_PASSWORD_CHARS = {"'", '"', '`', '\\'}
 _PASSWORD_CHARS = ''.join(
@@ -28,6 +25,7 @@ _PASSWORD_CHARS = ''.join(
 
 def _new_password(length: int = 16) -> str:
     return ''.join(secrets.choice(_PASSWORD_CHARS) for _ in range(length))
+
 
 logger = logging.getLogger(__name__)
 
@@ -51,105 +49,15 @@ class ProvisionResult:
 
 
 def _load_access_rules():
-    """Load access rules from BG's own DB as dicts for fgbg_common."""
-    return list(
-        AccessRule.objects.values(
-            'entity_id', 'entity_type', 'deny',
-        )
-    )
-
-
-def _query_character_rows(pilot_db_conn, rs):
-    """Query pilot source for all characters matching access rules."""
-    from fgbg_common.eligibility import all_referenced_ids
-
-    ids = all_referenced_ids(rs)
-    if not ids['alliance_ids'] and not ids['corporation_ids'] and not ids['pilot_ids']:
-        return []
-
-    # Build WHERE clauses for matching characters
-    conditions = []
-    params = []
-
-    if ids['alliance_ids']:
-        placeholders = ','.join(['%s'] * len(ids['alliance_ids']))
-        conditions.append(f'ec.alliance_id IN ({placeholders})')
-        params.extend(ids['alliance_ids'])
-
-    if ids['corporation_ids']:
-        placeholders = ','.join(['%s'] * len(ids['corporation_ids']))
-        conditions.append(f'ec.corporation_id IN ({placeholders})')
-        params.extend(ids['corporation_ids'])
-
-    if ids['pilot_ids']:
-        placeholders = ','.join(['%s'] * len(ids['pilot_ids']))
-        conditions.append(f'ec.character_id IN ({placeholders})')
-        params.extend(ids['pilot_ids'])
-
-    where = ' OR '.join(conditions)
-    query = f"""
-        SELECT
-            ec.user_id,
-            ec.character_id,
-            ec.character_name,
-            ec.corporation_id,
-            COALESCE(ec.corporation_name, '') AS corporation_name,
-            ec.alliance_id,
-            COALESCE(ec.alliance_name, '') AS alliance_name
-        FROM accounts_evecharacter ec
-        WHERE ec.pending_delete = false
-          AND ({where})
-        ORDER BY ec.user_id, ec.character_name
-    """
-
-    with pilot_db_conn.cursor() as cur:
-        cur.execute(query, params)
-        columns = [col[0] for col in cur.description]
-        return [dict(zip(columns, row)) for row in cur.fetchall()]
-
-
-def _query_main_rows(pilot_db_conn, user_ids):
-    """Query pilot source for main characters of given users."""
-    if not user_ids:
-        return {}
-
-    placeholders = ','.join(['%s'] * len(user_ids))
-    query = f"""
-        SELECT
-            ec.user_id,
-            ec.character_id,
-            ec.character_name,
-            COALESCE(ec.corporation_name, '') AS corporation_name,
-            COALESCE(ec.alliance_name, '') AS alliance_name,
-            ec.is_main
-        FROM accounts_evecharacter ec
-        WHERE ec.user_id IN ({placeholders})
-          AND ec.pending_delete = false
-        ORDER BY ec.user_id, ec.is_main DESC, ec.character_name
-    """
-
-    mains = {}
-    with pilot_db_conn.cursor() as cur:
-        cur.execute(query, list(user_ids))
-        columns = [col[0] for col in cur.description]
-        for row_tuple in cur.fetchall():
-            row = dict(zip(columns, row_tuple))
-            mains.setdefault(row['user_id'], row)
-    return mains
+    return list(AccessRule.objects.values('entity_id', 'entity_type', 'deny'))
 
 
 def provision_registrations(
-    pilot_db_conn,
     *,
     server: MumbleServer | None = None,
     dry_run: bool = False,
 ) -> ProvisionResult:
-    """Sync MumbleUser rows to match current eligibility.
-
-    - Eligible accounts without a MumbleUser → create one
-    - Eligible accounts with inactive MumbleUser → reactivate
-    - Blocked accounts with active MumbleUser → deactivate
-    """
+    """Sync MumbleUser rows to match eligibility from BG's cached pilot snapshot."""
     result = ProvisionResult(errors=[])
 
     if server is None:
@@ -158,51 +66,33 @@ def provision_registrations(
         result.errors.append('No active MumbleServer found')
         return result
 
-    rules = _load_access_rules()
-    rs = build_rule_sets(rules)
-
-    char_rows = _query_character_rows(pilot_db_conn, rs)
-    if not char_rows:
-        logger.info('No matching characters found for access rules')
+    snapshot = current_pilot_snapshot()
+    if not snapshot.accounts:
+        result.errors.append('No pilot snapshot data available; sync /v1/pilot-snapshot/sync first')
         return result
 
-    user_ids = list({r['user_id'] for r in char_rows})
-    main_rows = _query_main_rows(pilot_db_conn, user_ids)
+    rules = _load_access_rules()
+    rs = build_rule_sets(rules)
+    eligible = eligible_account_list_from_snapshot(snapshot, rs)
+    blocked = blocked_main_list_from_snapshot(snapshot, rs)
 
-    eligible = eligible_account_list(char_rows, main_rows, rs)
-    blocked = blocked_main_list(char_rows, main_rows, rs)
+    eligible_by_pkid = {int(entry['pkid']): entry for entry in eligible}
+    eligible_user_ids = set(eligible_by_pkid)
+    blocked_user_ids = {int(entry['pkid']) for entry in blocked}
 
-    eligible_user_ids = set()
-    eligible_by_user_id = {}
-    for entry in eligible:
-        # Find the user_id from main_rows
-        for uid, main in main_rows.items():
-            if main['character_name'] == entry['character_name']:
-                eligible_user_ids.add(uid)
-                eligible_by_user_id[uid] = entry
-                break
+    accounts_by_pkid = {int(account.pkid): account for account in snapshot.accounts}
 
-    blocked_user_ids = set()
-    for entry in blocked:
-        for uid, main in main_rows.items():
-            if main['character_name'] == entry['character_name']:
-                blocked_user_ids.add(uid)
-                break
-
-    # Load existing MumbleUser rows for this server
     existing = {
         mu.user_id: mu
         for mu in MumbleUser.objects.filter(server=server).select_related('user')
     }
 
-    # Create/activate eligible accounts
-    for user_id in eligible_user_ids:
-        entry = eligible_by_user_id[user_id]
-        main = main_rows.get(user_id)
-        if main is None:
+    for user_id in sorted(eligible_user_ids):
+        account = accounts_by_pkid.get(user_id)
+        if account is None:
             continue
-
-        username = main['character_name']
+        main = account.main_character
+        username = main.character_name
 
         if user_id in existing:
             mu = existing[user_id]
@@ -211,43 +101,42 @@ def provision_registrations(
                     mu.is_active = True
                     mu.save(update_fields=['is_active', 'updated_at'])
                 result.activated += 1
-                logger.info('Activated %s (user_id=%d)', username, user_id)
+                logger.info('Activated %s (pkid=%d)', username, user_id)
             else:
                 result.unchanged += 1
-        else:
-            if not dry_run:
-                # Ensure auth.User exists
-                auth_user, _ = User.objects.get_or_create(
-                    pk=user_id,
-                    defaults={'username': username},
-                )
-                password = _new_password()
-                password_record = build_murmur_password_record(password)
-                MumbleUser.objects.create(
-                    user=auth_user,
-                    server=server,
-                    evepilot_id=main['character_id'],
-                    corporation_id=main.get('corporation_id'),
-                    alliance_id=main.get('alliance_id'),
-                    username=username,
-                    display_name=username,
-                    pwhash=password_record['pwhash'],
-                    hashfn=password_record['hashfn'],
-                    pw_salt=password_record['pw_salt'],
-                    kdf_iterations=password_record['kdf_iterations'],
-                    is_active=True,
-                )
-            result.created += 1
-            logger.info('Created %s (user_id=%d)', username, user_id)
+            continue
 
-    # Deactivate blocked accounts
-    for user_id in blocked_user_ids:
+        if not dry_run:
+            auth_user, _ = User.objects.get_or_create(
+                pk=user_id,
+                defaults={'username': username},
+            )
+            password = _new_password()
+            password_record = build_murmur_password_record(password)
+            MumbleUser.objects.create(
+                user=auth_user,
+                server=server,
+                evepilot_id=main.character_id,
+                corporation_id=main.corporation_id,
+                alliance_id=main.alliance_id,
+                username=username,
+                display_name=username,
+                pwhash=password_record['pwhash'],
+                hashfn=password_record['hashfn'],
+                pw_salt=password_record['pw_salt'],
+                kdf_iterations=password_record['kdf_iterations'],
+                is_active=True,
+            )
+        result.created += 1
+        logger.info('Created %s (pkid=%d)', username, user_id)
+
+    for user_id in sorted(blocked_user_ids):
         if user_id in existing and existing[user_id].is_active:
             mu = existing[user_id]
             if not dry_run:
                 mu.is_active = False
                 mu.save(update_fields=['is_active', 'updated_at'])
             result.deactivated += 1
-            logger.info('Deactivated %s (user_id=%d)', mu.username, user_id)
+            logger.info('Deactivated %s (pkid=%d)', mu.username, user_id)
 
     return result

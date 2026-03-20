@@ -6,7 +6,7 @@ Reads active MumbleServer configs from the database and connects to each
 server's ICE endpoint, registering a scoped authenticator per server.
 
 Configuration via environment variables:
-    DATABASES (JSON object containing pilot and bg)
+    DATABASES (JSON object containing bg)
 """
 
 import os
@@ -26,7 +26,6 @@ if PROJECT_ROOT not in sys.path:
 from bg.contracts import PilotIdentity
 
 from bg.db import (
-    PilotDBA,
     PilotDBError,
     MmblBgDBA,
     db_config_from_env,
@@ -38,16 +37,6 @@ from bg.passwords import verify_murmur_password
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
-
-PILOT_DB_ADAPTER = PilotDBA(
-    db_config_from_env(
-        'DATABASES',
-        'pilot',
-        default_database='pilot',
-        default_host='localhost',
-        default_username='pilot',
-    )
-)
 
 BG_DB_ADAPTER = MmblBgDBA(
     db_config_from_env(
@@ -114,33 +103,34 @@ SERVER_NAME_QUERY = """
 
 PILOT_IDENTITY_QUERY = """
     SELECT
-        ec.character_id,
-        ec.character_name,
-        ec.corporation_id,
-        ec.alliance_id,
-        COALESCE(ec.corporation_name, '') AS corporation_name,
-        COALESCE(ec.alliance_name, '') AS alliance_name,
+        pc.character_id,
+        pc.character_name,
+        pc.corporation_id,
+        pc.alliance_id,
+        COALESCE(pc.corporation_name, '') AS corporation_name,
+        COALESCE(pc.alliance_name, '') AS alliance_name,
         '' AS corporation_ticker,
         '' AS alliance_ticker
-    FROM accounts_evecharacter ec
-    WHERE ec.pending_delete = false
-      AND ec.is_main = true
+    FROM bg_pilot_character pc
+    JOIN bg_pilot_account pa ON pa.id = pc.account_id
+    WHERE pc.is_main = true
+    ORDER BY pa.pkid, pc.character_name
 """
 
-MUMBLE_PILOT_IDENTITY_SOURCE = "pilot/mumble-bg adapter contract"
+MUMBLE_PILOT_IDENTITY_SOURCE = "bg cached pilot snapshot contract"
 
 
 def list_pilot_identities():
     """
-    Return read-only pilot identities from the pilot source for mumble-bg orchestration.
+    Return read-only pilot identities from BG's cached pilot snapshot.
 
     Returns a list of PilotIdentity objects.
     """
     try:
-        conn = get_pilot_db_connection()
+        conn = get_db_connection()
         try:
             with _cursor(conn) as cur:
-                cur.execute(PILOT_IDENTITY_QUERY)
+                _execute(cur, conn, PILOT_IDENTITY_QUERY)
                 rows = cur.fetchall()
         finally:
             conn.close()
@@ -165,13 +155,6 @@ def list_pilot_identities():
         )
         for row in rows
     ]
-
-
-def get_pilot_db_connection():
-    try:
-        return PILOT_DB_ADAPTER.connect()
-    except Exception as exc:
-        raise PilotDBError('Could not connect to pilot source DB') from exc
 
 
 def _is_sqlite_connection(conn):

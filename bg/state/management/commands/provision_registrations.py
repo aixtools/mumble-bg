@@ -27,22 +27,11 @@ class Command(BaseCommand):
         )
 
     def handle(self, **options):
-        from bg.authd.service import get_pilot_db_connection
-        from bg.db import PilotDBError
         from bg.provisioner import provision_registrations
 
-        try:
-            conn = get_pilot_db_connection()
-        except PilotDBError as exc:
-            raise CommandError(f'Cannot connect to pilot source: {exc}') from exc
-
-        try:
-            result = provision_registrations(
-                conn,
-                dry_run=not options['apply'],
-            )
-        finally:
-            conn.close()
+        result = provision_registrations(
+            dry_run=not options['apply'],
+        )
 
         if options['json']:
             self.stdout.write(json.dumps(result.to_dict(), indent=2))
