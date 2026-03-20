@@ -1,6 +1,7 @@
 # Installation Materials
 
 Canonical sequence is in `installation/installation.md`.
+Troubleshooting checklist/FAQ is in `docs/fg-bg-troubleshooting.md`.
 
 Preferred install/ops flow is wheel-first with Django management commands:
 - `python -m django init_bg_env`

@@ -41,6 +41,7 @@ class Command(BaseCommand):
         }
 
         report["checks"]["control_psk"] = self._check_control_psk()
+        report["checks"]["control_url"] = self._check_control_url()
         report["checks"]["encryption"] = self._check_encryption()
         report["checks"]["pilot_db"] = self._check_pilot_db()
         report["checks"]["bg_db"] = self._check_bg_db()
@@ -66,6 +67,11 @@ class Command(BaseCommand):
                 "Control PSK",
                 report["checks"]["control_psk"]["status"],
                 report["checks"]["control_psk"]["message"],
+            ),
+            (
+                "Control URL",
+                report["checks"]["control_url"]["status"],
+                report["checks"]["control_url"]["message"],
             ),
             (
                 "Encryption",
@@ -124,6 +130,14 @@ class Command(BaseCommand):
         if value:
             return {"status": "ok", "message": "set"}
         return {"status": "warning", "message": "MURMUR_CONTROL_PSK is not set"}
+
+    def _check_control_url(self) -> dict[str, Any]:
+        import os
+
+        value = (os.environ.get("MURMUR_CONTROL_URL") or "").strip()
+        if value:
+            return {"status": "ok", "message": value}
+        return {"status": "warning", "message": "MURMUR_CONTROL_URL is not set"}
 
     def _check_encryption(self) -> dict[str, Any]:
         try:

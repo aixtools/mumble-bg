@@ -217,6 +217,14 @@ Expected behavior:
 
 Even if ACL rules are unchanged, provisioning/reconcile can still run.
 
+If this step fails, run the CLI diagnostic from Cube to capture the root cause quickly:
+
+```bash
+python manage.py sync_mumble_acl --traceback
+```
+
+For full triage flow and common failure patterns, see `docs/fg-bg-troubleshooting.md`.
+
 ## 10. Validate end state
 
 Check three surfaces:

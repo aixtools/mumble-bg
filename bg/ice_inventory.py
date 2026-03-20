@@ -133,10 +133,8 @@ def parse_ice_env(raw: str | None = None) -> list[IceInventoryEntry]:
 
         display_name = _first_nonempty(row, ("name",), default="")
         if not display_name:
-            if virtual_server_id is None:
-                display_name = f"ICE {ice_host}:{ice_port}"
-            else:
-                display_name = f"ICE {ice_host}:{ice_port} vs{virtual_server_id}"
+            # Contract: when name is omitted, default to host only.
+            display_name = str(ice_host)
 
         address = _first_nonempty(row, ("address", "mumble_address"), default="")
         if not address:

@@ -6,6 +6,7 @@ Primary reference:
 
 - [consolidated.md](./consolidated.md) — current runtime, deployment, and integration notes.
 - [fg-bg-contracts.md](./fg-bg-contracts.md) — explicit and implicit FG/BG interaction contracts.
+- [fg-bg-troubleshooting.md](./fg-bg-troubleshooting.md) — operator checklist and FAQ for FG/BG runtime debugging.
 
 Historical documents are archived in:
 

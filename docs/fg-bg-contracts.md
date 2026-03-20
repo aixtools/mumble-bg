@@ -109,3 +109,22 @@ This document captures explicit contracts and implicit conventions between:
 ### 4.5 Evolution Convention
 - Backward-compatibility shims used during development should be removed once contract stabilizes.
 - New behavior changes should land with tests and explicit contract updates in docs.
+
+## 5) ACL Sync Failed: Quick Triage
+
+When FG UI reports ACL sync failed, run this minimal diagnostic path:
+
+1. From Cube:
+   - `python manage.py sync_mumble_acl --traceback`
+2. From BG:
+   - `curl -sS http://127.0.0.1:18080/v1/health`
+3. Compare control env values:
+   - Cube: `MURMUR_CONTROL_URL`, `MURMUR_CONTROL_PSK`
+   - BG: `MURMUR_CONTROL_PSK`
+
+Interpretation:
+- No BG log entry for the sync attempt usually means FG/Cube never reached BG control (URL/service/network issue).
+- BG receives request but rejects it usually means control secret mismatch or payload validation failure.
+- BG returns `500` with `relation "bg_access_rule_audit" does not exist` means DB schema drift (migration state/table mismatch) on BG.
+
+For full checklist + FAQ, see `docs/fg-bg-troubleshooting.md`.
