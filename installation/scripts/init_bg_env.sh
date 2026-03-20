@@ -155,6 +155,8 @@ DATABASES=$(sq "$databases_json")
 # IMPORTANT:
 # - icehost is the ICE endpoint host/IP.
 # - address is the Mumble server address shown to users and must be an IP or resolvable hostname.
+# - address without :port implies the default Mumble port 64738.
+# - To use a non-default port, set address as host:port.
 # - name is the FG/profile title and defaults to address.
 # - Use shell_export.sh when values contain difficult characters.
 # - Example icesecretwrite value that includes literal single quotes:

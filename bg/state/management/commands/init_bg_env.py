@@ -117,6 +117,8 @@ class Command(BaseCommand):
             "# IMPORTANT:",
             "# - `icehost` is the ICE endpoint host/IP.",
             "# - `address` is the Mumble server address shown to users and must be an IP or resolvable hostname.",
+            "# - `address` without `:port` implies the default Mumble port `64738`.",
+            "# - To use a non-default port, set `address` as `host:port`.",
             "# - `name` is the FG/profile title and defaults to `address`.",
             "# - Use `python -m django shell_export KEY VALUE...` for difficult values.",
             "# - Example icesecretwrite value with literal single quotes:",

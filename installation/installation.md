@@ -51,6 +51,13 @@ python -m django <command> --settings=bg.settings
 
 Env formatting rule for JSON variables (`DATABASES`, `ICE`, `MURMUR_PROBE`): keep them valid JSON and shell-parseable. If a JSON string value must include a literal apostrophe, encode it as `\\u0027` inside JSON. Example: `"'MyPrettyS3rcet'"` must be represented as `"\\u0027MyPrettyS3rcet\\u0027"`. This avoids shell quote parsing issues in `.env`.
 
+ICE inventory rule:
+- `icehost` is the ICE endpoint host/IP.
+- `address` is the user-facing Mumble server address.
+- If `address` is given without `:port`, BG/FG treat it as the default Mumble port `64738`.
+- To use a different client port, set `address` as `host:port`.
+- `name` is the FG/profile title and defaults to `address`.
+
 ## 3. Run BG preflight checks
 
 ```bash
