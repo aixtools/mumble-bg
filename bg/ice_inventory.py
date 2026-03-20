@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import json
 import os
 import sqlite3
+import socket
+from urllib.parse import urlparse
 
 from bg.db import MmblBgDBA, PilotDBError, db_config_from_env
 
@@ -84,6 +86,48 @@ def _parse_optional_int(raw: str) -> int | None:
     return int(text)
 
 
+def _looks_like_ip_literal(value: str) -> bool:
+    import ipaddress
+
+    try:
+        ipaddress.ip_address(str(value).strip())
+        return True
+    except ValueError:
+        return False
+
+
+def _extract_address_host(raw: str) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    if "://" in text:
+        parsed = urlparse(text)
+        return str(parsed.hostname or "").strip()
+    if text.startswith("[") and "]" in text:
+        return text[1:text.index("]")].strip()
+    if text.count(":") == 1:
+        host, port = text.rsplit(":", 1)
+        if port.isdigit():
+            return host.strip()
+    return text
+
+
+def _validate_network_name(value: str, *, field_name: str, idx: int) -> None:
+    text = str(value or "").strip()
+    if not text:
+        raise PilotDBError(f"ICE[{idx}] is missing required {field_name}")
+    if _looks_like_ip_literal(text):
+        return
+    try:
+        infos = socket.getaddrinfo(text, None, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise PilotDBError(
+            f"ICE[{idx}] {field_name}={text!r} is not a valid IP and did not resolve: {exc}"
+        ) from exc
+    if not infos:
+        raise PilotDBError(f"ICE[{idx}] {field_name}={text!r} did not resolve")
+
+
 def parse_ice_env(raw: str | None = None) -> list[IceInventoryEntry]:
     """Parse ICE JSON env payload into canonical inventory entries."""
     payload_raw = (raw if raw is not None else os.environ.get("ICE", "")).strip()
@@ -103,9 +147,10 @@ def parse_ice_env(raw: str | None = None) -> list[IceInventoryEntry]:
         if not isinstance(row, dict):
             raise PilotDBError(f"ICE[{idx}] must be a JSON object")
 
-        ice_host = _first_nonempty(row, ("ice_host", "host"))
+        ice_host = _first_nonempty(row, ("ice_host", "icehost"))
         if not ice_host:
-            raise PilotDBError(f"ICE[{idx}] is missing required host/ice_host")
+            raise PilotDBError(f"ICE[{idx}] is missing required icehost/ice_host")
+        _validate_network_name(ice_host, field_name="icehost", idx=idx)
 
         ice_port_raw = _first_nonempty(row, ("ice_port", "iceport", "port"), default="6502")
         try:
@@ -131,15 +176,16 @@ def parse_ice_env(raw: str | None = None) -> list[IceInventoryEntry]:
         if not ice_secret:
             ice_secret = None
 
-        display_name = _first_nonempty(row, ("name",), default="")
-        if not display_name:
-            # Contract: when name is omitted, default to host only.
-            display_name = str(ice_host)
-
         address = _first_nonempty(row, ("address", "mumble_address"), default="")
         if not address:
-            voice_port = _first_nonempty(row, ("voice_port", "mumble_port"), default="64738")
-            address = f"{ice_host}:{voice_port}"
+            raise PilotDBError(f"ICE[{idx}] is missing required address")
+        _validate_network_name(_extract_address_host(address), field_name="address", idx=idx)
+
+        # `name` is the user-facing server title FG renders on profile pages.
+        # Keep `label` as a fallback so older env payloads still import cleanly.
+        display_name = _first_nonempty(row, ("name", "label"), default="")
+        if not display_name:
+            display_name = str(address)
 
         entries.append(
             IceInventoryEntry(

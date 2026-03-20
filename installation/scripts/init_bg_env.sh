@@ -83,7 +83,9 @@ databases_json="$(val_or_default DATABASES '{
 }')"
 ice_json="$(val_or_default ICE '[
   {
-    "host": "127.0.0.1",
+    "icehost": "127.0.0.1",
+    "address": "127.0.0.1:64738",
+    "name": "127.0.0.1:64738",
     "virtual_server_id": 1,
     "icewrite": "CHANGE_ME",
     "iceport": 6502,
@@ -151,6 +153,9 @@ DATABASES=$(sq "$databases_json")
 
 # ICE endpoint inventory (JSON list)
 # IMPORTANT:
+# - icehost is the ICE endpoint host/IP.
+# - address is the Mumble server address shown to users and must be an IP or resolvable hostname.
+# - name is the FG/profile title and defaults to address.
 # - Use shell_export.sh when values contain difficult characters.
 # - Example icesecretwrite value that includes literal single quotes:
 #   "'CubeiNive'"
@@ -163,14 +168,18 @@ if [[ "$ice_count" -le 1 ]]; then
 # Example second ICE endpoint entry (commented template):
 # ICE='[
 #   {
-#     "host": "127.0.0.1",
+#     "icehost": "127.0.0.1",
+#     "address": "127.0.0.1:64738",
+#     "name": "127.0.0.1:64738",
 #     "virtual_server_id": 1,
 #     "icewrite": "CHANGE_ME",
 #     "iceport": 6502,
 #     "iceread": "CHANGE_ME"
 #   },
 #   {
-#     "host": "127.0.0.2",
+#     "icehost": "127.0.0.2",
+#     "address": "127.0.0.2:64739",
+#     "name": "127.0.0.2:64739",
 #     "virtual_server_id": 2,
 #     "icewrite": "CHANGE_ME_2",
 #     "iceport": 6502,
