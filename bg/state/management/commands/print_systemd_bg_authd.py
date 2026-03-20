@@ -55,8 +55,10 @@ User={options["user"]}
 Group={options["group"]}
 WorkingDirectory={options["working_dir"]}
 EnvironmentFile={env_file}
+Environment=BG_ENV_FILE={env_file}
 Environment=DJANGO_SETTINGS_MODULE=bg.settings
-ExecStart={py} -m bg.authd
+Environment=PYTHONUNBUFFERED=1
+ExecStart={py} -I -m bg.authd
 Restart=always
 RestartSec=5
 

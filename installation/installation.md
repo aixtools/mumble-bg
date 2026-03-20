@@ -88,7 +88,7 @@ At this point `Encryption` should report active.
 ```bash
 python -m django showmigrations state
 python -m django migrate
-python -m django runserver 127.0.0.1:18080
+BG_ENV_FILE=~/.env/mumble-bg python -I -m bg.control_main --noreload
 ```
 
 In a second shell, verify BG:
@@ -106,7 +106,7 @@ Health output should report crypto readiness when configured:
 Then start authd:
 
 ```bash
-python -m bg.authd
+BG_ENV_FILE=~/.env/mumble-bg python -I -m bg.authd
 ```
 
 To keep `authd` running while continuing in the same shell, press `Ctrl-Z` and then run:
@@ -118,6 +118,8 @@ bg
 ## 5. Generate systemd units for BG control and authd (optional)
 
 Use the helpers to generate unit files from the active installation context (including venv path). Run these commands from the BG venv that will run the services.
+
+The generated control unit does not hardcode the bind address unless `--bind` is passed. At service start it resolves bind from `BG_BIND`, then `MURMUR_CONTROL_URL`, then the built-in default.
 
 ```bash
 python -m django print_systemd_bg_control --env-file ~/.env/mumble-bg > /tmp/mumble-bg-control.service

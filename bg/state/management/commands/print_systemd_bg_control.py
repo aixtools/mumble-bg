@@ -71,11 +71,13 @@ class Command(BaseCommand):
             bind = str(options["bind"]).strip()
             bind_source = "--bind"
             bind_detail = "explicit command argument"
+            exec_start = f"{py} -I -m bg.control_main {bind} --noreload"
         else:
             bind_info = resolve_bg_bind(env_values)
             bind = bind_info["bind"]
             bind_source = bind_info["source"]
             bind_detail = bind_info["detail"]
+            exec_start = f"{py} -I -m bg.control_main --noreload"
 
         unit = f"""# ResolvedBind={bind}
 # BindSource={bind_source}
@@ -89,9 +91,11 @@ User={options["user"]}
 Group={options["group"]}
 WorkingDirectory={options["working_dir"]}
 EnvironmentFile={env_file}
+Environment=BG_ENV_FILE={env_file}
 Environment=DJANGO_SETTINGS_MODULE=bg.settings
 Environment=BG_KEY_DIR={options["key_dir"]}
-ExecStart={py} -m django runserver {bind} --settings=bg.settings
+Environment=PYTHONUNBUFFERED=1
+ExecStart={exec_start}
 Restart=always
 RestartSec=5
 

@@ -7,8 +7,10 @@ User=__APP_USER__
 Group=__APP_USER__
 WorkingDirectory=__APP_DIR__
 EnvironmentFile=__ENV_FILE__
+Environment=BG_ENV_FILE=__ENV_FILE__
 Environment=BG_KEY_DIR=__KEY_DIR__
-ExecStart=__VENV_DIR__/bin/python manage.py runserver __BIND_ADDR__
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__VENV_DIR__/bin/python -I -m bg.control_main --noreload
 Restart=always
 RestartSec=5
 

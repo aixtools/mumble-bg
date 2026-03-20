@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import ipaddress
+import os
 import re
 import socket
 import subprocess
@@ -12,6 +13,7 @@ from pathlib import Path
 
 ENV_KEYS = [
     "DJANGO_SETTINGS_MODULE",
+    "BG_ENV_FILE",
     "BG_KEY_PASSPHRASE",
     "BG_BIND",
     "MURMUR_CONTROL_PSK",
@@ -159,3 +161,36 @@ def resolve_bg_bind(
         "source": "MURMUR_CONTROL_URL",
         "detail": detail,
     }
+
+
+def load_env_file_into_environment(
+    source_file: Path | str,
+    *,
+    override: bool = False,
+) -> dict[str, str]:
+    """Load shell-style env assignments into os.environ."""
+    env_path = Path(source_file).expanduser().resolve()
+    env_text = env_path.read_text(encoding="utf-8")
+    env_keys = list(dict.fromkeys([*ENV_KEYS, *parse_assigned_keys(env_text)]))
+    env_values = read_env_values_with_bash(env_path, env_keys)
+
+    applied: dict[str, str] = {}
+    for key, value in env_values.items():
+        if override or key not in os.environ:
+            os.environ[key] = value
+            applied[key] = value
+    return applied
+
+
+def bootstrap_bg_environment(
+    *,
+    env_file_var: str = "BG_ENV_FILE",
+    default_settings_module: str = "bg.settings",
+) -> str | None:
+    """Load BG env from BG_ENV_FILE when present, then ensure settings."""
+    env_file = (os.environ.get(env_file_var) or "").strip()
+    if env_file:
+        load_env_file_into_environment(env_file, override=False)
+    if not str(os.environ.get("DJANGO_SETTINGS_MODULE") or "").strip():
+        os.environ["DJANGO_SETTINGS_MODULE"] = default_settings_module
+    return env_file or None

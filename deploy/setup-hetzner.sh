@@ -156,7 +156,9 @@ User=${APP_USER}
 Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${ENV_FILE}
-ExecStart=${VENV_DIR}/bin/python -m bg.authd
+Environment=BG_ENV_FILE=${ENV_FILE}
+Environment=PYTHONUNBUFFERED=1
+ExecStart=${VENV_DIR}/bin/python -I -m bg.authd
 Restart=always
 RestartSec=5
 

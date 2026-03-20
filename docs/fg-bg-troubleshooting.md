@@ -12,7 +12,8 @@ Run these in order before deeper debugging:
    - `curl -sS http://127.0.0.1:18080/v1/health | python3 -m json.tool`
 
 2. Verify BG control/authd are running:
-   - `ps -ef | rg 'bg.authd|manage.py runserver.*18080'`
+   - `ps -ef | rg 'bg.authd|bg.control_main'`
+   - `ss -ltn | rg 18080`
    - Check logs:
      - `/tmp/mumble-bg-authd-debug-0320.log`
      - `/tmp/mumble-bg-control-debug-0320.log`
