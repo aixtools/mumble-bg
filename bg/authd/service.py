@@ -6,7 +6,7 @@ Reads active MumbleServer configs from the database and connects to each
 server's ICE endpoint, registering a scoped authenticator per server.
 
 Configuration via environment variables:
-    DATABASES (JSON object containing bg)
+    BG_DBMS (flat JSON DB object; legacy DATABASES values are still accepted)
 """
 
 import os
@@ -40,11 +40,12 @@ logger = logging.getLogger(__name__)
 
 BG_DB_ADAPTER = MmblBgDBA(
     db_config_from_env(
-        'DATABASES',
+        'BG_DBMS',
         'bg',
         default_database='mumble',
         default_host='localhost',
         default_username='cube',
+        legacy_env_var='DATABASES',
     )
 )
 

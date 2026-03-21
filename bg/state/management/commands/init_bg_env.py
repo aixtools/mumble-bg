@@ -8,20 +8,11 @@ from bg.envtools import ENV_KEYS, count_ice_entries, read_env_values_with_bash, 
 
 
 DEFAULT_DATABASES = """{
-  "pilot": {
-    "name": "cube",
-    "host": "127.0.0.1",
-    "username": "cube_user",
-    "database": "cube_db",
-    "password": "CHANGE_ME"
-  },
-  "bg": {
-    "name": "authd bg",
-    "host": "127.0.0.1",
-    "username": "bg_user",
-    "database": "bg_data",
-    "password": "CHANGE_ME"
-  }
+  "name": "authd bg",
+  "host": "127.0.0.1",
+  "username": "bg_user",
+  "database": "bg_data",
+  "password": "CHANGE_ME"
 }"""
 
 DEFAULT_ICE = """[
@@ -80,7 +71,7 @@ class Command(BaseCommand):
         bg_bind = cur_or_default("BG_BIND", "")
         psk = cur_or_default("MURMUR_CONTROL_PSK", "CHANGE_ME")
         control_url = cur_or_default("MURMUR_CONTROL_URL", "http://127.0.0.1:18080")
-        databases = cur_or_default("DATABASES", DEFAULT_DATABASES)
+        databases = cur_or_default("BG_DBMS", cur_or_default("DATABASES", DEFAULT_DATABASES))
         ice = cur_or_default("ICE", DEFAULT_ICE)
         probe = cur_or_default("MURMUR_PROBE", DEFAULT_PROBE)
         ice_count = count_ice_entries(ice)
@@ -110,8 +101,9 @@ class Command(BaseCommand):
             "# BG control URL advertised to FG/Cube. Also used to derive bind when BG_BIND is blank.",
             f"MURMUR_CONTROL_URL={shell_single_quote(control_url)}",
             "",
-            "# BG-owned and pilot-source DB configuration (JSON object)",
-            f"DATABASES={shell_single_quote(databases)}",
+            "# BG-owned DB configuration (JSON object)",
+            "# Flat object is preferred. Legacy nested {\"bg\": {...}} is still accepted.",
+            f"BG_DBMS={shell_single_quote(databases)}",
             "",
             "# ICE endpoint inventory (JSON list)",
             "# IMPORTANT:",

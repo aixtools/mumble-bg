@@ -20,7 +20,7 @@ fi
 mkdir -p "$(dirname "$target")"
 
 declare -A current=()
-vars=(DJANGO_SETTINGS_MODULE BG_KEY_PASSPHRASE BG_BIND MURMUR_CONTROL_PSK MURMUR_CONTROL_URL DATABASES ICE MURMUR_PROBE)
+vars=(DJANGO_SETTINGS_MODULE BG_KEY_PASSPHRASE BG_BIND BG_DBMS MURMUR_CONTROL_PSK MURMUR_CONTROL_URL DATABASES ICE MURMUR_PROBE)
 
 if [[ -n "$backup_file" ]]; then
   extracted="$(mktemp)"
@@ -65,22 +65,13 @@ bg_passphrase="$(val_or_default BG_KEY_PASSPHRASE "CHANGE_ME")"
 bg_bind="$(val_or_default BG_BIND "")"
 control_psk="$(val_or_default MURMUR_CONTROL_PSK "CHANGE_ME")"
 control_url="$(val_or_default MURMUR_CONTROL_URL "http://127.0.0.1:18080")"
-databases_json="$(val_or_default DATABASES '{
-  "pilot": {
-    "name": "cube",
-    "host": "127.0.0.1",
-    "username": "cube_user",
-    "database": "cube_db",
-    "password": "CHANGE_ME"
-  },
-  "bg": {
-    "name": "authd bg",
-    "host": "127.0.0.1",
-    "username": "bg_user",
-    "database": "bg_data",
-    "password": "CHANGE_ME"
-  }
-}')"
+databases_json="$(val_or_default BG_DBMS "$(val_or_default DATABASES '{
+  "name": "authd bg",
+  "host": "127.0.0.1",
+  "username": "bg_user",
+  "database": "bg_data",
+  "password": "CHANGE_ME"
+}')")"
 ice_json="$(val_or_default ICE '[
   {
     "icehost": "127.0.0.1",
@@ -148,8 +139,9 @@ MURMUR_CONTROL_PSK=$(sq "$control_psk")
 # BG control URL advertised to FG/Cube. Also used to derive bind when BG_BIND is blank.
 MURMUR_CONTROL_URL=$(sq "$control_url")
 
-# BG-owned and pilot-source DB configuration (JSON object)
-DATABASES=$(sq "$databases_json")
+# BG-owned DB configuration (JSON object)
+# Flat object is preferred. Legacy nested {"bg": {...}} is still accepted.
+BG_DBMS=$(sq "$databases_json")
 
 # ICE endpoint inventory (JSON list)
 # IMPORTANT:

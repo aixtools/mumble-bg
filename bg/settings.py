@@ -3,7 +3,7 @@ Minimal Django settings for mumble-bg-owned tables.
 
 BG now owns its runtime schema plus the cached FG pilot snapshot.
 This settings module is for `manage.py migrate` and local ownership of
-mumble-bg state in `DATABASES.bg`.
+mumble-bg state configured through `BG_DBMS`.
 """
 
 import os
@@ -68,11 +68,12 @@ if _BG_SQLITE_PATH:
     }
 else:
     BG_DATABASE = db_config_from_env(
-        'DATABASES',
+        'BG_DBMS',
         'bg',
         default_database='MMBL_BG',
         default_host='localhost',
         default_username='cube',
+        legacy_env_var='DATABASES',
     )
 
     DATABASE_HOST = BG_DATABASE.host

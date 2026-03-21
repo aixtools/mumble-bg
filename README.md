@@ -17,15 +17,15 @@ This is not the target architecture. The copied code is here to preserve the cur
 - `mumble-bg` owns Mumble background services, ICE interactions, and per-server state
 - `PKID` is the stable Cube-side identity key
 
-The locked boundary rules are documented in [docs/system-boundary.md](/home/michael/prj/mumble-bg/docs/system-boundary.md).
+The locked boundary rules are documented in [docs/system-boundary.md](./docs/system-boundary.md).
 
 The bg-owned Django app and model naming choices are documented in
-[docs/bg-state.md](/home/michael/prj/mumble-bg/docs/bg-state.md).
+[docs/bg-state.md](./docs/bg-state.md).
 
 The explicit fg/bg control path is documented in
-[docs/mumble-control.md](/home/michael/prj/mumble-bg/docs/mumble-control.md).
+[docs/mumble-control.md](./docs/mumble-control.md).
 
-See [docs/extraction-inventory.md](/home/michael/prj/mumble-bg/docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
+See [docs/extraction-inventory.md](./docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
 
 ## Installation Guides
 
@@ -49,7 +49,7 @@ Relevant files:
 - [deploy/undeploy-hetzner.sh](/home/michael/prj/mumble-bg/deploy/undeploy-hetzner.sh)
 - [deploy/systemd/mumble-bg-auth.service](/home/michael/prj/mumble-bg/deploy/systemd/mumble-bg-auth.service)
 - [.github/workflows/deploy-dev.yml](/home/michael/prj/mumble-bg/.github/workflows/deploy-dev.yml)
-- [docs/bootstrap-dev-deploy.md](/home/michael/prj/mumble-bg/docs/bootstrap-dev-deploy.md)
+- [docs/workflow-deploy.md](./docs/workflow-deploy.md)
 
 `deploy/setup-hetzner.sh` is the one-time root install path. The GitHub workflow is for ordinary code updates after that setup exists.
 
@@ -107,7 +107,7 @@ This contract update aligns with Cube core behavioral changes introduced in Cube
 
 ## Environment Contracts
 
-- `DATABASES` = JSON object containing the owned `bg` DB config.
+- `BG_DBMS` = the owned BG DB config.
 - `ICE` = JSON list describing required ICE connectivity for `authd` and `pulse`.
 - `MURMUR_PROBE` = optional JSON list for Murmur DB probe/debug targets.
 
@@ -115,8 +115,9 @@ This contract update aligns with Cube core behavioral changes introduced in Cube
 python manage.py migrate
 ```
 
-uses `DATABASES.bg` and keeps local schema independent of FG/host databases.
-BG does not require direct pilot DB access.
+uses `BG_DBMS` and keeps local
+schema independent of FG/host databases. BG does not require direct
+`PILOT_DBMS` access.
 
 ### Pilot Snapshot Sync
 

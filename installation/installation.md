@@ -49,7 +49,11 @@ Fallback one-off pattern (if env is not loaded):
 python -m django <command> --settings=bg.settings
 ```
 
-Env formatting rule for JSON variables (`DATABASES`, `ICE`, `MURMUR_PROBE`): keep them valid JSON and shell-parseable. If a JSON string value must include a literal apostrophe, encode it as `\\u0027` inside JSON. Example: `"'MyPrettyS3rcet'"` must be represented as `"\\u0027MyPrettyS3rcet\\u0027"`. This avoids shell quote parsing issues in `.env`.
+Env formatting rule for JSON variables (`BG_DBMS`, `ICE`, `MURMUR_PROBE`):
+keep them valid JSON and shell-parseable. If a JSON string value must include a
+literal apostrophe, encode it as `\\u0027` inside JSON. Example:
+`"'MyPrettyS3rcet'"` must be represented as `"\\u0027MyPrettyS3rcet\\u0027"`.
+This avoids shell quote parsing issues in `.env`.
 
 ICE inventory rule:
 - `icehost` is the ICE endpoint host/IP.

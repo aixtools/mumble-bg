@@ -208,11 +208,12 @@ class Command(BaseCommand):
     def _check_bg_db(self) -> dict[str, Any]:
         adapter = MmblBgDBA(
             db_config_from_env(
-                "DATABASES",
+                "BG_DBMS",
                 "bg",
                 default_database="mumble",
                 default_host="localhost",
                 default_username="cube",
+                legacy_env_var="DATABASES",
             )
         )
         try:

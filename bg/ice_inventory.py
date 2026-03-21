@@ -25,11 +25,12 @@ class IceInventoryEntry:
 
 BG_DB_ADAPTER = MmblBgDBA(
     db_config_from_env(
-        "DATABASES",
+        "BG_DBMS",
         "bg",
         default_database="mumble",
         default_host="localhost",
         default_username="cube",
+        legacy_env_var="DATABASES",
     )
 )
 

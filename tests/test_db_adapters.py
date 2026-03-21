@@ -14,12 +14,12 @@ from bg.db import (
 
 def test_db_config_from_env_loads_json_object(monkeypatch):
     monkeypatch.setenv(
-        "DATABASES",
+        "BG_DBMS",
         '{"pilot":{"name":"pilot","host":"127.0.0.1","username":"pilot_user","database":"pilot_db","password":"secret"}}',
     )
 
     config = db_config_from_env(
-        "DATABASES",
+        "BG_DBMS",
         "pilot",
         default_database="pilot",
         default_host="localhost",
@@ -32,15 +32,53 @@ def test_db_config_from_env_loads_json_object(monkeypatch):
     assert config.password == "secret"
 
 
+def test_db_config_from_env_loads_flat_json_object(monkeypatch):
+    monkeypatch.setenv(
+        "BG_DBMS",
+        '{"name":"authd bg","host":"127.0.0.1","username":"bg_user","database":"bg_data","password":"secret"}',
+    )
+
+    config = db_config_from_env(
+        "BG_DBMS",
+        "bg",
+        default_database="mumble",
+        default_host="localhost",
+        default_username="cube",
+    )
+
+    assert config.name == "bg_data"
+    assert config.host == "127.0.0.1"
+    assert config.user == "bg_user"
+    assert config.password == "secret"
+
+
 def test_db_config_from_env_rejects_missing_required_fields(monkeypatch):
     monkeypatch.setenv(
-        "DATABASES",
+        "BG_DBMS",
         '{"bg":{"host":"127.0.0.1","username":"bg_user","database":"bg_data"}}',
     )
 
     with pytest.raises(PilotDBError) as exc_info:
         db_config_from_env(
-            "DATABASES",
+            "BG_DBMS",
+            "bg",
+            default_database="mumble",
+            default_host="localhost",
+            default_username="cube",
+        )
+
+    assert "password" in str(exc_info.value)
+
+
+def test_db_config_from_env_rejects_flat_object_missing_required_fields(monkeypatch):
+    monkeypatch.setenv(
+        "BG_DBMS",
+        '{"host":"127.0.0.1","username":"bg_user","database":"bg_data"}',
+    )
+
+    with pytest.raises(PilotDBError) as exc_info:
+        db_config_from_env(
+            "BG_DBMS",
             "bg",
             default_database="mumble",
             default_host="localhost",
@@ -52,13 +90,13 @@ def test_db_config_from_env_rejects_missing_required_fields(monkeypatch):
 
 def test_db_config_from_env_rejects_missing_named_object(monkeypatch):
     monkeypatch.setenv(
-        "DATABASES",
+        "BG_DBMS",
         '{"pilot":{"host":"127.0.0.1","username":"pilot_user","database":"pilot_db","password":"secret"}}',
     )
 
     with pytest.raises(PilotDBError) as exc_info:
         db_config_from_env(
-            "DATABASES",
+            "BG_DBMS",
             "bg",
             default_database="mumble",
             default_host="localhost",
@@ -66,6 +104,28 @@ def test_db_config_from_env_rejects_missing_named_object(monkeypatch):
         )
 
     assert "missing required object: bg" in str(exc_info.value)
+
+
+def test_db_config_from_env_falls_back_to_legacy_databases_env(monkeypatch):
+    monkeypatch.delenv("BG_DBMS", raising=False)
+    monkeypatch.setenv(
+        "DATABASES",
+        '{"bg":{"host":"127.0.0.1","username":"bg_user","database":"bg_data","password":"secret"}}',
+    )
+
+    config = db_config_from_env(
+        "BG_DBMS",
+        "bg",
+        default_database="mumble",
+        default_host="localhost",
+        default_username="cube",
+        legacy_env_var="DATABASES",
+    )
+
+    assert config.name == "bg_data"
+    assert config.host == "127.0.0.1"
+    assert config.user == "bg_user"
+    assert config.password == "secret"
 
 
 def test_pilot_dba_autodetect_prefers_postgresql_first(monkeypatch):

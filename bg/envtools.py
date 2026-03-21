@@ -16,6 +16,7 @@ ENV_KEYS = [
     "BG_ENV_FILE",
     "BG_KEY_PASSPHRASE",
     "BG_BIND",
+    "BG_DBMS",
     "MURMUR_CONTROL_PSK",
     "MURMUR_CONTROL_URL",
     "DATABASES",
@@ -179,6 +180,12 @@ def load_env_file_into_environment(
         if override or key not in os.environ:
             os.environ[key] = value
             applied[key] = value
+    if ("BG_DBMS" not in applied and "BG_DBMS" not in os.environ) and (
+        env_values.get("DATABASES") or os.environ.get("DATABASES")
+    ):
+        legacy_value = str(env_values.get("DATABASES") or os.environ.get("DATABASES") or "")
+        os.environ["BG_DBMS"] = legacy_value
+        applied["BG_DBMS"] = legacy_value
     return applied
 
 

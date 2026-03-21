@@ -11,6 +11,10 @@ Preferred install/ops flow is wheel-first with Django management commands:
 - `python -m django print_systemd_bg_control --env-file ~/.env/mumble-bg`
 - `python -m django print_systemd_bg_authd --env-file ~/.env/mumble-bg`
 
+Terminology note: `BG_DBMS` is the owned BG database contract and current env
+variable name. Legacy `DATABASES` values are still accepted as a compatibility
+fallback.
+
 JSON env note: if a value must contain a literal apostrophe, encode it as `\\u0027` in JSON. Example: `"'MyPrettyS3rcet'"` should be `"\\u0027MyPrettyS3rcet\\u0027"`.
 ICE note: `address` without `:port` means default Mumble client port `64738`; use `address:port` to override it. `name` is the FG/profile title and defaults to `address`.
 

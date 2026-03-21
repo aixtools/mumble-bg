@@ -11,6 +11,7 @@ This document captures explicit contracts and implicit conventions between:
 - FG is host/UI/admin.
 - BG is runtime/state daemon.
 - FG is the only side that reads host/pilot data.
+- FG reads `PILOT_DBMS`; BG owns `BG_DBMS`.
 - FG does not read BG DB directly.
 - BG does not read FG/host DB directly.
 - BG does not write FG/host tables.

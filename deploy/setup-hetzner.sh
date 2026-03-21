@@ -47,6 +47,9 @@ set -a
 source "${ENV_FILE}"
 set +a
 
+BG_DBMS="${BG_DBMS:-${DATABASES:-}}"
+export BG_DBMS
+
 json_field() {
     local env_var="$1"
     local object_key="$2"
@@ -71,13 +74,16 @@ except json.JSONDecodeError as exc:
 if not isinstance(payload, dict):
     raise SystemExit(f"{env_var} must be a JSON object")
 
-payload = payload.get(object_key)
-if payload is None:
-    raise SystemExit(f"{env_var} is missing required object: {object_key}")
-if not isinstance(payload, dict):
-    raise SystemExit(f"{env_var}.{object_key} must be a JSON object")
+if all(key in payload for key in ("host", "username", "database", "password")):
+    db_payload = payload
+else:
+    db_payload = payload.get(object_key)
+    if db_payload is None:
+        raise SystemExit(f"{env_var} is missing required object: {object_key}")
+    if not isinstance(db_payload, dict):
+        raise SystemExit(f"{env_var}.{object_key} must be a JSON object")
 
-value = payload.get(field, '')
+value = db_payload.get(field, '')
 if value is None:
     value = ''
 print(value)
@@ -112,13 +118,13 @@ if [ ! -d "${VENV_DIR}" ]; then
     sudo -u "${APP_USER}" python3 -m venv "${VENV_DIR}"
 fi
 
-BG_DATABASE_NAME="$(json_field DATABASES bg database)"
-BG_DATABASE_HOST="$(json_field DATABASES bg host)"
-BG_DATABASE_USER="$(json_field DATABASES bg username)"
-BG_DATABASE_PASSWORD="$(json_field DATABASES bg password)"
+BG_DATABASE_NAME="$(json_field BG_DBMS bg database)"
+BG_DATABASE_HOST="$(json_field BG_DBMS bg host)"
+BG_DATABASE_USER="$(json_field BG_DBMS bg username)"
+BG_DATABASE_PASSWORD="$(json_field BG_DBMS bg password)"
 
 if [ -z "${BG_DATABASE_NAME}" ] || [ -z "${BG_DATABASE_HOST}" ] || [ -z "${BG_DATABASE_USER}" ] || [ -z "${BG_DATABASE_PASSWORD}" ]; then
-    echo "Expected DATABASES.bg JSON with host, username, database, and password in ${ENV_FILE}"
+    echo "Expected BG_DBMS JSON with host, username, database, and password in ${ENV_FILE}"
     exit 1
 fi
 
@@ -138,7 +144,7 @@ esac
 
 sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${APP_DIR}/requirements.txt"
 sudo -u "${APP_USER}" env \
-    DATABASES="${DATABASES}" \
+    BG_DBMS="${BG_DBMS}" \
     "${VENV_DIR}/bin/python" "${APP_DIR}/manage.py" migrate --noinput
 
 cat > /etc/sudoers.d/mumble-bg <<EOF
