@@ -262,6 +262,12 @@ class PilotAccountCache(models.Model):
         unique=True,
         help_text='Stable FG/BG account identity key.',
     )
+    display_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text='Computed display name from the latest FG snapshot.',
+    )
     main_character_id = models.BigIntegerField(
         null=True,
         blank=True,

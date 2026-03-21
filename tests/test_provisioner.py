@@ -25,6 +25,7 @@ class ProvisionerSnapshotTest(TestCase):
     def _seed_snapshot(self, *, pkid, character_id, character_name, corporation_id=None, corporation_name='', alliance_id=None, alliance_name=''):
         account = PilotAccountCache.objects.create(
             pkid=pkid,
+            display_name='[ALLY CORP] Pilot One' if pkid == 42 else '',
             main_character_id=character_id,
             main_character_name=character_name,
         )
@@ -58,6 +59,7 @@ class ProvisionerSnapshotTest(TestCase):
         mumble_user = MumbleUser.objects.get(user_id=42, server=self.server)
         self.assertTrue(mumble_user.is_active)
         self.assertEqual(mumble_user.username, 'Pilot One')
+        self.assertEqual(mumble_user.display_name, '[ALLY CORP] Pilot One')
         self.assertEqual(mumble_user.evepilot_id, 9001)
         self.assertEqual(mumble_user.alliance_id, 9901)
 
@@ -95,3 +97,40 @@ class ProvisionerSnapshotTest(TestCase):
 
         self.assertEqual(result.deactivated, 1)
         self.assertFalse(MumbleUser.objects.get(user_id=42, server=self.server).is_active)
+
+    def test_provision_updates_existing_display_name_from_snapshot(self):
+        AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
+        self._seed_snapshot(
+            pkid=42,
+            character_id=9001,
+            character_name='Pilot One',
+            alliance_id=9901,
+            alliance_name='Alliance One',
+            corporation_id=8801,
+            corporation_name='Corp One',
+        )
+
+        user = User.objects.create(pk=42, username='Pilot One')
+        password_record = build_murmur_password_record('temporary-pass')
+        MumbleUser.objects.create(
+            user=user,
+            server=self.server,
+            evepilot_id=9001,
+            corporation_id=8801,
+            alliance_id=9901,
+            username='Pilot One',
+            display_name='Pilot One',
+            pwhash=password_record['pwhash'],
+            hashfn=password_record['hashfn'],
+            pw_salt=password_record['pw_salt'],
+            kdf_iterations=password_record['kdf_iterations'],
+            is_active=True,
+        )
+
+        result = provision_registrations(dry_run=False)
+
+        self.assertEqual(result.unchanged, 1)
+        self.assertEqual(
+            MumbleUser.objects.get(user_id=42, server=self.server).display_name,
+            '[ALLY CORP] Pilot One',
+        )

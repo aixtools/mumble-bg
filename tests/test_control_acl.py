@@ -395,8 +395,34 @@ class PilotSnapshotSyncEndpointTest(TestCase):
         self.assertEqual(data['status'], 'completed')
         self.assertTrue(data['changed'])
         self.assertEqual(PilotAccountCache.objects.count(), 1)
+        self.assertEqual(PilotAccountCache.objects.get(pkid=42).display_name, '')
         self.assertEqual(PilotCharacterCache.objects.count(), 2)
         self.assertEqual(PilotSnapshotSyncAudit.objects.count(), 1)
+
+    def test_sync_stores_account_display_name(self):
+        resp = _post_pilot_snapshot_sync(
+            self.client,
+            [
+                {
+                    'pkid': 42,
+                    'display_name': '[ALLY CORP] Pilot One',
+                    'characters': [
+                        {
+                            'character_id': 9001,
+                            'character_name': 'Pilot One',
+                            'corporation_id': 77,
+                            'corporation_name': 'Corp One',
+                            'alliance_id': 88,
+                            'alliance_name': 'Alliance One',
+                            'is_main': True,
+                        },
+                    ],
+                }
+            ],
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(PilotAccountCache.objects.get(pkid=42).display_name, '[ALLY CORP] Pilot One')
 
     def test_sync_is_idempotent_when_snapshot_is_unchanged(self):
         accounts = [

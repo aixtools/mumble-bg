@@ -93,16 +93,33 @@ def provision_registrations(
             continue
         main = account.main_character
         username = main.character_name
+        display_name = account.display_name or username
 
         if user_id in existing:
             mu = existing[user_id]
+            update_fields = []
+            if mu.display_name != display_name:
+                mu.display_name = display_name
+                update_fields.append('display_name')
+            if mu.evepilot_id != main.character_id:
+                mu.evepilot_id = main.character_id
+                update_fields.append('evepilot_id')
+            if mu.corporation_id != main.corporation_id:
+                mu.corporation_id = main.corporation_id
+                update_fields.append('corporation_id')
+            if mu.alliance_id != main.alliance_id:
+                mu.alliance_id = main.alliance_id
+                update_fields.append('alliance_id')
             if not mu.is_active:
                 if not dry_run:
                     mu.is_active = True
-                    mu.save(update_fields=['is_active', 'updated_at'])
+                    update_fields.append('is_active')
+                    mu.save(update_fields=update_fields + ['updated_at'])
                 result.activated += 1
                 logger.info('Activated %s (pkid=%d)', username, user_id)
             else:
+                if update_fields and not dry_run:
+                    mu.save(update_fields=update_fields + ['updated_at'])
                 result.unchanged += 1
             continue
 
@@ -120,7 +137,7 @@ def provision_registrations(
                 corporation_id=main.corporation_id,
                 alliance_id=main.alliance_id,
                 username=username,
-                display_name=username,
+                display_name=display_name,
                 pwhash=password_record['pwhash'],
                 hashfn=password_record['hashfn'],
                 pw_salt=password_record['pw_salt'],

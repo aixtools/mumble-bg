@@ -38,7 +38,13 @@ def current_pilot_snapshot() -> PilotSnapshot:
         )
         if not characters:
             continue
-        accounts.append(PilotAccount(pkid=int(row.pkid), characters=characters))
+        accounts.append(
+            PilotAccount(
+                pkid=int(row.pkid),
+                display_name=str(row.display_name or ''),
+                characters=characters,
+            )
+        )
     return PilotSnapshot(accounts=tuple(accounts), generated_at=generated_at)
 
 
@@ -83,6 +89,7 @@ def store_pilot_snapshot(
             account_rows.append(
                 PilotAccountCache(
                     pkid=account.pkid,
+                    display_name=account.display_name,
                     main_character_id=main.character_id if main else None,
                     main_character_name=main.character_name if main else '',
                 )
