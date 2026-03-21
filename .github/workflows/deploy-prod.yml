@@ -235,30 +235,36 @@ jobs:
             python3 -m venv "${DEPLOY_VENV_DIR}"
           fi
 
-          # Install systemd service from template.
-          TEMPLATE="${DEPLOY_PROJECT_DIR}/deploy/systemd/mumble-bg-auth.service"
-          if [ -f "${TEMPLATE}" ]; then
-            SERVICE_FILE="/etc/systemd/system/${DEPLOY_SERVICE_NAME}.service"
-            sed \
-              -e "s|__APP_USER__|$(whoami)|g" \
-              -e "s|__APP_DIR__|${DEPLOY_PROJECT_DIR}|g" \
-              -e "s|__ENV_FILE__|${DEPLOY_ENV_FILE}|g" \
-              -e "s|__VENV_DIR__|${DEPLOY_VENV_DIR}|g" \
-              "${TEMPLATE}" | sudo tee "${SERVICE_FILE}" > /dev/null
-            sudo chmod 0644 "${SERVICE_FILE}"
-            sudo systemctl daemon-reload
-            sudo systemctl enable "${DEPLOY_SERVICE_NAME}"
-            echo "[bootstrap] Installed systemd service ${DEPLOY_SERVICE_NAME}."
-          else
-            echo "[bootstrap][WARN] Template not found: ${TEMPLATE}"
-          fi
+          # Install systemd services from templates.
+          CURRENT_USER="$(whoami)"
+          KEY_DIR="${DEPLOY_HOME_DIR:-/home/${CURRENT_USER}}/.keys/mumble-bg"
+          mkdir -p "${KEY_DIR}"
+
+          for svc_template in mumble-bg-auth mumble-bg-control; do
+            TEMPLATE="${DEPLOY_PROJECT_DIR}/deploy/systemd/${svc_template}.service"
+            if [ -f "${TEMPLATE}" ]; then
+              SERVICE_FILE="/etc/systemd/system/${svc_template}.service"
+              sed \
+                -e "s|__APP_USER__|${CURRENT_USER}|g" \
+                -e "s|__APP_DIR__|${DEPLOY_PROJECT_DIR}|g" \
+                -e "s|__ENV_FILE__|${DEPLOY_ENV_FILE}|g" \
+                -e "s|__VENV_DIR__|${DEPLOY_VENV_DIR}|g" \
+                -e "s|__KEY_DIR__|${KEY_DIR}|g" \
+                "${TEMPLATE}" | sudo tee "${SERVICE_FILE}" > /dev/null
+              sudo chmod 0644 "${SERVICE_FILE}"
+              echo "[bootstrap] Installed systemd service ${svc_template}."
+            else
+              echo "[bootstrap][WARN] Template not found: ${TEMPLATE}"
+            fi
+          done
+          sudo systemctl daemon-reload
+          sudo systemctl enable mumble-bg-auth mumble-bg-control
 
           # Configure sudoers for service management.
           SUDOERS_FILE="/etc/sudoers.d/mumble-bg"
           if [ ! -f "${SUDOERS_FILE}" ]; then
-            CURRENT_USER="$(whoami)"
             sudo tee "${SUDOERS_FILE}" > /dev/null <<SUDOERS
-          ${CURRENT_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart ${DEPLOY_SERVICE_NAME}, /bin/systemctl status ${DEPLOY_SERVICE_NAME}, /bin/systemctl is-active ${DEPLOY_SERVICE_NAME}, /bin/systemctl daemon-reload, /bin/systemctl list-unit-files *, /bin/bash ${DEPLOY_PROJECT_DIR}/deploy/create-db.sh *
+          ${CURRENT_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart mumble-bg-auth, /bin/systemctl restart mumble-bg-control, /bin/systemctl status mumble-bg-auth, /bin/systemctl status mumble-bg-control, /bin/systemctl is-active mumble-bg-auth, /bin/systemctl is-active mumble-bg-control, /bin/systemctl daemon-reload, /bin/systemctl list-unit-files *, /bin/bash ${DEPLOY_PROJECT_DIR}/deploy/create-db.sh *
           SUDOERS
             sudo chmod 440 "${SUDOERS_FILE}"
             echo "[bootstrap] Configured sudoers."
@@ -392,20 +398,22 @@ jobs:
           fi
 
           "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" migrate --noinput
+          "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" sync_ice_inventory
 
           if [ "${CONTROL_PSK_RESET_REQUESTED}" -eq 1 ]; then
             "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" reset_murmur_control_key --yes
           fi
           EOF
 
-      - name: Restart service
+      - name: Restart services
         run: |
           set -euo pipefail
           ssh -p "${DEPLOY_TARGET_PORT}" -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
-            "sudo systemctl restart '${DEPLOY_SERVICE_NAME}'"
+            "sudo systemctl restart mumble-bg-auth mumble-bg-control"
 
       - name: Health check
         run: |
           set -euo pipefail
+          sleep 3
           ssh -p "${DEPLOY_TARGET_PORT}" -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
-            "sudo systemctl is-active '${DEPLOY_SERVICE_NAME}'"
+            "sudo systemctl is-active mumble-bg-auth && sudo systemctl is-active mumble-bg-control"
