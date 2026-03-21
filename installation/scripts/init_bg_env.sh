@@ -20,7 +20,7 @@ fi
 mkdir -p "$(dirname "$target")"
 
 declare -A current=()
-vars=(DJANGO_SETTINGS_MODULE BG_KEY_PASSPHRASE BG_BIND BG_DBMS MURMUR_CONTROL_PSK MURMUR_CONTROL_URL DATABASES ICE MURMUR_PROBE)
+vars=(DJANGO_SETTINGS_MODULE BG_KEY_PASSPHRASE BG_BIND BG_DBMS FGBG_PSK MURMUR_CONTROL_PSK MURMUR_CONTROL_URL DATABASES ICE MURMUR_PROBE)
 
 if [[ -n "$backup_file" ]]; then
   extracted="$(mktemp)"
@@ -63,24 +63,24 @@ val_or_default() {
 dj_settings="$(val_or_default DJANGO_SETTINGS_MODULE "bg.settings")"
 bg_passphrase="$(val_or_default BG_KEY_PASSPHRASE "CHANGE_ME")"
 bg_bind="$(val_or_default BG_BIND "")"
-control_psk="$(val_or_default MURMUR_CONTROL_PSK "CHANGE_ME")"
+control_psk="$(val_or_default FGBG_PSK "$(val_or_default MURMUR_CONTROL_PSK "CHANGE_ME")")"
 control_url="$(val_or_default MURMUR_CONTROL_URL "http://127.0.0.1:18080")"
 databases_json="$(val_or_default BG_DBMS "$(val_or_default DATABASES '{
   "name": "authd bg",
   "host": "127.0.0.1",
-  "username": "bg_user",
-  "database": "bg_data",
-  "password": "CHANGE_ME"
+  "username": "bg_username",
+  "database": "bg_database",
+  "password": "bg_secretPassword"
 }')")"
 ice_json="$(val_or_default ICE '[
   {
-    "icehost": "127.0.0.1",
-    "address": "127.0.0.1:64738",
-    "name": "127.0.0.1:64738",
+    "icehost": "localhost",
+    "address": "voice.yourhost.tld:64738",
+    "name": "Mumble Server Name in Dialogs",
     "virtual_server_id": 1,
-    "icewrite": "CHANGE_ME",
+    "icewrite": "bg_iceWriteSecret",
     "iceport": 6502,
-    "iceread": "CHANGE_ME"
+    "iceread": "bg_iceReadSecret"
   }
 ]')"
 probe_json="$(val_or_default MURMUR_PROBE '[
@@ -133,8 +133,8 @@ BG_KEY_PASSPHRASE=$(sq "$bg_passphrase")
 # Optional explicit BG bind override. Leave blank to derive from MURMUR_CONTROL_URL.
 BG_BIND=$(sq "$bg_bind")
 
-# BG control API shared secret (must match FG)
-MURMUR_CONTROL_PSK=$(sq "$control_psk")
+# FG/BG control API shared secret (must match FG)
+FGBG_PSK=$(sq "$control_psk")
 
 # BG control URL advertised to FG/Cube. Also used to derive bind when BG_BIND is blank.
 MURMUR_CONTROL_URL=$(sq "$control_url")
@@ -162,22 +162,22 @@ if [[ "$ice_count" -le 1 ]]; then
 # Example second ICE endpoint entry (commented template):
 # ICE='[
 #   {
-#     "icehost": "127.0.0.1",
-#     "address": "127.0.0.1:64738",
-#     "name": "127.0.0.1:64738",
+#     "icehost": "localhost",
+#     "address": "voice.yourhost.tld:64738",
+#     "name": "Mumble Server Name in Dialogs",
 #     "virtual_server_id": 1,
-#     "icewrite": "CHANGE_ME",
+#     "icewrite": "bg_iceWriteSecret",
 #     "iceport": 6502,
-#     "iceread": "CHANGE_ME"
+#     "iceread": "bg_iceReadSecret"
 #   },
 #   {
-#     "icehost": "127.0.0.2",
-#     "address": "127.0.0.2:64739",
-#     "name": "127.0.0.2:64739",
+#     "icehost": "localhost",
+#     "address": "voice.yourhost.tld:64739",
+#     "name": "Second Mumble Server Name in Dialogs",
 #     "virtual_server_id": 2,
-#     "icewrite": "CHANGE_ME_2",
+#     "icewrite": "bg_iceWriteSecret_2",
 #     "iceport": 6502,
-#     "iceread": "CHANGE_ME_2"
+#     "iceread": "bg_iceReadSecret_2"
 #   }
 # ]'
 EOF

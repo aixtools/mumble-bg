@@ -19,13 +19,13 @@ Run these in order before deeper debugging:
      - `/tmp/mumble-bg-control-debug-0320.log`
 
 3. Verify Cube/FG env has required control variables:
-   - `rg -n '^(OPTIONAL_APPS|MURMUR_CONTROL_URL|MURMUR_CONTROL_PSK)=' /home/cube/Cube/.env`
+   - `rg -n '^(OPTIONAL_APPS|MURMUR_CONTROL_URL|FGBG_PSK|MURMUR_CONTROL_PSK)=' /home/cube/Cube/.env`
    - `OPTIONAL_APPS` must include `mumble_ui.apps.MumbleUiConfig`.
    - `MURMUR_CONTROL_URL` must point to BG control endpoint.
-   - `MURMUR_CONTROL_PSK` must match BG.
+   - `FGBG_PSK` must match BG.
 
 4. Verify BG env has matching control secret:
-   - `rg -n '^(MURMUR_CONTROL_URL|MURMUR_CONTROL_PSK|DJANGO_SETTINGS_MODULE)=' ~/.env/mumble-bg`
+   - `rg -n '^(MURMUR_CONTROL_URL|FGBG_PSK|MURMUR_CONTROL_PSK|DJANGO_SETTINGS_MODULE)=' ~/.env/mumble-bg`
 
 5. Run explicit FG-to-BG ACL sync diagnostic from Cube:
    - `python manage.py sync_mumble_acl --traceback`
@@ -111,7 +111,7 @@ Recovery:
 ### Q: ACL sync reaches BG but fails auth. Why?
 
 Usually shared secret mismatch:
-- `MURMUR_CONTROL_PSK` in Cube does not exactly match BG `MURMUR_CONTROL_PSK`.
+- `FGBG_PSK` in Cube does not exactly match BG `FGBG_PSK`.
 
 Check both files directly and compare exact values (including quoting/whitespace handling):
 - `/home/cube/Cube/.env`

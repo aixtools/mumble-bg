@@ -17,6 +17,7 @@ ENV_KEYS = [
     "BG_KEY_PASSPHRASE",
     "BG_BIND",
     "BG_DBMS",
+    "FGBG_PSK",
     "MURMUR_CONTROL_PSK",
     "MURMUR_CONTROL_URL",
     "DATABASES",
@@ -86,6 +87,10 @@ def _is_ip_literal(host: str) -> bool:
 
 def _format_bind_host(host: str) -> str:
     return f"[{host}]" if ":" in host else host
+
+
+def _is_missing_env_value(key: str) -> bool:
+    return not str(os.environ.get(key) or "").strip()
 
 
 def _pick_resolved_address(host: str, port: int) -> str:
@@ -180,12 +185,26 @@ def load_env_file_into_environment(
         if override or key not in os.environ:
             os.environ[key] = value
             applied[key] = value
-    if ("BG_DBMS" not in applied and "BG_DBMS" not in os.environ) and (
+    if _is_missing_env_value("BG_DBMS") and (
         env_values.get("DATABASES") or os.environ.get("DATABASES")
     ):
         legacy_value = str(env_values.get("DATABASES") or os.environ.get("DATABASES") or "")
         os.environ["BG_DBMS"] = legacy_value
         applied["BG_DBMS"] = legacy_value
+    if _is_missing_env_value("FGBG_PSK") and (
+        env_values.get("MURMUR_CONTROL_PSK") or os.environ.get("MURMUR_CONTROL_PSK")
+    ):
+        legacy_value = str(
+            env_values.get("MURMUR_CONTROL_PSK") or os.environ.get("MURMUR_CONTROL_PSK") or ""
+        )
+        os.environ["FGBG_PSK"] = legacy_value
+        applied["FGBG_PSK"] = legacy_value
+    if _is_missing_env_value("MURMUR_CONTROL_PSK") and (
+        env_values.get("FGBG_PSK") or os.environ.get("FGBG_PSK")
+    ):
+        current_value = str(env_values.get("FGBG_PSK") or os.environ.get("FGBG_PSK") or "")
+        os.environ["MURMUR_CONTROL_PSK"] = current_value
+        applied["MURMUR_CONTROL_PSK"] = current_value
     return applied
 
 

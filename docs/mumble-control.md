@@ -15,7 +15,7 @@ Current control transport is HTTP + JSON served by `mumble-bg`.
 
 Security/auth is based on the control secret:
 
-- `MURMUR_CONTROL_PSK` for FG -> BG requests
+- `FGBG_PSK` for FG -> BG requests
 - DB-backed control-key lifecycle state in `control_channel_key`
 
 ## Current Endpoint Surface

@@ -65,7 +65,7 @@ def _new_password(length: int = 16) -> str:
 
 
 def _env_bootstrap_psk() -> str | None:
-    value = os.getenv('MURMUR_CONTROL_PSK', '').strip()
+    value = (os.getenv('FGBG_PSK') or os.getenv('MURMUR_CONTROL_PSK') or '').strip()
     return value or None
 
 
@@ -88,7 +88,11 @@ def _configured_control_secret() -> tuple[str | None, str]:
 
 
 def _provided_control_secret(request) -> str | None:
-    value = request.headers.get('X-Murmur-Control-PSK') or request.headers.get('X-Control-PSK')
+    value = (
+        request.headers.get('X-FGBG-PSK')
+        or request.headers.get('X-Murmur-Control-PSK')
+        or request.headers.get('X-Control-PSK')
+    )
     if value:
         value = str(value).strip()
         return value or None
@@ -329,7 +333,14 @@ def _validate_password(password: str, *, field_name: str):
 
 
 def _read_new_control_secret(payload: dict[str, Any]) -> str:
-    for field_name in ('new_control_psk', 'control_psk', 'shared_secret', 'new_psk'):
+    for field_name in (
+        'new_fgbg_psk',
+        'fgbg_psk',
+        'new_control_psk',
+        'control_psk',
+        'shared_secret',
+        'new_psk',
+    ):
         if field_name not in payload:
             continue
         value = payload.get(field_name)
@@ -339,7 +350,7 @@ def _read_new_control_secret(payload: dict[str, Any]) -> str:
         if len(normalized) < 16:
             raise _BadRequest(f'{field_name} must be at least 16 characters')
         return normalized
-    raise _BadRequest('new_control_psk is required')
+    raise _BadRequest('new_fgbg_psk is required')
 
 
 class _ServerResolver:

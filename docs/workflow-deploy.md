@@ -39,7 +39,7 @@ The workflow in `.github/workflows/deploy-dev.yml` currently:
 - creates `<venv_dir>` if missing and installs `requirements.txt`
 - bootstraps `BG_DBMS` through `deploy/create-db.sh` when the BG DB host is local (`127.0.0.1` or `localhost`)
 - optionally resets the local PostgreSQL BG database before migrate when `BG_RESET_DB_ON_DEPLOY` is enabled
-- strips a `:reset` suffix from `MURMUR_CONTROL_PSK`, writes the stripped value back to `<env_file>`, and runs `manage.py reset_murmur_control_key --yes`
+- strips a `:reset` suffix from `FGBG_PSK`, writes the stripped value back to `<env_file>`, and runs `manage.py reset_murmur_control_key --yes`
 - runs `manage.py migrate --noinput`
 - restarts one configured systemd service, defaulting to `mumble-bg-auth`
 - verifies the restarted service with `systemctl is-active`
@@ -72,11 +72,11 @@ Minimal shape:
 
 ```json
 {
-  "name": "mumble-bg",
+  "name": "authd bg",
   "host": "127.0.0.1",
-  "username": "bg_user",
-  "database": "bg_data",
-  "password": "change_me"
+  "username": "bg_username",
+  "database": "bg_database",
+  "password": "bg_secretPassword"
 }
 ```
 
@@ -133,7 +133,7 @@ Optional deploy/runtime values:
 - `MURMUR_PROBE`
 - `BG_ENGINE`
 - `BG_RESET_DB_ON_DEPLOY`
-- `MURMUR_CONTROL_PSK`
+- `FGBG_PSK`
 - `BG_KEY_PASSPHRASE`
 
 If you want the guided first-time env workflow and key-generation checks, use
@@ -235,7 +235,7 @@ explicitly; the current workflow does not restart both services for you.
 
 Required deploy configuration:
 
-- deploy target JSON secret, default secret name `CUBE_DEV_CUBE`
+- deploy target JSON secret, identified by a host-user label, default label `CUBE_DEV_CUBE`
 - `BG_DBMS`
 - `ICE`
 
@@ -244,9 +244,12 @@ Optional deploy/runtime configuration:
 - `MURMUR_PROBE`
 - `BG_ENGINE`
 - `BG_RESET_DB_ON_DEPLOY`
-- `MURMUR_CONTROL_PSK`
+- `FGBG_PSK`
 
-### Deploy Target Secret
+### Deploy Target Host-User Label
+
+The deploy target is selected by a host-user label. The default label is
+`CUBE_DEV_CUBE`, which is a GitHub-secret-safe host-user label.
 
 Default target secret example:
 
@@ -292,19 +295,21 @@ Defaults:
 ```json
 [
   {
-    "name": "optional label",
-    "host": "127.0.0.1",
+    "icehost": "localhost",
+    "address": "voice.yourhost.tld:64738",
+    "name": "Mumble Server Name in Dialogs",
     "virtual_server_id": 1,
-    "icewrite": "write-secret",
+    "icewrite": "bg_iceWriteSecret",
     "iceport": 6502,
-    "iceread": "read-secret"
+    "iceread": "bg_iceReadSecret"
   }
 ]
 ```
 
 Required per server:
 
-- `host`
+- `icehost`
+- `address`
 - `virtual_server_id`
 - `icewrite`
 
@@ -345,11 +350,12 @@ Optional per probe target:
 - `dbport`
 - `dbengine`
 
-### `MURMUR_CONTROL_PSK` Notes
+### `FGBG_PSK` Notes
 
 - when set, the workflow writes it into `<env_file>`
 - if the value ends with `:reset`, deploy strips the suffix for runtime and runs `manage.py reset_murmur_control_key --yes`
 - this supports a one-shot control-key reset during deploy without leaving the suffix in runtime config
+- legacy GitHub secret name `MURMUR_CONTROL_PSK` is still accepted as a workflow fallback, but `FGBG_PSK` is the primary branch name
 
 ## After Bootstrap
 

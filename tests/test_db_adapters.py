@@ -35,7 +35,7 @@ def test_db_config_from_env_loads_json_object(monkeypatch):
 def test_db_config_from_env_loads_flat_json_object(monkeypatch):
     monkeypatch.setenv(
         "BG_DBMS",
-        '{"name":"authd bg","host":"127.0.0.1","username":"bg_user","database":"bg_data","password":"secret"}',
+        '{"name":"authd bg","host":"127.0.0.1","username":"bg_username","database":"bg_database","password":"bg_secretPassword"}',
     )
 
     config = db_config_from_env(
@@ -46,16 +46,16 @@ def test_db_config_from_env_loads_flat_json_object(monkeypatch):
         default_username="cube",
     )
 
-    assert config.name == "bg_data"
+    assert config.name == "bg_database"
     assert config.host == "127.0.0.1"
-    assert config.user == "bg_user"
-    assert config.password == "secret"
+    assert config.user == "bg_username"
+    assert config.password == "bg_secretPassword"
 
 
 def test_db_config_from_env_rejects_missing_required_fields(monkeypatch):
     monkeypatch.setenv(
         "BG_DBMS",
-        '{"bg":{"host":"127.0.0.1","username":"bg_user","database":"bg_data"}}',
+        '{"bg":{"host":"127.0.0.1","username":"bg_username","database":"bg_database"}}',
     )
 
     with pytest.raises(PilotDBError) as exc_info:
@@ -73,7 +73,7 @@ def test_db_config_from_env_rejects_missing_required_fields(monkeypatch):
 def test_db_config_from_env_rejects_flat_object_missing_required_fields(monkeypatch):
     monkeypatch.setenv(
         "BG_DBMS",
-        '{"host":"127.0.0.1","username":"bg_user","database":"bg_data"}',
+        '{"host":"127.0.0.1","username":"bg_username","database":"bg_database"}',
     )
 
     with pytest.raises(PilotDBError) as exc_info:
@@ -110,7 +110,7 @@ def test_db_config_from_env_falls_back_to_legacy_databases_env(monkeypatch):
     monkeypatch.delenv("BG_DBMS", raising=False)
     monkeypatch.setenv(
         "DATABASES",
-        '{"bg":{"host":"127.0.0.1","username":"bg_user","database":"bg_data","password":"secret"}}',
+        '{"bg":{"host":"127.0.0.1","username":"bg_username","database":"bg_database","password":"bg_secretPassword"}}',
     )
 
     config = db_config_from_env(
@@ -122,10 +122,10 @@ def test_db_config_from_env_falls_back_to_legacy_databases_env(monkeypatch):
         legacy_env_var="DATABASES",
     )
 
-    assert config.name == "bg_data"
+    assert config.name == "bg_database"
     assert config.host == "127.0.0.1"
-    assert config.user == "bg_user"
-    assert config.password == "secret"
+    assert config.user == "bg_username"
+    assert config.password == "bg_secretPassword"
 
 
 def test_pilot_dba_autodetect_prefers_postgresql_first(monkeypatch):

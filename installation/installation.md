@@ -35,7 +35,7 @@ source ~/.env/mumble-bg
 set +a
 ```
 
-BG variables are maintained in `~/.env/mumble-bg`. For FG/Cube integration, treat this file as the operator source of truth for shared control values (for example `MURMUR_CONTROL_URL`, `MURMUR_CONTROL_PSK`, optional `BG_PUBLIC_KEY_PATH`) and copy/append those into Cube-side env configuration during deployment.
+BG variables are maintained in `~/.env/mumble-bg`. For FG/Cube integration, treat this file as the operator source of truth for shared control values (for example `MURMUR_CONTROL_URL`, `FGBG_PSK`, optional `BG_PUBLIC_KEY_PATH`) and copy/append those into Cube-side env configuration during deployment.
 
 Default command pattern after loading env:
 
@@ -189,17 +189,17 @@ After install/migrate/collectstatic, start `cube-django` again.
 ```bash
 env | rg '^OPTIONAL_APPS='
 env | rg '^MURMUR_CONTROL_URL='
-env | rg '^MURMUR_CONTROL_PSK='
+env | rg '^FGBG_PSK='
 ```
 
 Required runtime env:
 - `OPTIONAL_APPS` includes `mumble_ui.apps.MumbleUiConfig`
 - `MURMUR_CONTROL_URL` points to BG control endpoint
-- `MURMUR_CONTROL_PSK` matches BG control secret
+- `FGBG_PSK` matches BG control secret
 
 Copy from BG-side config:
 - Default BG control URL is `http://127.0.0.1:18080` (adjust if BG is on another host/port).
-- `MURMUR_CONTROL_PSK` in Cube/FG must exactly match BG `MURMUR_CONTROL_PSK`.
+- `FGBG_PSK` in Cube/FG must exactly match BG `FGBG_PSK`.
 - If FG reads BG public key from file, set `BG_PUBLIC_KEY_PATH` to BG public key path (default `/etc/mumble-bg/keys/public_key.pem`).
 
 Quick BG URL check from Cube host:

@@ -10,20 +10,20 @@ from bg.envtools import ENV_KEYS, count_ice_entries, read_env_values_with_bash, 
 DEFAULT_DATABASES = """{
   "name": "authd bg",
   "host": "127.0.0.1",
-  "username": "bg_user",
-  "database": "bg_data",
-  "password": "CHANGE_ME"
+  "username": "bg_username",
+  "database": "bg_database",
+  "password": "bg_secretPassword"
 }"""
 
 DEFAULT_ICE = """[
   {
-    "icehost": "127.0.0.1",
-    "address": "127.0.0.1:64738",
-    "name": "127.0.0.1:64738",
+    "icehost": "localhost",
+    "address": "voice.yourhost.tld:64738",
+    "name": "Mumble Server Name in Dialogs",
     "virtual_server_id": 1,
-    "icewrite": "CHANGE_ME",
+    "icewrite": "bg_iceWriteSecret",
     "iceport": 6502,
-    "iceread": "CHANGE_ME"
+    "iceread": "bg_iceReadSecret"
   }
 ]"""
 
@@ -69,7 +69,7 @@ class Command(BaseCommand):
         dj_settings = cur_or_default("DJANGO_SETTINGS_MODULE", "bg.settings")
         passphrase = cur_or_default("BG_KEY_PASSPHRASE", "CHANGE_ME")
         bg_bind = cur_or_default("BG_BIND", "")
-        psk = cur_or_default("MURMUR_CONTROL_PSK", "CHANGE_ME")
+        psk = cur_or_default("FGBG_PSK", cur_or_default("MURMUR_CONTROL_PSK", "CHANGE_ME"))
         control_url = cur_or_default("MURMUR_CONTROL_URL", "http://127.0.0.1:18080")
         databases = cur_or_default("BG_DBMS", cur_or_default("DATABASES", DEFAULT_DATABASES))
         ice = cur_or_default("ICE", DEFAULT_ICE)
@@ -95,8 +95,8 @@ class Command(BaseCommand):
             "# Optional explicit BG bind override. Leave blank to derive from MURMUR_CONTROL_URL.",
             f"BG_BIND={shell_single_quote(bg_bind)}",
             "",
-            "# BG control API shared secret (must match FG)",
-            f"MURMUR_CONTROL_PSK={shell_single_quote(psk)}",
+            "# FG/BG control API shared secret (must match FG)",
+            f"FGBG_PSK={shell_single_quote(psk)}",
             "",
             "# BG control URL advertised to FG/Cube. Also used to derive bind when BG_BIND is blank.",
             f"MURMUR_CONTROL_URL={shell_single_quote(control_url)}",
@@ -124,22 +124,22 @@ class Command(BaseCommand):
                     "# Example second ICE endpoint entry (commented template):",
                     "# ICE='[",
                     "#   {",
-                    "#     \"icehost\": \"127.0.0.1\",",
-                    "#     \"address\": \"127.0.0.1:64738\",",
-                    "#     \"name\": \"127.0.0.1:64738\",",
+                    "#     \"icehost\": \"localhost\",",
+                    "#     \"address\": \"voice.yourhost.tld:64738\",",
+                    "#     \"name\": \"Mumble Server Name in Dialogs\",",
                     "#     \"virtual_server_id\": 1,",
-                    "#     \"icewrite\": \"CHANGE_ME\",",
+                    "#     \"icewrite\": \"bg_iceWriteSecret\",",
                     "#     \"iceport\": 6502,",
-                    "#     \"iceread\": \"CHANGE_ME\"",
+                    "#     \"iceread\": \"bg_iceReadSecret\"",
                     "#   },",
                     "#   {",
-                    "#     \"icehost\": \"127.0.0.2\",",
-                    "#     \"address\": \"127.0.0.2:64739\",",
-                    "#     \"name\": \"127.0.0.2:64739\",",
+                    "#     \"icehost\": \"localhost\",",
+                    "#     \"address\": \"voice.yourhost.tld:64739\",",
+                    "#     \"name\": \"Second Mumble Server Name in Dialogs\",",
                     "#     \"virtual_server_id\": 2,",
-                    "#     \"icewrite\": \"CHANGE_ME_2\",",
+                    "#     \"icewrite\": \"bg_iceWriteSecret_2\",",
                     "#     \"iceport\": 6502,",
-                    "#     \"iceread\": \"CHANGE_ME_2\"",
+                    "#     \"iceread\": \"bg_iceReadSecret_2\"",
                     "#   }",
                     "# ]'",
                     "",

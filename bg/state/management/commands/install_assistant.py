@@ -134,10 +134,10 @@ class Command(BaseCommand):
     def _check_control_psk(self) -> dict[str, Any]:
         import os
 
-        value = (os.environ.get("MURMUR_CONTROL_PSK") or "").strip()
+        value = (os.environ.get("FGBG_PSK") or os.environ.get("MURMUR_CONTROL_PSK") or "").strip()
         if value:
             return {"status": "ok", "message": "set"}
-        return {"status": "warning", "message": "MURMUR_CONTROL_PSK is not set"}
+        return {"status": "warning", "message": "FGBG_PSK is not set"}
 
     def _check_control_url(self) -> dict[str, Any]:
         import os
