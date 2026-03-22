@@ -52,6 +52,18 @@ def _load_access_rules():
     return list(AccessRule.objects.values('entity_id', 'entity_type', 'deny'))
 
 
+def _resolved_username_for_account(account, *, user_id: int, existing: MumbleUser | None = None) -> str:
+    username = str(getattr(account, 'account_username', '') or '').strip()
+    if username:
+        return username
+    if existing is not None and str(existing.username or '').strip():
+        return str(existing.username).strip()
+    auth_user = User.objects.filter(pk=user_id).only('username').first()
+    if auth_user is not None and str(auth_user.username or '').strip():
+        return str(auth_user.username).strip()
+    return f'pkid_{user_id}'
+
+
 def provision_registrations(
     *,
     server: MumbleServer | None = None,
@@ -92,12 +104,16 @@ def provision_registrations(
         if account is None:
             continue
         main = account.main_character
-        username = main.character_name
+        existing_row = existing.get(user_id)
+        username = _resolved_username_for_account(account, user_id=user_id, existing=existing_row)
         display_name = account.display_name or username
 
         if user_id in existing:
             mu = existing[user_id]
             update_fields = []
+            if mu.username != username:
+                mu.username = username
+                update_fields.append('username')
             if mu.display_name != display_name:
                 mu.display_name = display_name
                 update_fields.append('display_name')
@@ -114,11 +130,17 @@ def provision_registrations(
                 if not dry_run:
                     mu.is_active = True
                     update_fields.append('is_active')
+                    if mu.user.username != username:
+                        mu.user.username = username
+                        mu.user.save(update_fields=['username'])
                     mu.save(update_fields=update_fields + ['updated_at'])
                 result.activated += 1
                 logger.info('Activated %s (pkid=%d)', username, user_id)
             else:
                 if update_fields and not dry_run:
+                    if mu.user.username != username:
+                        mu.user.username = username
+                        mu.user.save(update_fields=['username'])
                     mu.save(update_fields=update_fields + ['updated_at'])
                 result.unchanged += 1
             continue
@@ -128,6 +150,9 @@ def provision_registrations(
                 pk=user_id,
                 defaults={'username': username},
             )
+            if auth_user.username != username:
+                auth_user.username = username
+                auth_user.save(update_fields=['username'])
             password = _new_password()
             password_record = build_murmur_password_record(password)
             MumbleUser.objects.create(

@@ -22,9 +22,21 @@ class ProvisionerSnapshotTest(TestCase):
             is_active=True,
         )
 
-    def _seed_snapshot(self, *, pkid, character_id, character_name, corporation_id=None, corporation_name='', alliance_id=None, alliance_name=''):
+    def _seed_snapshot(
+        self,
+        *,
+        pkid,
+        character_id,
+        character_name,
+        account_username='',
+        corporation_id=None,
+        corporation_name='',
+        alliance_id=None,
+        alliance_name='',
+    ):
         account = PilotAccountCache.objects.create(
             pkid=pkid,
+            account_username=account_username,
             display_name='[ALLY CORP] Pilot One' if pkid == 42 else '',
             main_character_id=character_id,
             main_character_name=character_name,
@@ -47,6 +59,7 @@ class ProvisionerSnapshotTest(TestCase):
             pkid=42,
             character_id=9001,
             character_name='Pilot One',
+            account_username='pilot_login',
             alliance_id=9901,
             alliance_name='Alliance One',
             corporation_id=8801,
@@ -58,7 +71,7 @@ class ProvisionerSnapshotTest(TestCase):
         self.assertEqual(result.created, 1)
         mumble_user = MumbleUser.objects.get(user_id=42, server=self.server)
         self.assertTrue(mumble_user.is_active)
-        self.assertEqual(mumble_user.username, 'Pilot One')
+        self.assertEqual(mumble_user.username, 'pilot_login')
         self.assertEqual(mumble_user.display_name, '[ALLY CORP] Pilot One')
         self.assertEqual(mumble_user.evepilot_id, 9001)
         self.assertEqual(mumble_user.alliance_id, 9901)
@@ -70,13 +83,14 @@ class ProvisionerSnapshotTest(TestCase):
             pkid=42,
             character_id=9001,
             character_name='Pilot One',
+            account_username='pilot_login',
             alliance_id=9901,
             alliance_name='Alliance One',
             corporation_id=8801,
             corporation_name='Corp One',
         )
 
-        user = User.objects.create(pk=42, username='Pilot One')
+        user = User.objects.create(pk=42, username='pilot_login')
         password_record = build_murmur_password_record('temporary-pass')
         MumbleUser.objects.create(
             user=user,
@@ -84,7 +98,7 @@ class ProvisionerSnapshotTest(TestCase):
             evepilot_id=9001,
             corporation_id=8801,
             alliance_id=9901,
-            username='Pilot One',
+            username='pilot_login',
             display_name='Pilot One',
             pwhash=password_record['pwhash'],
             hashfn=password_record['hashfn'],
@@ -104,13 +118,14 @@ class ProvisionerSnapshotTest(TestCase):
             pkid=42,
             character_id=9001,
             character_name='Pilot One',
+            account_username='pilot_login',
             alliance_id=9901,
             alliance_name='Alliance One',
             corporation_id=8801,
             corporation_name='Corp One',
         )
 
-        user = User.objects.create(pk=42, username='Pilot One')
+        user = User.objects.create(pk=42, username='old_login')
         password_record = build_murmur_password_record('temporary-pass')
         MumbleUser.objects.create(
             user=user,
@@ -130,7 +145,7 @@ class ProvisionerSnapshotTest(TestCase):
         result = provision_registrations(dry_run=False)
 
         self.assertEqual(result.unchanged, 1)
-        self.assertEqual(
-            MumbleUser.objects.get(user_id=42, server=self.server).display_name,
-            '[ALLY CORP] Pilot One',
-        )
+        updated = MumbleUser.objects.get(user_id=42, server=self.server)
+        self.assertEqual(updated.display_name, '[ALLY CORP] Pilot One')
+        self.assertEqual(updated.username, 'pilot_login')
+        self.assertEqual(User.objects.get(pk=42).username, 'pilot_login')

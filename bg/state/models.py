@@ -262,6 +262,19 @@ class PilotAccountCache(models.Model):
         unique=True,
         help_text='Stable FG/BG account identity key.',
     )
+    account_username = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text='Cube login username from the latest FG snapshot.',
+    )
+    pilot_data_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        db_index=True,
+        help_text='Hash of pilot snapshot payload for this account (md5 placeholder).',
+    )
     display_name = models.CharField(
         max_length=255,
         blank=True,

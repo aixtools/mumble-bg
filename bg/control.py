@@ -1103,6 +1103,7 @@ def pilot_snapshot_sync(request):
         changed=bool(result['changed']),
         account_count=int(result['account_count']),
         character_count=int(result['character_count']),
+        pilot_hashes=result['pilot_hashes'],
         summary_before=result['summary_before'],
         summary_after=result['summary_after'],
     )

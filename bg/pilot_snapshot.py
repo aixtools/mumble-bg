@@ -41,6 +41,8 @@ def current_pilot_snapshot() -> PilotSnapshot:
         accounts.append(
             PilotAccount(
                 pkid=int(row.pkid),
+                account_username=str(row.account_username or ''),
+                pilot_data_hash=str(row.pilot_data_hash or ''),
                 display_name=str(row.display_name or ''),
                 characters=characters,
             )
@@ -55,6 +57,16 @@ def pilot_snapshot_summary(snapshot: PilotSnapshot | None = None) -> dict[str, A
 
 def has_pilot_snapshot() -> bool:
     return PilotAccountCache.objects.exists()
+
+
+def pilot_snapshot_hash_pairs() -> list[dict[str, Any]]:
+    return [
+        {
+            'pkid': int(row['pkid']),
+            'hash': str(row['pilot_data_hash'] or ''),
+        }
+        for row in PilotAccountCache.objects.order_by('pkid').values('pkid', 'pilot_data_hash')
+    ]
 
 
 def store_pilot_snapshot(
@@ -77,6 +89,7 @@ def store_pilot_snapshot(
             'character_count': snapshot.character_count,
             'summary_before': before_summary,
             'summary_after': after_summary,
+            'pilot_hashes': pilot_snapshot_hash_pairs(),
         }
 
     with transaction.atomic():
@@ -89,6 +102,8 @@ def store_pilot_snapshot(
             account_rows.append(
                 PilotAccountCache(
                     pkid=account.pkid,
+                    account_username=account.account_username,
+                    pilot_data_hash=account.pilot_data_hash,
                     display_name=account.display_name,
                     main_character_id=main.character_id if main else None,
                     main_character_name=main.character_name if main else '',
@@ -133,4 +148,5 @@ def store_pilot_snapshot(
         'character_count': snapshot.character_count,
         'summary_before': before_summary,
         'summary_after': after_summary,
+        'pilot_hashes': pilot_snapshot_hash_pairs(),
     }
