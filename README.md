@@ -180,3 +180,19 @@ Before the first real release, remove historical references to the old table nam
 `mumble_mumbleserver`, `mumble_mumbleuser`, and `mumble_mumblesession` from
 handoff notes and transition docs. The fresh-start owned schema in this repo now
 uses `mumble_server`, `mumble_user`, and `mumble_session`.
+
+## Commit Message Pre-check
+
+Conventional Commits are enforced for new commits.
+
+Validate a message explicitly:
+
+```bash
+make precheck COMMIT_MSG="feat(bg): add pilot hash sync response"
+```
+
+Enable the git hook once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
