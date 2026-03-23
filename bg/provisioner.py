@@ -61,12 +61,6 @@ def _resolved_username_for_account(account, *, user_id: int, existing: MumbleUse
     )
     if username:
         return username
-    fallback = _USERNAME_SANITIZE_RE.sub(
-        '',
-        str(getattr(account.main_character, 'character_name', '') or '').strip().lower().replace(' ', ''),
-    )
-    if fallback:
-        return fallback
     if existing is not None and str(existing.username or '').strip():
         existing_username = _USERNAME_SANITIZE_RE.sub('', str(existing.username).strip().lower().replace(' ', ''))
         if existing_username:

@@ -96,6 +96,26 @@ class ProvisionerSnapshotTest(TestCase):
         self.assertEqual(mumble_user.username, 'leorises')
         self.assertEqual(User.objects.get(pk=42).username, 'leorises')
 
+    def test_provision_does_not_fallback_to_character_name_for_username(self):
+        AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
+        self._seed_snapshot(
+            pkid=42,
+            character_id=9001,
+            character_name='Zosma Rises',
+            account_username='',
+            alliance_id=9901,
+            alliance_name='Alliance One',
+            corporation_id=8801,
+            corporation_name='Corp One',
+        )
+
+        result = provision_registrations(dry_run=False)
+
+        self.assertEqual(result.created, 1)
+        mumble_user = MumbleUser.objects.get(user_id=42, server=self.server)
+        self.assertEqual(mumble_user.username, 'pkid_42')
+        self.assertEqual(User.objects.get(pk=42).username, 'pkid_42')
+
     def test_provision_creates_registration_for_each_active_server(self):
         secondary = MumbleServer.objects.create(
             name='Secondary',
