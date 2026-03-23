@@ -19,7 +19,7 @@ from fgbg_common.eligibility import (
     eligible_account_list_from_snapshot,
 )
 
-_FORBIDDEN_PASSWORD_CHARS = {"'", '"', '`', '\\'}
+_FORBIDDEN_PASSWORD_CHARS = {" ", "'", '"', '`', '\\'}
 _PASSWORD_CHARS = ''.join(
     chr(code) for code in range(33, 127) if chr(code) not in _FORBIDDEN_PASSWORD_CHARS
 )

@@ -55,7 +55,7 @@ class _Forbidden(ValueError):
     """Raised when a control request fails authorization."""
 
 
-_FORBIDDEN_PASSWORD_CHARS = {"'", '"', '`', '\\'}
+_FORBIDDEN_PASSWORD_CHARS = {" ", "'", '"', '`', '\\'}
 _PASSWORD_CHARS = ''.join(
     chr(code) for code in range(33, 127) if chr(code) not in _FORBIDDEN_PASSWORD_CHARS
 )
@@ -332,9 +332,9 @@ def _read_preferred_password(payload: dict[str, Any]) -> str | None:
 def _validate_password(password: str, *, field_name: str):
     for ch in password:
         if ord(ch) < 33 or ord(ch) > 126:
-            raise _BadRequest(f'{field_name} must use printable 7-bit ASCII characters only')
+            raise _BadRequest(f'{field_name} must use printable 7-bit ASCII characters only (no spaces)')
         if ch in _FORBIDDEN_PASSWORD_CHARS:
-            raise _BadRequest(f"{field_name} cannot contain any of: ' \" ` \\")
+            raise _BadRequest(f"{field_name} cannot contain any of: space, ' \" ` \\")
 
 
 def _read_new_control_secret(payload: dict[str, Any]) -> str:
