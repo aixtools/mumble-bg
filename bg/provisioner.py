@@ -88,6 +88,14 @@ def _display_name_needs_resolution(value: str) -> bool:
     return not normalized or '????' in normalized
 
 
+def _display_tags_look_name_based(value: str) -> bool:
+    text = str(value or '').strip()
+    if not (text.startswith('[') and '] ' in text):
+        return False
+    tag_section = text[1:text.find(']')]
+    return any(char.isalpha() and char.islower() for char in tag_section)
+
+
 def _display_name_from_account_with_eve_objects(account, *, eve_objects_by_key: dict[tuple[str, int], EveObject]) -> str:
     main = account.main_character
     if main is None:
@@ -116,10 +124,17 @@ def _display_name_from_account_with_eve_objects(account, *, eve_objects_by_key: 
 
 def _resolved_display_name_for_account(account, *, eve_objects_by_key: dict[tuple[str, int], EveObject]) -> str:
     current = str(getattr(account, 'display_name', '') or '').strip()
-    if current and not _display_name_needs_resolution(current):
-        return current
     resolved = _display_name_from_account_with_eve_objects(account, eve_objects_by_key=eve_objects_by_key)
-    return str(resolved or current or '').strip()
+    resolved = str(resolved or '').strip()
+    if current and not _display_name_needs_resolution(current):
+        if resolved and '????' not in resolved:
+            return resolved
+        if _display_tags_look_name_based(current) and resolved:
+            return resolved
+        return current
+    if resolved:
+        return resolved
+    return current
 
 
 def _acl_admin_accounts(snapshot, rules: list[dict[str, object]], rs: dict[str, set[int]]) -> set[int]:
@@ -190,7 +205,12 @@ def provision_registrations(
                 alliance_ids.add(int(character.alliance_id))
 
     needs_display_resolution = any(
-        _display_name_needs_resolution(str(getattr(account, 'display_name', '') or ''))
+        (account.main_character is not None)
+        and (
+            account.main_character.alliance_id is not None
+            or account.main_character.corporation_id is not None
+            or _display_name_needs_resolution(str(getattr(account, 'display_name', '') or ''))
+        )
         for account in accounts_by_pkid.values()
     )
     if needs_display_resolution:

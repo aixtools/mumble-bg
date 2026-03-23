@@ -275,6 +275,41 @@ class ProvisionerSnapshotTest(TestCase):
         self.assertEqual(mumble_user.display_name, '[ALLY CORP] Pilot One')
         self.assertEqual(PilotAccountCache.objects.get(pkid=42).display_name, '[ALLY CORP] Pilot One')
 
+    def test_provision_rewrites_name_tags_to_ticker_tags(self):
+        AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
+        self._seed_snapshot(
+            pkid=42,
+            character_id=9001,
+            character_name='Pilot One',
+            account_username='pilot_login',
+            alliance_id=9901,
+            alliance_name='Alliance One',
+            corporation_id=8801,
+            corporation_name='Corp One',
+            display_name='[Alliance One Corp One] Pilot One',
+        )
+        EveObject.objects.create(
+            entity_id=9901,
+            type='alliance',
+            category='alliance',
+            name='Alliance One',
+            ticker='ALLY',
+        )
+        EveObject.objects.create(
+            entity_id=8801,
+            type='corporation',
+            category='corporation',
+            name='Corp One',
+            ticker='CORP',
+        )
+
+        result = provision_registrations(dry_run=False)
+
+        self.assertEqual(result.created, 1)
+        mumble_user = MumbleUser.objects.get(user_id=42, server=self.server)
+        self.assertEqual(mumble_user.display_name, '[ALLY CORP] Pilot One')
+        self.assertEqual(PilotAccountCache.objects.get(pkid=42).display_name, '[ALLY CORP] Pilot One')
+
     def test_provision_clears_admin_when_corp_or_alliance_is_denied(self):
         AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
         AccessRule.objects.create(entity_id=9001, entity_type='pilot', deny=False, acl_admin=True)
