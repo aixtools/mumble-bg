@@ -134,10 +134,15 @@ class Command(BaseCommand):
     def _check_control_psk(self) -> dict[str, Any]:
         import os
 
-        value = (os.environ.get("FGBG_PSK") or os.environ.get("MURMUR_CONTROL_PSK") or "").strip()
+        value = (
+            os.environ.get("BG_PSK")
+            or os.environ.get("FGBG_PSK")
+            or os.environ.get("MURMUR_CONTROL_PSK")
+            or ""
+        ).strip()
         if value:
             return {"status": "ok", "message": "set"}
-        return {"status": "warning", "message": "FGBG_PSK is not set"}
+        return {"status": "warning", "message": "BG_PSK is not set"}
 
     def _check_control_url(self) -> dict[str, Any]:
         import os
@@ -181,7 +186,7 @@ class Command(BaseCommand):
         if status.get("has_public_key") and not status.get("can_decrypt"):
             return {
                 "status": "warning",
-                "message": "partial: public key loaded, decrypt unavailable (check BG_KEY_PASSPHRASE/private key)",
+                "message": "partial: public key loaded, decrypt unavailable (check BG_PKI_PASSPHRASE/private key)",
             }
 
         if status.get("has_public_key") and status.get("can_decrypt") and not status.get("can_store_encrypted"):

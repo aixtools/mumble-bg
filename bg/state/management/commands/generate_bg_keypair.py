@@ -3,7 +3,7 @@
 Usage:
     python manage.py generate_bg_keypair [--key-dir /etc/mumble-bg/keys]
 
-Passphrase is read from BG_KEY_PASSPHRASE env var.
+Passphrase is read from BG_PKI_PASSPHRASE env var.
 If missing/empty, command offers optional passwordless key generation.
 """
 
@@ -47,26 +47,26 @@ class Command(BaseCommand):
                 f'{private_path} already exists. Use --force to overwrite.'
             )
 
-        raw_passphrase = os.environ.get('BG_KEY_PASSPHRASE')
+        raw_passphrase = os.environ.get('BG_PKI_PASSPHRASE') or os.environ.get('BG_KEY_PASSPHRASE')
         passphrase = (raw_passphrase or '').strip()
         use_passwordless = False
         if not passphrase:
             self.stdout.write(
                 self.style.WARNING(
-                    'BG_KEY_PASSPHRASE is not set (or is empty).'
+                    'BG_PKI_PASSPHRASE is not set (or is empty).'
                 )
             )
             try:
                 answer = input('Generate passwordless keypair? [y/N]: ').strip().lower()
             except EOFError as exc:
                 raise CommandError(
-                    'BG_KEY_PASSPHRASE is required for encrypted keys (or confirm passwordless interactively).'
+                    'BG_PKI_PASSPHRASE is required for encrypted keys (or confirm passwordless interactively).'
                 ) from exc
             if answer in {'y', 'yes'}:
                 use_passwordless = True
             else:
                 raise CommandError(
-                    'Aborted: define BG_KEY_PASSPHRASE with a non-empty value and run again.'
+                    'Aborted: define BG_PKI_PASSPHRASE with a non-empty value and run again.'
                 )
 
         key_size = options['key_size']
@@ -107,6 +107,6 @@ class Command(BaseCommand):
         self.stdout.write('Distribute the public key to FG for password encryption.')
         if use_passwordless:
             self.stdout.write(self.style.WARNING('Generated passwordless private key (NoEncryption).'))
-            self.stdout.write('Set BG_KEY_PASSPHRASE and regenerate keys later for encrypted-at-rest support.')
+            self.stdout.write('Set BG_PKI_PASSPHRASE and regenerate keys later for encrypted-at-rest support.')
         else:
-            self.stdout.write('Set BG_KEY_PASSPHRASE in the BG environment file.')
+            self.stdout.write('Set BG_PKI_PASSPHRASE in the BG environment file.')

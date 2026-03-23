@@ -7,7 +7,7 @@
 # Default KEY_DIR: /etc/mumble-bg/keys
 # Creates: private_key.pem (passphrase-protected), public_key.pem
 #
-# The passphrase is prompted interactively or read from BG_KEY_PASSPHRASE env.
+# The passphrase is prompted interactively or read from BG_PKI_PASSPHRASE env.
 # Public key is world-readable; private key is owner-only.
 
 set -euo pipefail
@@ -24,11 +24,21 @@ fi
 mkdir -p "$KEY_DIR"
 chmod 0755 "$KEY_DIR"
 
-if [ -n "${BG_KEY_PASSPHRASE:-}" ]; then
-    PASS_ARGS=(-aes256 -passout "env:BG_KEY_PASSPHRASE")
-    echo "Using passphrase from BG_KEY_PASSPHRASE env var"
+if [ -n "${BG_PKI_PASSPHRASE:-}" ]; then
+    PASS_ENV_VAR="BG_PKI_PASSPHRASE"
+elif [ -n "${BG_KEY_PASSPHRASE:-}" ]; then
+    PASS_ENV_VAR="BG_KEY_PASSPHRASE"
+else
+    PASS_ENV_VAR=""
+fi
+
+if [ -n "$PASS_ENV_VAR" ]; then
+    PASS_ARGS=(-aes256 -passout "env:${PASS_ENV_VAR}")
+    PASSIN_ARGS=(-passin "env:${PASS_ENV_VAR}")
+    echo "Using passphrase from ${PASS_ENV_VAR} env var"
 else
     PASS_ARGS=(-aes256)
+    PASSIN_ARGS=()
     echo "Enter passphrase for the private key:"
 fi
 
@@ -43,7 +53,7 @@ chmod 0600 "$PRIVATE_KEY"
 # Extract public key
 openssl pkey -in "$PRIVATE_KEY" \
     -pubout \
-    ${BG_KEY_PASSPHRASE:+-passin "env:BG_KEY_PASSPHRASE"} \
+    "${PASSIN_ARGS[@]}" \
     -out "$PUBLIC_KEY"
 
 chmod 0644 "$PUBLIC_KEY"
@@ -54,4 +64,4 @@ echo "  Private: $PRIVATE_KEY (owner-only, passphrase-protected)"
 echo "  Public:  $PUBLIC_KEY (world-readable)"
 echo ""
 echo "Distribute $PUBLIC_KEY to FG for password encryption."
-echo "Set BG_KEY_PASSPHRASE in the BG environment file to enable decryption."
+echo "Set BG_PKI_PASSPHRASE in the BG environment file to enable decryption."
