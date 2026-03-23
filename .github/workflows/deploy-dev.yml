@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       deploy_target_name:
-        description: 'Secret name containing deploy target JSON'
+        description: 'Host-user label naming the deploy target secret (for example CUBE_DEV_CUBE)'
         required: false
         default: 'CUBE_DEV_CUBE'
 
@@ -153,12 +153,12 @@ jobs:
             "DEPLOY_ENV_DIR='${DEPLOY_ENV_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' bash -s" <<'EOF'
           mkdir -p "${DEPLOY_ENV_DIR}"
           cat > "${DEPLOY_ENV_FILE}" <<'ENVFILE'
-          DATABASES='${{ secrets.DATABASES }}'
+          BG_DBMS='${{ secrets.BG_DBMS || secrets.DATABASES }}'
           ICE='${{ secrets.ICE }}'
           MURMUR_PROBE='${{ secrets.MURMUR_PROBE }}'
           BG_ENGINE=${{ secrets.BG_ENGINE }}
           BG_RESET_DB_ON_DEPLOY=${{ secrets.BG_RESET_DB_ON_DEPLOY || vars.BG_RESET_DB_ON_DEPLOY }}
-          MURMUR_CONTROL_PSK='${{ secrets.MURMUR_CONTROL_PSK }}'
+          FGBG_PSK='${{ secrets.FGBG_PSK || secrets.MURMUR_CONTROL_PSK }}'
           ENVFILE
           chmod 600 "${DEPLOY_ENV_FILE}"
           EOF
@@ -177,16 +177,24 @@ jobs:
           set -a
           source "${DEPLOY_ENV_FILE}"
           set +a
+          BG_DBMS="${BG_DBMS:-${DATABASES:-}}"
+          export BG_DBMS
+          FGBG_PSK="${FGBG_PSK:-${MURMUR_CONTROL_PSK:-}}"
+          export FGBG_PSK
+          MURMUR_CONTROL_PSK="${MURMUR_CONTROL_PSK:-${FGBG_PSK:-}}"
+          export MURMUR_CONTROL_PSK
 
-          # Optional suffix trigger: if the configured PSK ends with ":reset",
+          # Optional suffix trigger: if the configured FG/BG PSK ends with ":reset",
           # strip the suffix for runtime and reset DB control-key state.
-          CONTROL_PSK_RESET_REQUESTED=0
-          if [ -n "${MURMUR_CONTROL_PSK:-}" ] && [ "${MURMUR_CONTROL_PSK%:reset}" != "${MURMUR_CONTROL_PSK}" ]; then
-            CONTROL_PSK_RESET_REQUESTED=1
-            MURMUR_CONTROL_PSK="${MURMUR_CONTROL_PSK%:reset}"
+          FGBG_PSK_RESET_REQUESTED=0
+          if [ -n "${FGBG_PSK:-}" ] && [ "${FGBG_PSK%:reset}" != "${FGBG_PSK}" ]; then
+            FGBG_PSK_RESET_REQUESTED=1
+            FGBG_PSK="${FGBG_PSK%:reset}"
+            export FGBG_PSK
+            MURMUR_CONTROL_PSK="${FGBG_PSK}"
             export MURMUR_CONTROL_PSK
-            esc_psk="$(printf '%s' "${MURMUR_CONTROL_PSK}" | sed "s/[\\/&]/\\\\&/g")"
-            sed -i "s|^MURMUR_CONTROL_PSK=.*$|MURMUR_CONTROL_PSK='${esc_psk}'|" "${DEPLOY_ENV_FILE}"
+            esc_psk="$(printf '%s' "${FGBG_PSK}" | sed "s/[\\/&]/\\\\&/g")"
+            sed -i "s|^FGBG_PSK=.*$|FGBG_PSK='${esc_psk}'|" "${DEPLOY_ENV_FILE}"
           fi
 
           json_field() {
@@ -209,23 +217,26 @@ jobs:
           if not isinstance(payload, dict):
               raise SystemExit(f"{env_var} must be a JSON object")
 
-          payload = payload.get(object_key)
-          if payload is None:
-              raise SystemExit(f"{env_var} is missing required object: {object_key}")
-          if not isinstance(payload, dict):
-              raise SystemExit(f"{env_var}.{object_key} must be a JSON object")
+          if all(key in payload for key in ("host", "username", "database", "password")):
+              db_payload = payload
+          else:
+              db_payload = payload.get(object_key)
+              if db_payload is None:
+                  raise SystemExit(f"{env_var} is missing required object: {object_key}")
+              if not isinstance(db_payload, dict):
+                  raise SystemExit(f"{env_var}.{object_key} must be a JSON object")
 
-          value = payload.get(field, '')
+          value = db_payload.get(field, '')
           if value is None:
               value = ''
           print(value)
           PY
           }
 
-          BG_DATABASE_NAME="$(json_field DATABASES bg database)"
-          BG_DATABASE_HOST="$(json_field DATABASES bg host)"
-          BG_DATABASE_USER="$(json_field DATABASES bg username)"
-          BG_DATABASE_PASSWORD="$(json_field DATABASES bg password)"
+          BG_DATABASE_NAME="$(json_field BG_DBMS bg database)"
+          BG_DATABASE_HOST="$(json_field BG_DBMS bg host)"
+          BG_DATABASE_USER="$(json_field BG_DBMS bg username)"
+          BG_DATABASE_PASSWORD="$(json_field BG_DBMS bg password)"
           BG_ENGINE_EFFECTIVE="${BG_ENGINE:-postgres}"
 
           case "$(printf '%s' "${BG_ENGINE_EFFECTIVE}" | tr '[:upper:]' '[:lower:]')" in
@@ -289,7 +300,7 @@ jobs:
 
           "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" migrate --noinput
 
-          if [ "${CONTROL_PSK_RESET_REQUESTED}" -eq 1 ]; then
+          if [ "${FGBG_PSK_RESET_REQUESTED}" -eq 1 ]; then
             "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" reset_murmur_control_key --yes
           fi
           EOF

@@ -17,13 +17,16 @@ This document is the active, consolidated operating document for the `mumble-bg`
 
 ## Deployment and Operations
 
-- Use the existing deploy/playbook docs in archive for historical process.
+- Use [workflow-deploy.md](./workflow-deploy.md) for the current deploy/bootstrap flow.
+- Archive deploy/playbook docs remain historical reference only.
 - Confirm service startup, DB migration, and control channel secrets are aligned before running operator actions.
 - Treat direct DB access from host as invalid; host integrations should use contract endpoints.
 
 ## Documentation Layout
 
 - [consolidated.md](./consolidated.md) is canonical.
+- [workflow-deploy.md](./workflow-deploy.md) covers current deploy/bootstrap workflow.
+- [system-boundary.md](./system-boundary.md), [bg-state.md](./bg-state.md), [mumble-control.md](./mumble-control.md), and [extraction-inventory.md](./extraction-inventory.md) remain active companion docs.
 - [history/mumble-bg](../../repository/history/mumble-bg) stores historical docs.
 
 ## Archive

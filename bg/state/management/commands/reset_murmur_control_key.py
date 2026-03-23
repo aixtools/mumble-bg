@@ -11,7 +11,7 @@ def _active_mode() -> str:
     row = ControlChannelKey.objects.filter(name=_CONTROL_KEY_NAME).only('shared_secret').first()
     if row and row.shared_secret:
         return 'db'
-    if os.getenv('MURMUR_CONTROL_PSK', '').strip():
+    if (os.getenv('BG_PSK') or os.getenv('FGBG_PSK') or os.getenv('MURMUR_CONTROL_PSK') or '').strip():
         return 'env'
     return 'open'
 

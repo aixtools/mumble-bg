@@ -10,12 +10,16 @@ This document captures explicit contracts and implicit conventions between:
 ### 1.1 Boundary
 - FG is host/UI/admin.
 - BG is runtime/state daemon.
+- FG is the only side that reads host/pilot data.
+- FG reads `PILOT_DBMS`; BG owns `BG_DBMS`.
 - FG does not read BG DB directly.
+- BG does not read FG/host DB directly.
 - BG does not write FG/host tables.
+- BG owns runtime state plus a cached FG pilot snapshot.
 - Integration is API-only (control/probe endpoints).
 
 ### 1.2 Control Channel Auth
-- FG calls BG control endpoints with shared secret auth (`MURMUR_CONTROL_PSK`).
+- FG calls BG control endpoints with shared secret auth (`FGBG_PSK`).
 - Missing/invalid secret is rejected (`401`).
 - If BG is unreachable, FG treats operations as unavailable.
 
@@ -27,9 +31,16 @@ This document captures explicit contracts and implicit conventions between:
 - If delta exists: BG applies create/update/delete, then writes ACL audit row.
 - Sync is full-table replacement on BG (rules not present in payload are removed).
 
-### 1.4 Provision Contract
+### 1.4 Pilot Snapshot Sync Contract
+- FG sends a full account-oriented pilot snapshot to BG (`/v1/pilot-snapshot/sync`).
+- Snapshot accounts are keyed by `pkid`.
+- Each account includes the main character plus its character list and org data.
+- BG validates payload shape/types.
+- BG replaces its cached pilot snapshot when the snapshot changes and writes snapshot sync audit metadata.
+
+### 1.5 Provision Contract
 - FG can request reconcile/provision after ACL sync (`/v1/provision`).
-- BG computes eligible/blocked from rules + pilot source data.
+- BG computes eligible/blocked from rules + cached FG pilot snapshot data.
 - Eligible:
   - missing BG user -> create
   - inactive BG user -> reactivate
@@ -37,7 +48,7 @@ This document captures explicit contracts and implicit conventions between:
   - existing active BG user -> deactivate
   - missing user -> no-op
 - FG periodic sync (scheduler/command) uses this same ACL sync path so disconnect windows self-heal.
-- Even when ACL sync is `noop`, BG still performs eligibility/provision and Murmur reconciliation.
+- Even when ACL sync is `noop`, FG can still push snapshot state and request eligibility/provision and Murmur reconciliation.
 
 ### 1.5 Password Reset Contract
 - FG reset/set actions target BG by `pkid` (BG-side user identity).
@@ -87,7 +98,7 @@ This document captures explicit contracts and implicit conventions between:
 ## 4) Implicit Contracts and Conventions
 
 ### 4.1 Identity Convention
-- Runtime key is Eve account/user identity (`user_id`/`pkid` in control payloads), not display name.
+- Runtime key is stable Cube account identity (`pkid`), not display name.
 - Character names are presentation values and can drift from stored runtime usernames.
 - Registration login name should remain stable per account (`pkid` identity); main-character changes update `display_name`.
 
@@ -119,12 +130,13 @@ When FG UI reports ACL sync failed, run this minimal diagnostic path:
 2. From BG:
    - `curl -sS http://127.0.0.1:18080/v1/health`
 3. Compare control env values:
-   - Cube: `MURMUR_CONTROL_URL`, `MURMUR_CONTROL_PSK`
-   - BG: `MURMUR_CONTROL_PSK`
+   - Cube: `MURMUR_CONTROL_URL`, `FGBG_PSK`
+   - BG: `FGBG_PSK`
 
 Interpretation:
 - No BG log entry for the sync attempt usually means FG/Cube never reached BG control (URL/service/network issue).
 - BG receives request but rejects it usually means control secret mismatch or payload validation failure.
+- BG returns `No pilot snapshot data available; sync /v1/pilot-snapshot/sync first` means FG has not populated BG's snapshot cache yet.
 - BG returns `500` with `relation "bg_access_rule_audit" does not exist` means DB schema drift (migration state/table mismatch) on BG.
 
 For full checklist + FAQ, see `docs/fg-bg-troubleshooting.md`.

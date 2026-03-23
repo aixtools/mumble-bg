@@ -9,9 +9,10 @@ from typing import Any
 
 from django.core.management.base import BaseCommand
 
-from bg.db import MmblBgDBA, PilotDBA, PilotDBError, db_config_from_env
+from bg.db import MmblBgDBA, PilotDBError, db_config_from_env
 from bg.envtools import resolve_bg_bind
 from bg.ice_inventory import list_current_ice_inventory, parse_ice_env
+from bg.state.models import PilotAccountCache, PilotCharacterCache
 
 
 def _connectivity(host: str, port: int, timeout: float = 1.0) -> tuple[bool, str]:
@@ -24,7 +25,7 @@ def _connectivity(host: str, port: int, timeout: float = 1.0) -> tuple[bool, str
 
 class Command(BaseCommand):
     help = (
-        "Install/deployment assistant: verify pilot DB, bg DB, and ICE endpoint reachability "
+        "Install/deployment assistant: verify cached pilot snapshot, bg DB, and ICE endpoint reachability "
         "without mutating state."
     )
 
@@ -45,12 +46,12 @@ class Command(BaseCommand):
         report["checks"]["control_url"] = self._check_control_url()
         report["checks"]["control_bind"] = self._check_control_bind()
         report["checks"]["encryption"] = self._check_encryption()
-        report["checks"]["pilot_db"] = self._check_pilot_db()
+        report["checks"]["pilot_snapshot"] = self._check_pilot_snapshot()
         report["checks"]["bg_db"] = self._check_bg_db()
         report["checks"]["ice"] = self._check_ice_endpoints()
         report["checks"]["authd_registration"] = self._check_authd_registration()
 
-        for key in ("pilot_db", "bg_db", "authd_registration"):
+        for key in ("bg_db", "authd_registration"):
             if report["checks"][key]["status"] != "ok":
                 report["status"] = "error"
 
@@ -86,9 +87,9 @@ class Command(BaseCommand):
                 report["checks"]["encryption"]["message"],
             ),
             (
-                "Pilot DB",
-                report["checks"]["pilot_db"]["status"],
-                report["checks"]["pilot_db"]["message"],
+                "Pilot Snapshot",
+                report["checks"]["pilot_snapshot"]["status"],
+                report["checks"]["pilot_snapshot"]["message"],
             ),
             (
                 "BG DB",
@@ -133,10 +134,15 @@ class Command(BaseCommand):
     def _check_control_psk(self) -> dict[str, Any]:
         import os
 
-        value = (os.environ.get("MURMUR_CONTROL_PSK") or "").strip()
+        value = (
+            os.environ.get("BG_PSK")
+            or os.environ.get("FGBG_PSK")
+            or os.environ.get("MURMUR_CONTROL_PSK")
+            or ""
+        ).strip()
         if value:
             return {"status": "ok", "message": "set"}
-        return {"status": "warning", "message": "MURMUR_CONTROL_PSK is not set"}
+        return {"status": "warning", "message": "BG_PSK is not set"}
 
     def _check_control_url(self) -> dict[str, Any]:
         import os
@@ -180,7 +186,7 @@ class Command(BaseCommand):
         if status.get("has_public_key") and not status.get("can_decrypt"):
             return {
                 "status": "warning",
-                "message": "partial: public key loaded, decrypt unavailable (check BG_KEY_PASSPHRASE/private key)",
+                "message": "partial: public key loaded, decrypt unavailable (check BG_PKI_PASSPHRASE/private key)",
             }
 
         if status.get("has_public_key") and status.get("can_decrypt") and not status.get("can_store_encrypted"):
@@ -191,37 +197,28 @@ class Command(BaseCommand):
 
         return {"status": "warning", "message": "inactive: crypto not fully initialized"}
 
-    def _check_pilot_db(self) -> dict[str, Any]:
-        adapter = PilotDBA(
-            db_config_from_env(
-                "DATABASES",
-                "pilot",
-                default_database="pilot",
-                default_host="localhost",
-                default_username="pilot",
-            )
-        )
-        try:
-            conn = adapter.connect()
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "error", "message": str(exc)}
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT 1")
-            _ = cur.fetchone()
-            cur.close()
-        finally:
-            conn.close()
-        return {"status": "ok", "message": "connected"}
+    def _check_pilot_snapshot(self) -> dict[str, Any]:
+        account_count = PilotAccountCache.objects.count()
+        character_count = PilotCharacterCache.objects.count()
+        if account_count == 0:
+            return {
+                "status": "warning",
+                "message": "no cached FG pilot snapshot yet (run FG ACL sync or /v1/pilot-snapshot/sync)",
+            }
+        return {
+            "status": "ok",
+            "message": f"cached {account_count} account(s) / {character_count} character(s)",
+        }
 
     def _check_bg_db(self) -> dict[str, Any]:
         adapter = MmblBgDBA(
             db_config_from_env(
-                "DATABASES",
+                "BG_DBMS",
                 "bg",
                 default_database="mumble",
                 default_host="localhost",
                 default_username="cube",
+                legacy_env_var="DATABASES",
             )
         )
         try:

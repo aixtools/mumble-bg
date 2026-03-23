@@ -28,14 +28,16 @@ def db_config_from_env(
     default_host: str,
     default_username: str,
     default_password: str = '',
+    legacy_env_var: str | None = None,
 ):
     """
-    Load a JSON DB config from one env var containing keyed DB objects.
+    Load a JSON DB config from one env var.
 
-    Expected top-level shape:
-    - {"pilot": {...}, "bg": {...}}
+    Supported shapes:
+    - {"bg": {...}, "pilot": {...}}  # legacy keyed object
+    - {"host": "...", "username": "...", "database": "...", "password": "..."}  # flat single DB object
 
-    Expected nested object keys:
+    Expected DB object keys:
     - host
     - username
     - database
@@ -44,6 +46,11 @@ def db_config_from_env(
     - optional engine
     """
     raw = (os.environ.get(env_var) or '').strip()
+    source_env_var = env_var
+    if not raw and legacy_env_var:
+        raw = (os.environ.get(legacy_env_var) or '').strip()
+        if raw:
+            source_env_var = legacy_env_var
     if not raw:
         return DBAdapterObject(
             name=default_database,
@@ -56,30 +63,34 @@ def db_config_from_env(
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise PilotDBError(f'{env_var} must be valid JSON') from exc
+        raise PilotDBError(f'{source_env_var} must be valid JSON') from exc
 
     if not isinstance(payload, dict):
-        raise PilotDBError(f'{env_var} must be a JSON object')
+        raise PilotDBError(f'{source_env_var} must be a JSON object')
 
-    payload = payload.get(key)
-    if payload is None:
-        raise PilotDBError(f'{env_var} is missing required object: {key}')
-    if not isinstance(payload, dict):
-        raise PilotDBError(f'{env_var}.{key} must be a JSON object')
+    db_object_fields = {'host', 'username', 'database', 'password', 'name', 'engine'}
+    if payload.keys() & db_object_fields:
+        db_payload = payload
+    else:
+        db_payload = payload.get(key)
+        if db_payload is None:
+            raise PilotDBError(f'{source_env_var} is missing required object: {key}')
+        if not isinstance(db_payload, dict):
+            raise PilotDBError(f'{source_env_var}.{key} must be a JSON object')
 
     required = ['host', 'username', 'database', 'password']
-    missing = [field for field in required if field not in payload or payload[field] in {None, ''}]
+    missing = [field for field in required if field not in db_payload or db_payload[field] in {None, ''}]
     if missing:
         raise PilotDBError(
-            f"{env_var} is missing required fields: {', '.join(missing)}"
+            f"{source_env_var} is missing required fields: {', '.join(missing)}"
         )
 
     return DBAdapterObject(
-        name=str(payload['database']),
-        host=str(payload['host']),
-        user=str(payload['username']),
-        password=str(payload['password']),
-        engine=str(payload.get('engine', '') or ''),
+        name=str(db_payload['database']),
+        host=str(db_payload['host']),
+        user=str(db_payload['username']),
+        password=str(db_payload['password']),
+        engine=str(db_payload.get('engine', '') or ''),
     )
 
 

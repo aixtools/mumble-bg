@@ -79,17 +79,21 @@ def _build_registration_info(M, mumble_user, password=None):
     return info
 
 
-def _find_existing_userid(server_proxy, username, preferred_userid=None):
+def _find_existing_userid(server_proxy, username, preferred_userid=None, aliases=None):
     registered = server_proxy.getRegisteredUsers('')
     if preferred_userid is not None and preferred_userid in registered:
         return preferred_userid
 
-    target = (username or '').strip().lower()
-    if not target:
+    candidates = {
+        str(value or '').strip().lower()
+        for value in [username, *(aliases or [])]
+        if str(value or '').strip()
+    }
+    if not candidates:
         return None
 
     for registered_userid, registered_name in (registered or {}).items():
-        if str(registered_name or '').strip().lower() == target:
+        if str(registered_name or '').strip().lower() in candidates:
             return registered_userid
     return None
 
@@ -102,6 +106,7 @@ def sync_murmur_registration(mumble_user, password=None, *, create_password=None
                 server_proxy,
                 mumble_user.username,
                 preferred_userid=mumble_user.mumble_userid,
+                aliases=[mumble_user.display_name],
             )
             created = target_userid is None
             effective_password = password
@@ -156,6 +161,7 @@ def disable_murmur_registration(mumble_user):
                 server_proxy,
                 mumble_user.username,
                 preferred_userid=mumble_user.mumble_userid,
+                aliases=[mumble_user.display_name],
             )
             if target_userid is None:
                 return {'changed': False, 'murmur_userid': None, 'already_disabled': False}
@@ -201,6 +207,7 @@ def unregister_murmur_registration(mumble_user):
                 server_proxy,
                 mumble_user.username,
                 preferred_userid=mumble_user.mumble_userid,
+                aliases=[mumble_user.display_name],
             )
             if target_userid is None:
                 return False
@@ -226,6 +233,45 @@ def _coerce_session_ids(session_ids):
         if session_id > 0:
             normalized.append(session_id)
     return normalized
+
+
+def disconnect_live_sessions(mumble_user, *, reason='Registration updated; reconnect required'):
+    from bg.pulse.service import mark_session_disconnected
+    from bg.state.models import MumbleSession
+
+    session_ids = list(
+        MumbleSession.objects.filter(
+            server=mumble_user.server,
+            mumble_user=mumble_user,
+            is_active=True,
+        ).order_by('session_id').values_list('session_id', flat=True)
+    )
+    if not session_ids:
+        return {'requested': 0, 'kicked': 0, 'errors': []}
+
+    reason_text = str(reason or '').strip() or 'Registration updated; reconnect required'
+    kicked = 0
+    errors: list[str] = []
+    try:
+        communicator, _, server_proxy = _open_target_server(mumble_user.server)
+        try:
+            for session_id in session_ids:
+                try:
+                    server_proxy.kickUser(int(session_id), reason_text)
+                    kicked += 1
+                    mark_session_disconnected(mumble_user.server, int(session_id))
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f'session {int(session_id)}: {exc}')
+        finally:
+            communicator.destroy()
+    except MurmurSyncError:
+        raise
+    except Exception as exc:
+        raise MurmurSyncError(
+            f'Failed to disconnect live sessions for {mumble_user.username} on {mumble_user.server.name}: {exc}'
+        ) from exc
+
+    return {'requested': len(session_ids), 'kicked': kicked, 'errors': errors}
 
 
 def sync_live_admin_membership(mumble_user, *, session_ids=None):

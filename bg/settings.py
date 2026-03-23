@@ -1,9 +1,9 @@
 """
 Minimal Django settings for mumble-bg-owned tables.
 
-The runtime auth daemon still reads the pilot source via SQL directly.
+BG now owns its runtime schema plus the cached FG pilot snapshot.
 This settings module is for `manage.py migrate` and local ownership of
-mumble-bg runtime schema in `DATABASES.bg`.
+mumble-bg state configured through `BG_DBMS`.
 """
 
 import os
@@ -54,11 +54,9 @@ def _detect_database_engine(host):
     return 'postgresql'
 
 
-# BG_USE_SQLITE: use sqlite for BG's own state tables (MumbleUser, AccessRule,
-# MumbleServer, etc.) while keeping the pilot source DB connection to PostgreSQL/MySQL
-# for character data.  Set to a file path, e.g. /tmp/bg-test.sqlite3.
-# The pilot source is accessed via PilotDBA (raw SQL, not Django ORM) and is
-# configured separately via the DATABASES env var's "pilot" key.
+# BG_USE_SQLITE: use sqlite for BG's owned state tables (MumbleUser, AccessRule,
+# MumbleServer, cached pilot snapshot, etc.). Set to a file path, e.g.
+# /tmp/bg-test.sqlite3.
 _BG_SQLITE_PATH = os.environ.get('BG_USE_SQLITE', '').strip()
 
 if _BG_SQLITE_PATH:
@@ -70,11 +68,12 @@ if _BG_SQLITE_PATH:
     }
 else:
     BG_DATABASE = db_config_from_env(
-        'DATABASES',
+        'BG_DBMS',
         'bg',
         default_database='MMBL_BG',
         default_host='localhost',
         default_username='cube',
+        legacy_env_var='DATABASES',
     )
 
     DATABASE_HOST = BG_DATABASE.host

@@ -17,15 +17,15 @@ This is not the target architecture. The copied code is here to preserve the cur
 - `mumble-bg` owns Mumble background services, ICE interactions, and per-server state
 - `PKID` is the stable Cube-side identity key
 
-The locked boundary rules are documented in [docs/system-boundary.md](/home/michael/prj/mumble-bg/docs/system-boundary.md).
+The locked boundary rules are documented in [docs/system-boundary.md](./docs/system-boundary.md).
 
 The bg-owned Django app and model naming choices are documented in
-[docs/bg-state.md](/home/michael/prj/mumble-bg/docs/bg-state.md).
+[docs/bg-state.md](./docs/bg-state.md).
 
 The explicit fg/bg control path is documented in
-[docs/mumble-control.md](/home/michael/prj/mumble-bg/docs/mumble-control.md).
+[docs/mumble-control.md](./docs/mumble-control.md).
 
-See [docs/extraction-inventory.md](/home/michael/prj/mumble-bg/docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
+See [docs/extraction-inventory.md](./docs/extraction-inventory.md) for what was copied and what still remains in Cube core.
 
 ## Installation Guides
 
@@ -49,14 +49,20 @@ Relevant files:
 - [deploy/undeploy-hetzner.sh](/home/michael/prj/mumble-bg/deploy/undeploy-hetzner.sh)
 - [deploy/systemd/mumble-bg-auth.service](/home/michael/prj/mumble-bg/deploy/systemd/mumble-bg-auth.service)
 - [.github/workflows/deploy-dev.yml](/home/michael/prj/mumble-bg/.github/workflows/deploy-dev.yml)
-- [docs/bootstrap-dev-deploy.md](/home/michael/prj/mumble-bg/docs/bootstrap-dev-deploy.md)
+- [docs/workflow-deploy.md](./docs/workflow-deploy.md)
 
 `deploy/setup-hetzner.sh` is the one-time root install path. The GitHub workflow is for ordinary code updates after that setup exists.
 
 ## Pilot Eligibility Rules
 
-BG receives access-control decision tables from FG via the control channel and
-independently provisions Mumble accounts by evaluating the pilot source against these rules.
+BG receives two inputs from FG via the control channel:
+
+- full ACL rules (`/v1/access-rules/sync`)
+- a full account-oriented pilot snapshot (`/v1/pilot-snapshot/sync`)
+
+BG then provisions Mumble accounts by evaluating its cached FG pilot snapshot
+against the synced ACL rules. BG no longer reads pilot data directly from a
+host/pilot database.
 
 ### Decision Tables (received from FG)
 
@@ -80,14 +86,15 @@ Block checks apply across the **entire account**, not just the main character.
 If the main **or any alt** matches a blocked corp or pilot ID, the whole account
 is denied — unless a pilot-level allow overrides it.
 
-## Read-only Pilot Contract
+## Cached Pilot Snapshot Contract
 
 - `bg.authd.service.PilotIdentity(character_id, character_name, corporation_id, alliance_id, corporation_name, alliance_name, corporation_ticker, alliance_ticker)`
 - `bg.authd.service.list_pilot_identities() -> list[PilotIdentity]`
 
 - `character_name` is used for display naming in Mumble.
-- `corporation_name` and `alliance_name` are now carried through from the pilot source.
-- `corporation_ticker` and `alliance_ticker` remain supported in the contract and default to empty strings when cube-core does not provide them.
+- `corporation_name` and `alliance_name` are carried through from the cached FG pilot snapshot.
+- `corporation_ticker` and `alliance_ticker` remain supported in the contract and default to empty strings when FG does not provide them.
+- BG serves this contract from BG-owned snapshot cache tables; it does not query host/pilot tables directly.
 
 This contract update aligns with Cube core behavioral changes introduced in Cube PR #74.
 
@@ -96,11 +103,11 @@ This contract update aligns with Cube core behavioral changes introduced in Cube
   - A pilot can change corporation over time.
   - A corporation can change alliance over time.
   - Therefore `alliance_id` is membership-state, not an immutable identity attribute.
-  - mumble-bg should always treat `alliance_id` as a snapshot from cube-core and refresh it whenever character org state is refreshed.
+  - mumble-bg should always treat `alliance_id` as a snapshot from FG/cube-core and refresh it whenever character org state is refreshed.
 
 ## Environment Contracts
 
-- `DATABASES` = JSON object containing the read-only `pilot` DB config and the owned `bg` DB config.
+- `BG_DBMS` = the owned BG DB config.
 - `ICE` = JSON list describing required ICE connectivity for `authd` and `pulse`.
 - `MURMUR_PROBE` = optional JSON list for Murmur DB probe/debug targets.
 
@@ -108,7 +115,21 @@ This contract update aligns with Cube core behavioral changes introduced in Cube
 python manage.py migrate
 ```
 
-uses `DATABASES.bg` and keeps local schema independent of the pilot source DB.
+uses `BG_DBMS` and keeps local
+schema independent of FG/host databases. BG does not require direct
+`PILOT_DBMS` access.
+
+### Pilot Snapshot Sync
+
+FG is expected to push the pilot snapshot before reconcile/provision. In the
+normal FG path, `sync_mumble_acl` sends:
+
+1. ACL rules to `/v1/access-rules/sync`
+2. pilot snapshot to `/v1/pilot-snapshot/sync`
+3. reconcile request to `/v1/provision`
+
+If BG has no cached pilot snapshot, provisioning commands return an explicit
+error telling the operator to sync `/v1/pilot-snapshot/sync` first.
 
 ### ICE Inventory Sync
 
@@ -142,7 +163,7 @@ python manage.py install_assistant
 ```
 
 It reports:
-- pilot DB connectivity
+- cached pilot snapshot presence/count
 - bg DB connectivity
 - ICE endpoint connectivity (from `ICE` env, or active `mumble_server` rows if `ICE` is empty)
 - `none_defined` when no ICE endpoints exist
@@ -159,3 +180,19 @@ Before the first real release, remove historical references to the old table nam
 `mumble_mumbleserver`, `mumble_mumbleuser`, and `mumble_mumblesession` from
 handoff notes and transition docs. The fresh-start owned schema in this repo now
 uses `mumble_server`, `mumble_user`, and `mumble_session`.
+
+## Commit Message Pre-check
+
+Conventional Commits are enforced for new commits.
+
+Validate a message explicitly:
+
+```bash
+make precheck COMMIT_MSG="feat(bg): add pilot hash sync response"
+```
+
+Enable the git hook once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```

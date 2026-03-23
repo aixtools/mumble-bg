@@ -19,6 +19,7 @@ from bg.pilot.registrations import (
     unregister_murmur_registration,
 )
 from bg.contracts import MurmurRegistrationContractPatch, MurmurRegistrationSnapshot
+from bg.pilot_snapshot import store_pilot_snapshot
 from bg.state.models import (
     AccessRule,
     AccessRuleSyncAudit,
@@ -26,10 +27,13 @@ from bg.state.models import (
     ENTITY_TYPE_CORPORATION,
     ENTITY_TYPE_PILOT,
     ControlChannelKey,
+    EveObject,
     MumbleServer,
     MumbleSession,
     MumbleUser,
 )
+from fgbg_common.entity_types import CATEGORY_TO_TYPE, TYPE_TO_CATEGORY, VALID_CATEGORIES
+from fgbg_common.snapshot import PilotSnapshot
 
 _PilotRegistrationSnapshot = MurmurRegistrationSnapshot
 _RegistrationContractPatch = MurmurRegistrationContractPatch
@@ -51,7 +55,7 @@ class _Forbidden(ValueError):
     """Raised when a control request fails authorization."""
 
 
-_FORBIDDEN_PASSWORD_CHARS = {"'", '"', '`', '\\'}
+_FORBIDDEN_PASSWORD_CHARS = {" ", "'", '"', '`', '\\'}
 _PASSWORD_CHARS = ''.join(
     chr(code) for code in range(33, 127) if chr(code) not in _FORBIDDEN_PASSWORD_CHARS
 )
@@ -63,7 +67,7 @@ def _new_password(length: int = 16) -> str:
 
 
 def _env_bootstrap_psk() -> str | None:
-    value = os.getenv('MURMUR_CONTROL_PSK', '').strip()
+    value = (os.getenv('BG_PSK') or os.getenv('FGBG_PSK') or os.getenv('MURMUR_CONTROL_PSK') or '').strip()
     return value or None
 
 
@@ -86,7 +90,11 @@ def _configured_control_secret() -> tuple[str | None, str]:
 
 
 def _provided_control_secret(request) -> str | None:
-    value = request.headers.get('X-Murmur-Control-PSK') or request.headers.get('X-Control-PSK')
+    value = (
+        request.headers.get('X-FGBG-PSK')
+        or request.headers.get('X-Murmur-Control-PSK')
+        or request.headers.get('X-Control-PSK')
+    )
     if value:
         value = str(value).strip()
         return value or None
@@ -175,6 +183,7 @@ def _snapshot_access_rules() -> list[dict[str, Any]]:
             'entity_id',
             'entity_type',
             'deny',
+            'acl_admin',
             'note',
             'created_by',
         ).order_by('entity_id')
@@ -184,6 +193,7 @@ def _snapshot_access_rules() -> list[dict[str, Any]]:
             'entity_id': int(row['entity_id']),
             'entity_type': str(row['entity_type']),
             'deny': bool(row['deny']),
+            'acl_admin': bool(row.get('acl_admin', False)),
             'note': str(row['note'] or ''),
             'created_by': str(row['created_by'] or ''),
         }
@@ -198,6 +208,7 @@ def _normalize_access_rule_map(rules: list[dict[str, Any]]) -> list[dict[str, An
             'entity_id': int(rule['entity_id']),
             'entity_type': str(rule['entity_type']),
             'deny': bool(rule['deny']),
+            'acl_admin': bool(rule.get('acl_admin', False)),
             'note': str(rule.get('note') or ''),
             'created_by': str(rule.get('created_by') or ''),
         })
@@ -217,7 +228,7 @@ def _rules_changed(
         if prior is None:
             changed = True
             continue
-        for field in ('entity_type', 'deny', 'note', 'created_by'):
+        for field in ('entity_type', 'deny', 'acl_admin', 'note', 'created_by'):
             if prior.get(field) != row[field]:
                 changed = True
                 break
@@ -257,6 +268,18 @@ def _coerce_session_ids(payload: dict[str, Any]) -> list[int]:
         raise _BadRequest('session_ids must be a list')
     normalized = [_coerce_int(session_id, field='session_ids') for session_id in session_ids]
     return [session_id for session_id in normalized if session_id > 0]
+
+
+def _read_pilot_snapshot(payload: dict[str, Any]) -> PilotSnapshot:
+    try:
+        return PilotSnapshot.from_mapping(
+            {
+                'generated_at': payload.get('generated_at', ''),
+                'accounts': payload.get('accounts', []),
+            }
+        )
+    except ValueError as exc:
+        raise _BadRequest(str(exc)) from exc
 
 
 def _read_requested_by(outer_payload: dict[str, Any], payload: dict[str, Any]) -> str | None:
@@ -309,13 +332,33 @@ def _read_preferred_password(payload: dict[str, Any]) -> str | None:
 def _validate_password(password: str, *, field_name: str):
     for ch in password:
         if ord(ch) < 33 or ord(ch) > 126:
-            raise _BadRequest(f'{field_name} must use printable 7-bit ASCII characters only')
+            raise _BadRequest(f'{field_name} must use printable 7-bit ASCII characters only (no spaces)')
         if ch in _FORBIDDEN_PASSWORD_CHARS:
-            raise _BadRequest(f"{field_name} cannot contain any of: ' \" ` \\")
+            raise _BadRequest(f"{field_name} cannot contain any of: space, ' \" ` \\")
+
+
+def _is_ice_down_error(exc: Exception) -> bool:
+    text = str(exc or '').strip().lower()
+    markers = (
+        'failed to connect to ice',
+        'no booted murmur servers',
+        'configured virtual server id',
+        'murmursyncerror',
+        'timed out',
+        'connection refused',
+    )
+    return any(marker in text for marker in markers)
 
 
 def _read_new_control_secret(payload: dict[str, Any]) -> str:
-    for field_name in ('new_control_psk', 'control_psk', 'shared_secret', 'new_psk'):
+    for field_name in (
+        'new_fgbg_psk',
+        'fgbg_psk',
+        'new_control_psk',
+        'control_psk',
+        'shared_secret',
+        'new_psk',
+    ):
         if field_name not in payload:
             continue
         value = payload.get(field_name)
@@ -325,7 +368,7 @@ def _read_new_control_secret(payload: dict[str, Any]) -> str:
         if len(normalized) < 16:
             raise _BadRequest(f'{field_name} must be at least 16 characters')
         return normalized
-    raise _BadRequest('new_control_psk is required')
+    raise _BadRequest('new_fgbg_psk is required')
 
 
 class _ServerResolver:
@@ -680,18 +723,20 @@ def password_reset(request):
         has_server = payload.get('server_name') or payload.get('server_id')
         if has_server:
             server = _SERVER_RESOLVER.resolve(payload)
-            mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
+            target_users = [_MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)]
         else:
             pkid = payload.get('pkid')
             if pkid is None:
                 raise _BadRequest('pkid is required')
             pkid_value = _coerce_int(pkid, field='pkid')
-            mumble_user = MumbleUser.objects.filter(
+            target_users = list(
+                MumbleUser.objects.filter(
                 user_id=pkid_value, is_active=True, server__is_active=True,
-            ).select_related('server').first()
-            if not mumble_user:
+                ).select_related('server').order_by('server__display_order', 'server__name', 'server_id')
+            )
+            if not target_users:
                 raise _NotFound('Mumble registration not found')
-            server = mumble_user.server
+            server = target_users[0].server
 
         desired_password = _read_preferred_password(payload)
         encrypted_password = payload.get('encrypted_password')
@@ -728,51 +773,67 @@ def password_reset(request):
 
     requested = desired_password is None
     password = desired_password if desired_password is not None else _new_password()
-
-    record = build_murmur_password_record(password)
-    mumble_user.pwhash = record['pwhash']
-    mumble_user.hashfn = record['hashfn']
-    mumble_user.pw_salt = record['pw_salt']
-    mumble_user.kdf_iterations = record['kdf_iterations']
-
     skip_ice = payload.get('skip_murmur_sync', False)
-    murmur_userid = None
-    ice_synced = False
+    failures: list[dict[str, Any]] = []
+    synced_servers: list[str] = []
+    first_murmur_userid: int | None = None
 
-    if not skip_ice:
-        try:
-            murmur_userid = sync_murmur_registration(mumble_user, password=password)
-            ice_synced = True
-        except MurmurSyncError as exc:
-            # Store the hash locally even if ICE sync fails
-            mumble_user.save(update_fields=['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations', 'updated_at'])
-            return _response(
-                request_id,
-                'partial',
-                message=f'Password hash stored but Murmur sync failed: {exc}',
-                user_id=mumble_user.user_id,
-                server_name=server.name,
-                password=password,
-                password_generated=requested,
-                ice_synced=False,
-                code=HTTPStatus.OK,
+    for mumble_user in target_users:
+        record = build_murmur_password_record(password)
+        mumble_user.pwhash = record['pwhash']
+        mumble_user.hashfn = record['hashfn']
+        mumble_user.pw_salt = record['pw_salt']
+        mumble_user.kdf_iterations = record['kdf_iterations']
+
+        murmur_userid = None
+        if not skip_ice:
+            try:
+                murmur_userid = sync_murmur_registration(mumble_user, password=password)
+                synced_servers.append(str(mumble_user.server.name))
+            except MurmurSyncError as exc:
+                failures.append(
+                    {
+                        'server_name': str(mumble_user.server.name),
+                        'error': str(exc),
+                        'ice_down': _is_ice_down_error(exc),
+                    }
+                )
+
+        if murmur_userid is not None:
+            mumble_user.mumble_userid = murmur_userid
+            if first_murmur_userid is None:
+                first_murmur_userid = int(murmur_userid)
+        mumble_user.save(update_fields=['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations', 'mumble_userid', 'updated_at'])
+
+    down_servers = [item['server_name'] for item in failures if bool(item.get('ice_down'))]
+    if failures and not skip_ice:
+        status = 'partial'
+        if down_servers:
+            message = (
+                'Password stored for BG data, but one or more ICE servers are down: '
+                + ', '.join(down_servers)
             )
-
-    if murmur_userid is not None:
-        mumble_user.mumble_userid = murmur_userid
-
-    mumble_user.save(update_fields=['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations', 'mumble_userid', 'updated_at'])
+        else:
+            message = 'Password stored for BG data, but one or more Murmur sync operations failed'
+    else:
+        status = 'completed'
+        message = 'Password set and registration synchronized' if not skip_ice else 'Password hash stored (Murmur sync skipped)'
 
     return _response(
         request_id,
-        'completed',
-        message='Password set and registration synchronized' if ice_synced else 'Password hash stored (Murmur sync skipped)',
-        user_id=mumble_user.user_id,
+        status,
+        message=message,
+        user_id=target_users[0].user_id,
         server_name=server.name,
-        murmur_userid=murmur_userid,
+        murmur_userid=first_murmur_userid,
         password=password,
         password_generated=requested,
-        ice_synced=ice_synced,
+        ice_synced=(not failures and not skip_ice) if not skip_ice else False,
+        synced_server_count=len(synced_servers),
+        server_count=len(target_users),
+        synced_servers=synced_servers,
+        ice_failures=failures,
+        ice_down_servers=down_servers,
     )
 
 
@@ -945,6 +1006,57 @@ def pilot(request, pkid: int):
 _VALID_ENTITY_TYPES = {ENTITY_TYPE_ALLIANCE, ENTITY_TYPE_CORPORATION, ENTITY_TYPE_PILOT}
 
 
+def _validate_eve_objects(objects: list[Any]) -> list[dict[str, Any]]:
+    if not isinstance(objects, list):
+        raise _BadRequest('objects must be a list')
+    validated = []
+    seen_ids = set()
+    for idx, item in enumerate(objects):
+        if not isinstance(item, dict):
+            raise _BadRequest(f'objects[{idx}] must be an object')
+        entity_id = item.get('entity_id')
+        if entity_id is None:
+            raise _BadRequest(f'objects[{idx}].entity_id is required')
+        entity_id = _coerce_int(entity_id, field=f'objects[{idx}].entity_id')
+        if entity_id in seen_ids:
+            raise _BadRequest(f'objects[{idx}].entity_id={entity_id} is duplicated')
+        seen_ids.add(entity_id)
+
+        entity_type = item.get('type', '')
+        if entity_type not in _VALID_ENTITY_TYPES:
+            raise _BadRequest(
+                f'objects[{idx}].type must be one of: {", ".join(sorted(_VALID_ENTITY_TYPES))}'
+            )
+        category = item.get('category', '')
+        if category not in VALID_CATEGORIES:
+            raise _BadRequest(
+                f'objects[{idx}].category must be one of: {", ".join(sorted(VALID_CATEGORIES))}'
+            )
+        expected_category = TYPE_TO_CATEGORY[str(entity_type)]
+        if str(category) != expected_category:
+            raise _BadRequest(
+                f'objects[{idx}] category/type mismatch: expected category={expected_category!r} for type={entity_type!r}'
+            )
+        if CATEGORY_TO_TYPE[str(category)] != str(entity_type):
+            raise _BadRequest(f'objects[{idx}] type/category mismatch')
+        name = item.get('name', '')
+        if not isinstance(name, str):
+            raise _BadRequest(f'objects[{idx}].name must be a string')
+        ticker = item.get('ticker', '')
+        if not isinstance(ticker, str):
+            raise _BadRequest(f'objects[{idx}].ticker must be a string')
+        validated.append(
+            {
+                'entity_id': entity_id,
+                'type': str(entity_type),
+                'category': str(category),
+                'name': str(name or ''),
+                'ticker': str(ticker or ''),
+            }
+        )
+    return validated
+
+
 def _validate_access_rules(rules: list[Any]) -> list[dict[str, Any]]:
     if not isinstance(rules, list):
         raise _BadRequest('rules must be a list')
@@ -968,10 +1080,18 @@ def _validate_access_rules(rules: list[Any]) -> list[dict[str, Any]]:
         deny = rule.get('deny', False)
         if not isinstance(deny, bool):
             raise _BadRequest(f'rules[{idx}].deny must be a boolean')
+        acl_admin = rule.get('acl_admin', False)
+        if not isinstance(acl_admin, bool):
+            raise _BadRequest(f'rules[{idx}].acl_admin must be a boolean')
+        if acl_admin and entity_type != ENTITY_TYPE_PILOT:
+            raise _BadRequest(f'rules[{idx}].acl_admin is allowed only for pilot rules')
+        if acl_admin and deny:
+            raise _BadRequest(f'rules[{idx}].acl_admin cannot be true when deny is true')
         validated.append({
             'entity_id': entity_id,
             'entity_type': entity_type,
             'deny': deny,
+            'acl_admin': acl_admin,
             'note': str(rule.get('note', '') or '').strip(),
             'created_by': str(rule.get('created_by', '') or '').strip(),
         })
@@ -1019,6 +1139,7 @@ def access_rules_sync(request):
             defaults={
                 'entity_type': rule['entity_type'],
                 'deny': rule['deny'],
+                'acl_admin': rule['acl_admin'],
                 'note': rule['note'],
                 'created_by': rule['created_by'],
                 'synced_at': synced_at,
@@ -1052,12 +1173,44 @@ def access_rules_sync(request):
     )
 
 
+@csrf_exempt
+@require_http_methods(['POST'])
+def pilot_snapshot_sync(request):
+    """Receive the full FG-owned pilot snapshot and replace BG's cached copy."""
+    try:
+        auth_source = _require_control_auth(request)
+        payload, request_id, requested_by, is_super = _sync_context(request)
+        _require_requested_by(requested_by)
+        _require_super(is_super)
+        snapshot = _read_pilot_snapshot(payload)
+        del auth_source
+    except _BadRequest as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
+    except _Unauthorized as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _Forbidden as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
+
+    result = store_pilot_snapshot(snapshot, request_id=request_id, requested_by=requested_by)
+    return _response(
+        request_id,
+        'completed',
+        message='Pilot snapshot synchronized',
+        changed=bool(result['changed']),
+        account_count=int(result['account_count']),
+        character_count=int(result['character_count']),
+        pilot_hashes=result['pilot_hashes'],
+        summary_before=result['summary_before'],
+        summary_after=result['summary_after'],
+    )
+
+
 @require_http_methods(['GET'])
 def access_rules(request):
     """Return the current access rule set."""
     rows = list(
         AccessRule.objects.values(
-            'entity_id', 'entity_type', 'deny', 'note', 'created_by', 'synced_at', 'updated_at',
+            'entity_id', 'entity_type', 'deny', 'acl_admin', 'note', 'created_by', 'synced_at', 'updated_at',
         ).order_by('entity_type', 'entity_id')
     )
     for row in rows:
@@ -1075,8 +1228,120 @@ def access_rules(request):
 
 @csrf_exempt
 @require_http_methods(['POST'])
+def eve_objects_sync(request):
+    """Upsert immutable EVE object dictionary rows from FG."""
+    try:
+        auth_source = _require_control_auth(request)
+        payload, request_id, requested_by, is_super = _sync_context(request)
+        _require_requested_by(requested_by)
+        _require_super(is_super)
+        objects = payload.get('objects')
+        if objects is None:
+            raise _BadRequest('objects is required')
+        validated = _validate_eve_objects(objects)
+        del auth_source
+    except _BadRequest as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
+    except _Unauthorized as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _Forbidden as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
+
+    synced_at = now()
+    created_count = 0
+    unchanged_count = 0
+    conflict_count = 0
+    conflicts: list[dict[str, Any]] = []
+    by_id = {
+        int(row.entity_id): row
+        for row in EveObject.objects.filter(entity_id__in=[item['entity_id'] for item in validated])
+    }
+    for item in validated:
+        existing = by_id.get(item['entity_id'])
+        if existing is None:
+            EveObject.objects.create(
+                entity_id=item['entity_id'],
+                type=item['type'],
+                category=item['category'],
+                name=item['name'],
+                ticker=item['ticker'],
+                synced_at=synced_at,
+            )
+            created_count += 1
+            continue
+
+        if (
+            existing.type != item['type']
+            or existing.category != item['category']
+            or str(existing.name or '') != item['name']
+            or str(existing.ticker or '') != item['ticker']
+        ):
+            conflict_count += 1
+            conflicts.append(
+                {
+                    'entity_id': item['entity_id'],
+                    'stored_type': existing.type,
+                    'incoming_type': item['type'],
+                    'stored_category': existing.category,
+                    'incoming_category': item['category'],
+                    'stored_name': str(existing.name or ''),
+                    'incoming_name': item['name'],
+                    'stored_ticker': str(existing.ticker or ''),
+                    'incoming_ticker': item['ticker'],
+                }
+            )
+            existing.synced_at = synced_at
+            existing.save(update_fields=['synced_at', 'updated_at'])
+            continue
+
+        existing.synced_at = synced_at
+        existing.save(update_fields=['synced_at', 'updated_at'])
+        unchanged_count += 1
+
+    return _response(
+        request_id,
+        'completed',
+        message='EVE object dictionary synchronized',
+        total=len(validated),
+        created=created_count,
+        unchanged=unchanged_count,
+        conflicts=conflict_count,
+        conflict_rows=conflicts,
+    )
+
+
+@require_http_methods(['GET'])
+def eve_objects(request):
+    rows = list(
+        EveObject.objects.values(
+            'entity_id',
+            'type',
+            'category',
+            'name',
+            'ticker',
+            'synced_at',
+            'updated_at',
+        ).order_by('type', 'entity_id')
+    )
+    for row in rows:
+        if row['synced_at']:
+            row['synced_at'] = row['synced_at'].isoformat()
+        if row['updated_at']:
+            row['updated_at'] = row['updated_at'].isoformat()
+    return JsonResponse(
+        {
+            'status': 'completed',
+            'request_id': now().strftime('%Y%m%dT%H%M%SZ'),
+            'objects': rows,
+            'object_count': len(rows),
+        }
+    )
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
 def provision(request):
-    """Evaluate eligibility and provision MumbleUser rows."""
+    """Evaluate eligibility from BG's cached pilot snapshot and provision MumbleUser rows."""
     try:
         auth_source = _require_control_auth(request)
         payload, request_id, requested_by, is_super = _sync_context(request)
@@ -1084,53 +1349,48 @@ def provision(request):
         dry_run = _coerce_bool(payload.get('dry_run', False), field='dry_run')
         reconcile = _coerce_bool(payload.get('reconcile', False), field='reconcile')
         server_id = payload.get('server_id')
+        server = None
         if server_id is not None:
             server_id = _coerce_int(server_id, field='server_id')
+            server = MumbleServer.objects.filter(pk=server_id, is_active=True).first()
+            if server is None:
+                raise _NotFound('Server not found')
         del auth_source
     except _BadRequest as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
     except _Unauthorized as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _NotFound as exc:
+        return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
 
-    from bg.authd.service import get_pilot_db_connection
-    from bg.db import PilotDBError
     from bg.provisioner import provision_registrations
 
     try:
-        conn = get_pilot_db_connection()
-    except PilotDBError as exc:
-        return _response(
-            request_id, 'failed',
-            message=f'Cannot connect to pilot source: {exc}',
-            code=HTTPStatus.BAD_GATEWAY,
-        )
-
-    try:
-        result = provision_registrations(conn, dry_run=dry_run)
+        result = provision_registrations(server=server, dry_run=dry_run)
     except Exception as exc:
         return _response(
             request_id, 'failed',
             message=f'Provisioning failed: {exc}',
             code=HTTPStatus.INTERNAL_SERVER_ERROR,
         )
-    finally:
-        conn.close()
 
     reconcile_results: list[dict[str, object]] = []
+    reconcile_status = 'skipped'
+    reconcile_message = 'Reconciliation not requested'
     if reconcile:
         from bg.pulse.reconciler import MurmurRegistrationReconciler, MurmurReconcileError
 
+        reconcile_status = 'completed'
+        reconcile_message = 'Reconciliation complete'
         try:
             reconciler = MurmurRegistrationReconciler(server_id=server_id)
             murmur_results = reconciler.reconcile(dry_run=dry_run)
             reconcile_results = [item.to_dict() for item in murmur_results]
         except MurmurReconcileError as exc:
-            return _response(
-                request_id,
-                'failed',
-                message=f'Reconciliation failed: {exc}',
-                code=HTTPStatus.BAD_GATEWAY,
-            )
+            # Degrade gracefully when ICE is not configured/reachable.
+            # BG control/provision remains available so FG can continue syncing ACL + pilot state.
+            reconcile_status = 'degraded'
+            reconcile_message = f'Reconciliation unavailable: {exc}'
         except Exception as exc:
             return _response(
                 request_id,
@@ -1144,6 +1404,8 @@ def provision(request):
         message='Provisioning complete',
         dry_run=dry_run,
         reconcile=reconcile,
+        reconcile_status=reconcile_status,
+        reconcile_message=reconcile_message,
         server_id=server_id,
         murmur_reconcile=reconcile_results,
         **result.to_dict(),
