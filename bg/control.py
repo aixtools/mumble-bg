@@ -1344,20 +1344,22 @@ def provision(request):
         )
 
     reconcile_results: list[dict[str, object]] = []
+    reconcile_status = 'skipped'
+    reconcile_message = 'Reconciliation not requested'
     if reconcile:
         from bg.pulse.reconciler import MurmurRegistrationReconciler, MurmurReconcileError
 
+        reconcile_status = 'completed'
+        reconcile_message = 'Reconciliation complete'
         try:
             reconciler = MurmurRegistrationReconciler(server_id=server_id)
             murmur_results = reconciler.reconcile(dry_run=dry_run)
             reconcile_results = [item.to_dict() for item in murmur_results]
         except MurmurReconcileError as exc:
-            return _response(
-                request_id,
-                'failed',
-                message=f'Reconciliation failed: {exc}',
-                code=HTTPStatus.BAD_GATEWAY,
-            )
+            # Degrade gracefully when ICE is not configured/reachable.
+            # BG control/provision remains available so FG can continue syncing ACL + pilot state.
+            reconcile_status = 'degraded'
+            reconcile_message = f'Reconciliation unavailable: {exc}'
         except Exception as exc:
             return _response(
                 request_id,
@@ -1371,6 +1373,8 @@ def provision(request):
         message='Provisioning complete',
         dry_run=dry_run,
         reconcile=reconcile,
+        reconcile_status=reconcile_status,
+        reconcile_message=reconcile_message,
         server_id=server_id,
         murmur_reconcile=reconcile_results,
         **result.to_dict(),

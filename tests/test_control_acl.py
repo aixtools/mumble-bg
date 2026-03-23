@@ -657,6 +657,31 @@ class ProvisionEndpointTest(TestCase):
         reconciler_ctor.assert_called_once_with(server_id=7)
         reconciler_instance.reconcile.assert_called_once_with(dry_run=True)
 
+    def test_provision_with_reconcile_degrades_when_no_ice_inventory(self):
+        from bg.pulse.reconciler import MurmurReconcileError
+
+        reconciler_instance = Mock()
+        reconciler_instance.reconcile.side_effect = MurmurReconcileError(
+            'No active MumbleServer rows matched for reconciliation'
+        )
+
+        with patch('bg.provisioner.provision_registrations', return_value=ProvisionResult()) as provision_rows:
+            with patch(
+                'bg.pulse.reconciler.MurmurRegistrationReconciler',
+                return_value=reconciler_instance,
+            ) as reconciler_ctor:
+                resp = _post_provision(self.client, {'dry_run': True, 'reconcile': True})
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data['reconcile'])
+        self.assertEqual(data['reconcile_status'], 'degraded')
+        self.assertIn('Reconciliation unavailable:', data['reconcile_message'])
+        self.assertEqual(data['murmur_reconcile'], [])
+        provision_rows.assert_called_once_with(server=None, dry_run=True)
+        reconciler_ctor.assert_called_once_with(server_id=None)
+        reconciler_instance.reconcile.assert_called_once_with(dry_run=True)
+
     def test_provision_rejects_invalid_reconcile_value(self):
         resp = _post_provision(self.client, {'reconcile': 'yes'})
         self.assertEqual(resp.status_code, 400)
