@@ -337,6 +337,19 @@ def _validate_password(password: str, *, field_name: str):
             raise _BadRequest(f"{field_name} cannot contain any of: space, ' \" ` \\")
 
 
+def _is_ice_down_error(exc: Exception) -> bool:
+    text = str(exc or '').strip().lower()
+    markers = (
+        'failed to connect to ice',
+        'no booted murmur servers',
+        'configured virtual server id',
+        'murmursyncerror',
+        'timed out',
+        'connection refused',
+    )
+    return any(marker in text for marker in markers)
+
+
 def _read_new_control_secret(payload: dict[str, Any]) -> str:
     for field_name in (
         'new_fgbg_psk',
@@ -710,18 +723,20 @@ def password_reset(request):
         has_server = payload.get('server_name') or payload.get('server_id')
         if has_server:
             server = _SERVER_RESOLVER.resolve(payload)
-            mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
+            target_users = [_MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)]
         else:
             pkid = payload.get('pkid')
             if pkid is None:
                 raise _BadRequest('pkid is required')
             pkid_value = _coerce_int(pkid, field='pkid')
-            mumble_user = MumbleUser.objects.filter(
+            target_users = list(
+                MumbleUser.objects.filter(
                 user_id=pkid_value, is_active=True, server__is_active=True,
-            ).select_related('server').first()
-            if not mumble_user:
+                ).select_related('server').order_by('server__display_order', 'server__name', 'server_id')
+            )
+            if not target_users:
                 raise _NotFound('Mumble registration not found')
-            server = mumble_user.server
+            server = target_users[0].server
 
         desired_password = _read_preferred_password(payload)
         encrypted_password = payload.get('encrypted_password')
@@ -758,51 +773,67 @@ def password_reset(request):
 
     requested = desired_password is None
     password = desired_password if desired_password is not None else _new_password()
-
-    record = build_murmur_password_record(password)
-    mumble_user.pwhash = record['pwhash']
-    mumble_user.hashfn = record['hashfn']
-    mumble_user.pw_salt = record['pw_salt']
-    mumble_user.kdf_iterations = record['kdf_iterations']
-
     skip_ice = payload.get('skip_murmur_sync', False)
-    murmur_userid = None
-    ice_synced = False
+    failures: list[dict[str, Any]] = []
+    synced_servers: list[str] = []
+    first_murmur_userid: int | None = None
 
-    if not skip_ice:
-        try:
-            murmur_userid = sync_murmur_registration(mumble_user, password=password)
-            ice_synced = True
-        except MurmurSyncError as exc:
-            # Store the hash locally even if ICE sync fails
-            mumble_user.save(update_fields=['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations', 'updated_at'])
-            return _response(
-                request_id,
-                'partial',
-                message=f'Password hash stored but Murmur sync failed: {exc}',
-                user_id=mumble_user.user_id,
-                server_name=server.name,
-                password=password,
-                password_generated=requested,
-                ice_synced=False,
-                code=HTTPStatus.OK,
+    for mumble_user in target_users:
+        record = build_murmur_password_record(password)
+        mumble_user.pwhash = record['pwhash']
+        mumble_user.hashfn = record['hashfn']
+        mumble_user.pw_salt = record['pw_salt']
+        mumble_user.kdf_iterations = record['kdf_iterations']
+
+        murmur_userid = None
+        if not skip_ice:
+            try:
+                murmur_userid = sync_murmur_registration(mumble_user, password=password)
+                synced_servers.append(str(mumble_user.server.name))
+            except MurmurSyncError as exc:
+                failures.append(
+                    {
+                        'server_name': str(mumble_user.server.name),
+                        'error': str(exc),
+                        'ice_down': _is_ice_down_error(exc),
+                    }
+                )
+
+        if murmur_userid is not None:
+            mumble_user.mumble_userid = murmur_userid
+            if first_murmur_userid is None:
+                first_murmur_userid = int(murmur_userid)
+        mumble_user.save(update_fields=['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations', 'mumble_userid', 'updated_at'])
+
+    down_servers = [item['server_name'] for item in failures if bool(item.get('ice_down'))]
+    if failures and not skip_ice:
+        status = 'partial'
+        if down_servers:
+            message = (
+                'Password stored for BG data, but one or more ICE servers are down: '
+                + ', '.join(down_servers)
             )
-
-    if murmur_userid is not None:
-        mumble_user.mumble_userid = murmur_userid
-
-    mumble_user.save(update_fields=['pwhash', 'hashfn', 'pw_salt', 'kdf_iterations', 'mumble_userid', 'updated_at'])
+        else:
+            message = 'Password stored for BG data, but one or more Murmur sync operations failed'
+    else:
+        status = 'completed'
+        message = 'Password set and registration synchronized' if not skip_ice else 'Password hash stored (Murmur sync skipped)'
 
     return _response(
         request_id,
-        'completed',
-        message='Password set and registration synchronized' if ice_synced else 'Password hash stored (Murmur sync skipped)',
-        user_id=mumble_user.user_id,
+        status,
+        message=message,
+        user_id=target_users[0].user_id,
         server_name=server.name,
-        murmur_userid=murmur_userid,
+        murmur_userid=first_murmur_userid,
         password=password,
         password_generated=requested,
-        ice_synced=ice_synced,
+        ice_synced=(not failures and not skip_ice) if not skip_ice else False,
+        synced_server_count=len(synced_servers),
+        server_count=len(target_users),
+        synced_servers=synced_servers,
+        ice_failures=failures,
+        ice_down_servers=down_servers,
     )
 
 
