@@ -105,8 +105,11 @@ def provision_registrations(
     result = ProvisionResult(errors=[])
 
     if server is None:
-        server = MumbleServer.objects.filter(is_active=True).order_by('display_order', 'name').first()
-    if server is None:
+        servers = list(MumbleServer.objects.filter(is_active=True).order_by('display_order', 'name'))
+    else:
+        servers = [server]
+
+    if not servers:
         result.errors.append('No active MumbleServer found')
         return result
 
@@ -127,103 +130,116 @@ def provision_registrations(
 
     accounts_by_pkid = {int(account.pkid): account for account in snapshot.accounts}
 
+    server_ids = [int(item.id) for item in servers]
     existing = {
-        mu.user_id: mu
-        for mu in MumbleUser.objects.filter(server=server).select_related('user')
+        (int(mu.server_id), int(mu.user_id)): mu
+        for mu in MumbleUser.objects.filter(server_id__in=server_ids).select_related('user', 'server')
     }
 
-    for user_id in sorted(eligible_user_ids):
-        account = accounts_by_pkid.get(user_id)
-        if account is None:
-            continue
-        main = account.main_character
-        existing_row = existing.get(user_id)
-        username = _resolved_username_for_account(account, user_id=user_id, existing=existing_row)
-        display_name = account.display_name or username
-        target_is_admin = user_id in admin_user_ids
+    auth_user_cache: dict[int, User] = {}
 
-        if user_id in existing:
-            mu = existing[user_id]
-            update_fields = []
-            if mu.username != username:
-                mu.username = username
-                update_fields.append('username')
-            if mu.display_name != display_name:
-                mu.display_name = display_name
-                update_fields.append('display_name')
-            if mu.evepilot_id != main.character_id:
-                mu.evepilot_id = main.character_id
-                update_fields.append('evepilot_id')
-            if mu.corporation_id != main.corporation_id:
-                mu.corporation_id = main.corporation_id
-                update_fields.append('corporation_id')
-            if mu.alliance_id != main.alliance_id:
-                mu.alliance_id = main.alliance_id
-                update_fields.append('alliance_id')
-            if mu.is_mumble_admin != target_is_admin:
-                mu.is_mumble_admin = target_is_admin
-                update_fields.append('is_mumble_admin')
-            if not mu.is_active:
-                if not dry_run:
-                    mu.is_active = True
-                    update_fields.append('is_active')
-                    if mu.user.username != username:
-                        mu.user.username = username
-                        mu.user.save(update_fields=['username'])
-                    mu.save(update_fields=update_fields + ['updated_at'])
-                result.activated += 1
-                logger.info('Activated %s (pkid=%d)', username, user_id)
-            else:
-                if update_fields and not dry_run:
-                    if mu.user.username != username:
-                        mu.user.username = username
-                        mu.user.save(update_fields=['username'])
-                    mu.save(update_fields=update_fields + ['updated_at'])
-                result.unchanged += 1
-            continue
+    for target_server in servers:
+        server_id = int(target_server.id)
 
-        if not dry_run:
-            auth_user, _ = User.objects.get_or_create(
-                pk=user_id,
-                defaults={'username': username},
-            )
-            if auth_user.username != username:
-                auth_user.username = username
-                auth_user.save(update_fields=['username'])
-            password = _new_password()
-            password_record = build_murmur_password_record(password)
-            MumbleUser.objects.create(
-                user=auth_user,
-                server=server,
-                evepilot_id=main.character_id,
-                corporation_id=main.corporation_id,
-                alliance_id=main.alliance_id,
-                username=username,
-                display_name=display_name,
-                pwhash=password_record['pwhash'],
-                hashfn=password_record['hashfn'],
-                pw_salt=password_record['pw_salt'],
-                kdf_iterations=password_record['kdf_iterations'],
-                is_mumble_admin=target_is_admin,
-                is_active=True,
-            )
-        result.created += 1
-        logger.info('Created %s (pkid=%d)', username, user_id)
+        for user_id in sorted(eligible_user_ids):
+            account = accounts_by_pkid.get(user_id)
+            if account is None:
+                continue
+            main = account.main_character
+            existing_row = existing.get((server_id, user_id))
+            username = _resolved_username_for_account(account, user_id=user_id, existing=existing_row)
+            display_name = account.display_name or username
+            target_is_admin = user_id in admin_user_ids
 
-    for user_id in sorted(blocked_user_ids):
-        if user_id in existing and (existing[user_id].is_active or existing[user_id].is_mumble_admin):
-            mu = existing[user_id]
+            if existing_row is not None:
+                mu = existing_row
+                update_fields = []
+                if mu.username != username:
+                    mu.username = username
+                    update_fields.append('username')
+                if mu.display_name != display_name:
+                    mu.display_name = display_name
+                    update_fields.append('display_name')
+                if mu.evepilot_id != main.character_id:
+                    mu.evepilot_id = main.character_id
+                    update_fields.append('evepilot_id')
+                if mu.corporation_id != main.corporation_id:
+                    mu.corporation_id = main.corporation_id
+                    update_fields.append('corporation_id')
+                if mu.alliance_id != main.alliance_id:
+                    mu.alliance_id = main.alliance_id
+                    update_fields.append('alliance_id')
+                if mu.is_mumble_admin != target_is_admin:
+                    mu.is_mumble_admin = target_is_admin
+                    update_fields.append('is_mumble_admin')
+                if not mu.is_active:
+                    if not dry_run:
+                        mu.is_active = True
+                        update_fields.append('is_active')
+                        if mu.user.username != username:
+                            mu.user.username = username
+                            mu.user.save(update_fields=['username'])
+                        mu.save(update_fields=update_fields + ['updated_at'])
+                    result.activated += 1
+                    logger.info('Activated %s on %s (pkid=%d)', username, target_server.name, user_id)
+                else:
+                    if update_fields and not dry_run:
+                        if mu.user.username != username:
+                            mu.user.username = username
+                            mu.user.save(update_fields=['username'])
+                        mu.save(update_fields=update_fields + ['updated_at'])
+                    result.unchanged += 1
+                continue
+
+            if not dry_run:
+                auth_user = auth_user_cache.get(user_id)
+                if auth_user is None:
+                    auth_user, _ = User.objects.get_or_create(
+                        pk=user_id,
+                        defaults={'username': username},
+                    )
+                    auth_user_cache[user_id] = auth_user
+                if auth_user.username != username:
+                    auth_user.username = username
+                    auth_user.save(update_fields=['username'])
+                password = _new_password()
+                password_record = build_murmur_password_record(password)
+                created_row = MumbleUser.objects.create(
+                    user=auth_user,
+                    server=target_server,
+                    evepilot_id=main.character_id,
+                    corporation_id=main.corporation_id,
+                    alliance_id=main.alliance_id,
+                    username=username,
+                    display_name=display_name,
+                    pwhash=password_record['pwhash'],
+                    hashfn=password_record['hashfn'],
+                    pw_salt=password_record['pw_salt'],
+                    kdf_iterations=password_record['kdf_iterations'],
+                    is_mumble_admin=target_is_admin,
+                    is_active=True,
+                )
+                existing[(server_id, user_id)] = created_row
+            result.created += 1
+            logger.info('Created %s on %s (pkid=%d)', username, target_server.name, user_id)
+
+        for user_id in sorted(blocked_user_ids):
+            existing_row = existing.get((server_id, user_id))
+            if existing_row is None:
+                continue
+            if not (existing_row.is_active or existing_row.is_mumble_admin):
+                continue
             if not dry_run:
                 update_fields = []
-                if mu.is_active:
-                    mu.is_active = False
+                if existing_row.is_active:
+                    existing_row.is_active = False
                     update_fields.append('is_active')
-                if mu.is_mumble_admin:
-                    mu.is_mumble_admin = False
+                if existing_row.is_mumble_admin:
+                    existing_row.is_mumble_admin = False
                     update_fields.append('is_mumble_admin')
                 if update_fields:
-                    mu.save(update_fields=update_fields + ['updated_at'])
+                    existing_row.save(update_fields=update_fields + ['updated_at'])
             result.deactivated += 1
-            logger.info('Deactivated %s (pkid=%d)', mu.username, user_id)
+            logger.info('Deactivated %s on %s (pkid=%d)', existing_row.username, target_server.name, user_id)
 
     return result

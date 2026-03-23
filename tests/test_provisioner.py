@@ -76,6 +76,34 @@ class ProvisionerSnapshotTest(TestCase):
         self.assertEqual(mumble_user.evepilot_id, 9001)
         self.assertEqual(mumble_user.alliance_id, 9901)
 
+    def test_provision_creates_registration_for_each_active_server(self):
+        secondary = MumbleServer.objects.create(
+            name='Secondary',
+            address='voice2.example.com:64738',
+            ice_host='127.0.0.1',
+            ice_port=6503,
+            is_active=True,
+        )
+        AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
+        self._seed_snapshot(
+            pkid=42,
+            character_id=9001,
+            character_name='Pilot One',
+            account_username='pilot_login',
+            alliance_id=9901,
+            alliance_name='Alliance One',
+            corporation_id=8801,
+            corporation_name='Corp One',
+        )
+
+        result = provision_registrations(dry_run=False)
+
+        self.assertEqual(result.created, 2)
+        rows = list(MumbleUser.objects.filter(user_id=42).order_by('server_id'))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({rows[0].server_id, rows[1].server_id}, {self.server.id, secondary.id})
+        self.assertTrue(all(row.is_active for row in rows))
+
     def test_provision_deactivates_blocked_registration_from_snapshot(self):
         AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
         AccessRule.objects.create(entity_id=8801, entity_type='corporation', deny=True)

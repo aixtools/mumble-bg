@@ -38,6 +38,7 @@ class MurmurReconcilePlan:
 
     server: MumbleServer
     actions: tuple[MurmurDesiredAction, ...]
+    errors: tuple[str, ...] = ()
 
     @property
     def is_empty(self) -> bool:
@@ -276,8 +277,21 @@ class MurmurRegistrationReconciler:
                 if _normalize_username(row.username)
             }
 
-            with _MurmurServerAdapter(server) as adapter:
-                live_names = {_normalize_username(name) for name in adapter.list_registered_usernames()}
+            plan_errors: tuple[str, ...] = ()
+            try:
+                with _MurmurServerAdapter(server) as adapter:
+                    live_names = {_normalize_username(name) for name in adapter.list_registered_usernames()}
+            except Exception as exc:
+                message = f"plan {server.name}: {exc}"
+                logger.exception("Failed to build reconcile plan for server_row=%s (%s)", server.id, server.name)
+                plans.append(
+                    MurmurReconcilePlan(
+                        server=server,
+                        actions=tuple(),
+                        errors=(message,),
+                    )
+                )
+                continue
 
             create_actions: list[MurmurDesiredAction] = []
             for normalized_name, row in desired_by_name.items():
@@ -316,6 +330,7 @@ class MurmurRegistrationReconciler:
                             key=lambda action: action.username.lower(),
                         )
                     ),
+                    errors=plan_errors,
                 )
             )
 
@@ -333,8 +348,8 @@ class MurmurRegistrationReconciler:
         for plan in plans:
             created_count = 0
             deleted_count = 0
-            failed_count = 0
-            errors: list[str] = []
+            failed_count = len(plan.errors)
+            errors: list[str] = list(plan.errors)
 
             if plan.is_empty:
                 results.append(
@@ -345,8 +360,9 @@ class MurmurRegistrationReconciler:
                         planned_delete_count=0,
                         created_count=0,
                         deleted_count=0,
-                        failed_count=0,
+                        failed_count=failed_count,
                         dry_run=dry_run,
+                        errors=tuple(errors),
                     )
                 )
                 continue
