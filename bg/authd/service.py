@@ -74,13 +74,51 @@ AUTH_QUERY = """
         mu.groups,
         mu.display_name
     FROM mumble_user mu
-    WHERE LOWER(mu.username) = LOWER(%s) AND mu.is_active = true AND mu.server_id = %s
+    WHERE (
+        LOWER(mu.username) = LOWER(%s)
+        OR LOWER(mu.display_name) = LOWER(%s)
+    )
+      AND mu.is_active = true
+      AND mu.server_id = %s
 """
 
 NAME_TO_ID_QUERY = """
     SELECT COALESCE(mu.mumble_userid, mu.id)
     FROM mumble_user mu
-    WHERE LOWER(mu.username) = LOWER(%s)
+    WHERE (
+        LOWER(mu.username) = LOWER(%s)
+        OR LOWER(mu.display_name) = LOWER(%s)
+    )
+      AND mu.is_active = true
+      AND mu.server_id = %s
+"""
+
+LEGACY_AUTH_QUERY = """
+    SELECT
+        mu.id,
+        mu.user_id,
+        mu.mumble_userid,
+        mu.pwhash,
+        mu.hashfn,
+        mu.pw_salt,
+        mu.kdf_iterations,
+        mu.certhash,
+        mu.groups,
+        mu.display_name
+    FROM mumble_user mu
+    JOIN bg_pilot_account pa
+      ON pa.pkid = mu.user_id
+    WHERE LOWER(pa.account_username) = LOWER(%s)
+      AND mu.is_active = true
+      AND mu.server_id = %s
+"""
+
+LEGACY_NAME_TO_ID_QUERY = """
+    SELECT COALESCE(mu.mumble_userid, mu.id)
+    FROM mumble_user mu
+    JOIN bg_pilot_account pa
+      ON pa.pkid = mu.user_id
+    WHERE LOWER(pa.account_username) = LOWER(%s)
       AND mu.is_active = true
       AND mu.server_id = %s
 """
@@ -256,8 +294,11 @@ def authenticate(username, password, server_id, certhash=''):
         conn = get_db_connection()
         try:
             with _cursor(conn) as cur:
-                _execute(cur, conn, AUTH_QUERY, (username, server_id))
+                _execute(cur, conn, AUTH_QUERY, (username, username, server_id))
                 row = cur.fetchone()
+                if row is None:
+                    _execute(cur, conn, LEGACY_AUTH_QUERY, (username, server_id))
+                    row = cur.fetchone()
         finally:
             conn.close()
     except Exception:
@@ -313,8 +354,11 @@ def name_to_id(name, server_id):
         conn = get_db_connection()
         try:
             with _cursor(conn) as cur:
-                _execute(cur, conn, NAME_TO_ID_QUERY, (name, server_id))
+                _execute(cur, conn, NAME_TO_ID_QUERY, (name, name, server_id))
                 row = cur.fetchone()
+                if row is None:
+                    _execute(cur, conn, LEGACY_NAME_TO_ID_QUERY, (name, server_id))
+                    row = cur.fetchone()
         finally:
             conn.close()
     except Exception:

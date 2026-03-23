@@ -39,7 +39,7 @@ class ProvisionerSnapshotTest(TestCase):
         account = PilotAccountCache.objects.create(
             pkid=pkid,
             account_username=account_username,
-            display_name='[ALLY CORP] Pilot One' if display_name is None and pkid == 42 else str(display_name or ''),
+            display_name=f'[ALLY CORP] {character_name}' if display_name is None and pkid == 42 else str(display_name or ''),
             main_character_id=character_id,
             main_character_name=character_name,
         )
@@ -73,12 +73,12 @@ class ProvisionerSnapshotTest(TestCase):
         self.assertEqual(result.created, 1)
         mumble_user = MumbleUser.objects.get(user_id=42, server=self.server)
         self.assertTrue(mumble_user.is_active)
-        self.assertEqual(mumble_user.username, 'pilot_login')
+        self.assertEqual(mumble_user.username, '[ALLY CORP] Pilot One')
         self.assertEqual(mumble_user.display_name, '[ALLY CORP] Pilot One')
         self.assertEqual(mumble_user.evepilot_id, 9001)
         self.assertEqual(mumble_user.alliance_id, 9901)
 
-    def test_provision_normalizes_username_to_login_style(self):
+    def test_provision_uses_display_name_as_username(self):
         AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
         self._seed_snapshot(
             pkid=42,
@@ -95,10 +95,10 @@ class ProvisionerSnapshotTest(TestCase):
 
         self.assertEqual(result.created, 1)
         mumble_user = MumbleUser.objects.get(user_id=42, server=self.server)
-        self.assertEqual(mumble_user.username, 'leorises')
-        self.assertEqual(User.objects.get(pk=42).username, 'leorises')
+        self.assertEqual(mumble_user.username, '[ALLY CORP] Leo Rises')
+        self.assertEqual(User.objects.get(pk=42).username, '[ALLY CORP] Leo Rises')
 
-    def test_provision_does_not_fallback_to_character_name_for_username(self):
+    def test_provision_uses_cached_display_name_when_account_username_is_empty(self):
         AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
         self._seed_snapshot(
             pkid=42,
@@ -115,8 +115,8 @@ class ProvisionerSnapshotTest(TestCase):
 
         self.assertEqual(result.created, 1)
         mumble_user = MumbleUser.objects.get(user_id=42, server=self.server)
-        self.assertEqual(mumble_user.username, 'pkid_42')
-        self.assertEqual(User.objects.get(pk=42).username, 'pkid_42')
+        self.assertEqual(mumble_user.username, '[ALLY CORP] Zosma Rises')
+        self.assertEqual(User.objects.get(pk=42).username, '[ALLY CORP] Zosma Rises')
 
     def test_provision_creates_registration_for_each_active_server(self):
         secondary = MumbleServer.objects.create(
@@ -217,8 +217,8 @@ class ProvisionerSnapshotTest(TestCase):
         self.assertEqual(result.unchanged, 1)
         updated = MumbleUser.objects.get(user_id=42, server=self.server)
         self.assertEqual(updated.display_name, '[ALLY CORP] Pilot One')
-        self.assertEqual(updated.username, 'pilot_login')
-        self.assertEqual(User.objects.get(pk=42).username, 'pilot_login')
+        self.assertEqual(updated.username, '[ALLY CORP] Pilot One')
+        self.assertEqual(User.objects.get(pk=42).username, '[ALLY CORP] Pilot One')
 
     def test_provision_sets_admin_from_pilot_acl_admin(self):
         AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
@@ -309,6 +309,26 @@ class ProvisionerSnapshotTest(TestCase):
         mumble_user = MumbleUser.objects.get(user_id=42, server=self.server)
         self.assertEqual(mumble_user.display_name, '[ALLY CORP] Pilot One')
         self.assertEqual(PilotAccountCache.objects.get(pkid=42).display_name, '[ALLY CORP] Pilot One')
+
+    def test_provision_skips_new_registration_when_tickers_are_unresolved(self):
+        AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
+        self._seed_snapshot(
+            pkid=42,
+            character_id=9001,
+            character_name='Pilot One',
+            account_username='pilot_login',
+            alliance_id=9901,
+            alliance_name='Alliance One',
+            corporation_id=8801,
+            corporation_name='Corp One',
+            display_name='[???? ????] Pilot One',
+        )
+
+        result = provision_registrations(dry_run=False)
+
+        self.assertEqual(result.created, 0)
+        self.assertTrue(any('cannot resolve ticker' in message for message in (result.errors or [])))
+        self.assertFalse(MumbleUser.objects.filter(user_id=42, server=self.server).exists())
 
     def test_provision_clears_admin_when_corp_or_alliance_is_denied(self):
         AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)

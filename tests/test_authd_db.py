@@ -172,3 +172,94 @@ def test_wait_for_server_configs_sleeps_until_data_exists(monkeypatch):
     assert servers == [(1, "127.0.0.1", 6502, "secret", 1)]
     assert len(calls) == 2
     assert sleep_calls == [7]
+
+
+def test_authenticate_falls_back_to_legacy_account_username_lookup(monkeypatch):
+    class _FallbackCursor:
+        def __init__(self):
+            self.executed = []
+            self.calls = 0
+
+        def execute(self, query, params=()):
+            self.executed.append((query, params))
+            self.calls += 1
+
+        def fetchone(self):
+            if self.calls == 1:
+                return None
+            return (
+                11,            # mu.id
+                42,            # mu.user_id
+                99,            # mumble_userid
+                "hash",        # pwhash
+                "algo",        # hashfn
+                "",            # pw_salt
+                16000,         # kdf_iterations
+                "cert-abc",    # certhash
+                "admin",       # groups
+                "[ALLY CORP] Pilot One",  # display_name
+            )
+
+        def close(self):
+            return None
+
+    class _FallbackConn:
+        def __init__(self):
+            self.cursor_obj = _FallbackCursor()
+            self.closed = False
+
+        def cursor(self):
+            return self.cursor_obj
+
+        def close(self):
+            self.closed = True
+
+    conn = _FallbackConn()
+    monkeypatch.setattr(authd, "get_db_connection", lambda: conn)
+
+    result = authd.authenticate("legacy_login", "", 1, certhash="cert-abc")
+
+    assert result is not None
+    assert conn.cursor_obj.executed[0][0] == authd.AUTH_QUERY
+    assert conn.cursor_obj.executed[1][0] == authd.LEGACY_AUTH_QUERY
+    assert conn.closed is True
+
+
+def test_name_to_id_falls_back_to_legacy_account_username_lookup(monkeypatch):
+    class _FallbackCursor:
+        def __init__(self):
+            self.executed = []
+            self.calls = 0
+
+        def execute(self, query, params=()):
+            self.executed.append((query, params))
+            self.calls += 1
+
+        def fetchone(self):
+            if self.calls == 1:
+                return None
+            return (123,)
+
+        def close(self):
+            return None
+
+    class _FallbackConn:
+        def __init__(self):
+            self.cursor_obj = _FallbackCursor()
+            self.closed = False
+
+        def cursor(self):
+            return self.cursor_obj
+
+        def close(self):
+            self.closed = True
+
+    conn = _FallbackConn()
+    monkeypatch.setattr(authd, "get_db_connection", lambda: conn)
+
+    result = authd.name_to_id("legacy_login", 1)
+
+    assert result == 123
+    assert conn.cursor_obj.executed[0][0] == authd.NAME_TO_ID_QUERY
+    assert conn.cursor_obj.executed[1][0] == authd.LEGACY_NAME_TO_ID_QUERY
+    assert conn.closed is True

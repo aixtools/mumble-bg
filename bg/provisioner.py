@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-import re
 import secrets
 
 from django.contrib.auth.models import User
 
 from bg.eve_lookup import resolve_and_cache_eve_objects
 from bg.passwords import build_murmur_password_record
+from bg.pilot.registrations import (
+    MurmurSyncError,
+    disable_murmur_registration,
+    disconnect_live_sessions,
+    sync_murmur_registration,
+)
 from bg.pilot_snapshot import current_pilot_snapshot
 from bg.state.models import AccessRule, EveObject, MumbleServer, MumbleUser, PilotAccountCache
 from fgbg_common.eligibility import (
@@ -30,7 +35,6 @@ def _new_password(length: int = 16) -> str:
 
 
 logger = logging.getLogger(__name__)
-_USERNAME_SANITIZE_RE = re.compile(r'[^a-z0-9_]+')
 
 
 @dataclass
@@ -55,23 +59,26 @@ def _load_access_rules():
     return list(AccessRule.objects.values('entity_id', 'entity_type', 'deny', 'acl_admin'))
 
 
-def _resolved_username_for_account(account, *, user_id: int, existing: MumbleUser | None = None) -> str:
-    username = _USERNAME_SANITIZE_RE.sub(
-        '',
-        str(getattr(account, 'account_username', '') or '').strip().lower().replace(' ', ''),
-    )
-    if username:
-        return username
-    if existing is not None and str(existing.username or '').strip():
-        existing_username = _USERNAME_SANITIZE_RE.sub('', str(existing.username).strip().lower().replace(' ', ''))
-        if existing_username:
-            return existing_username
-    auth_user = User.objects.filter(pk=user_id).only('username').first()
-    if auth_user is not None and str(auth_user.username or '').strip():
-        auth_username = _USERNAME_SANITIZE_RE.sub('', str(auth_user.username).strip().lower().replace(' ', ''))
-        if auth_username:
-            return auth_username
-    return f'pkid_{user_id}'
+def _resolved_username_for_account(
+    account,
+    *,
+    resolved_display_name: str,
+    existing: MumbleUser | None = None,
+) -> str:
+    """Username contract: use display-name format, never placeholder tags."""
+    display_candidate = str(resolved_display_name or '').strip()
+    if display_candidate and '????' not in display_candidate:
+        return display_candidate
+
+    existing_username = str(getattr(existing, 'username', '') or '').strip()
+    if existing_username and '????' not in existing_username:
+        return existing_username
+
+    cached_display = str(getattr(account, 'display_name', '') or '').strip()
+    if cached_display and '????' not in cached_display:
+        return cached_display
+
+    return ''
 
 
 def _account_matches_corp_or_alliance_deny(account, rs: dict[str, set[int]]) -> bool:
@@ -86,6 +93,10 @@ def _account_matches_corp_or_alliance_deny(account, rs: dict[str, set[int]]) -> 
 def _display_name_needs_resolution(value: str) -> bool:
     normalized = str(value or '').strip()
     return not normalized or '????' in normalized
+
+
+def _display_name_has_unresolved_tickers(value: str) -> bool:
+    return '????' in str(value or '')
 
 
 def _display_tags_look_name_based(value: str) -> bool:
@@ -250,19 +261,60 @@ def provision_registrations(
                 continue
             main = account.main_character
             existing_row = existing.get((server_id, user_id))
-            username = _resolved_username_for_account(account, user_id=user_id, existing=existing_row)
-            display_name = str(resolved_display_by_pkid.get(user_id) or account.display_name or username)
+            resolved_display = str(resolved_display_by_pkid.get(user_id) or '').strip()
+            unresolved_tickers = _display_name_has_unresolved_tickers(resolved_display)
+            if unresolved_tickers:
+                issue = (
+                    'bg cannot resolve ticker for '
+                    f'pkid={user_id} pilot="{getattr(main, "character_name", "")}" '
+                    f'alliance_id={getattr(main, "alliance_id", None)} '
+                    f'corporation_id={getattr(main, "corporation_id", None)}'
+                )
+                logger.warning(issue)
+                result.errors.append(issue)
+
+            username = _resolved_username_for_account(
+                account,
+                resolved_display_name=resolved_display,
+                existing=existing_row,
+            )
+            display_name = (
+                resolved_display
+                or str(getattr(existing_row, 'display_name', '') or '').strip()
+                or str(getattr(account, 'display_name', '') or '').strip()
+                or username
+            )
+
+            if unresolved_tickers:
+                if existing_row is None:
+                    result.unchanged += 1
+                    continue
+                username = str(existing_row.username or '').strip()
+                display_name = str(existing_row.display_name or '').strip() or username
+
+            if not username:
+                issue = f'No valid display username for pkid={user_id}; skipping provisioning'
+                logger.warning(issue)
+                result.errors.append(issue)
+                if existing_row is None:
+                    result.unchanged += 1
+                    continue
+                username = str(existing_row.username or '').strip()
+                display_name = str(existing_row.display_name or '').strip() or username
             target_is_admin = user_id in admin_user_ids
 
             if existing_row is not None:
                 mu = existing_row
                 update_fields = []
+                identity_changed = False
                 if mu.username != username:
                     mu.username = username
                     update_fields.append('username')
+                    identity_changed = True
                 if mu.display_name != display_name:
                     mu.display_name = display_name
                     update_fields.append('display_name')
+                    identity_changed = True
                 if mu.evepilot_id != main.character_id:
                     mu.evepilot_id = main.character_id
                     update_fields.append('evepilot_id')
@@ -283,6 +335,19 @@ def provision_registrations(
                             mu.user.username = username
                             mu.user.save(update_fields=['username'])
                         mu.save(update_fields=update_fields + ['updated_at'])
+                        try:
+                            sync_result = sync_murmur_registration(mu, return_details=True)
+                            synced_userid = sync_result.get('murmur_userid')
+                            if synced_userid is not None and mu.mumble_userid != synced_userid:
+                                mu.mumble_userid = synced_userid
+                                mu.save(update_fields=['mumble_userid', 'updated_at'])
+                        except MurmurSyncError as exc:
+                            issue = (
+                                f'Failed to sync active registration for pkid={user_id} '
+                                f'on {target_server.name}: {exc}'
+                            )
+                            logger.warning(issue)
+                            result.errors.append(issue)
                     result.activated += 1
                     logger.info('Activated %s on %s (pkid=%d)', username, target_server.name, user_id)
                 else:
@@ -291,6 +356,24 @@ def provision_registrations(
                             mu.user.username = username
                             mu.user.save(update_fields=['username'])
                         mu.save(update_fields=update_fields + ['updated_at'])
+                        if identity_changed:
+                            try:
+                                sync_result = sync_murmur_registration(mu, return_details=True)
+                                synced_userid = sync_result.get('murmur_userid')
+                                if synced_userid is not None and mu.mumble_userid != synced_userid:
+                                    mu.mumble_userid = synced_userid
+                                    mu.save(update_fields=['mumble_userid', 'updated_at'])
+                                disconnect_live_sessions(
+                                    mu,
+                                    reason='Display identity changed; reconnect required',
+                                )
+                            except MurmurSyncError as exc:
+                                issue = (
+                                    f'Failed to apply identity change for pkid={user_id} '
+                                    f'on {target_server.name}: {exc}'
+                                )
+                                logger.warning(issue)
+                                result.errors.append(issue)
                     result.unchanged += 1
                 continue
 
@@ -342,6 +425,19 @@ def provision_registrations(
                     update_fields.append('is_mumble_admin')
                 if update_fields:
                     existing_row.save(update_fields=update_fields + ['updated_at'])
+                try:
+                    disable_murmur_registration(existing_row)
+                    disconnect_live_sessions(
+                        existing_row,
+                        reason='Access denied by ACL; reconnect denied',
+                    )
+                except MurmurSyncError as exc:
+                    issue = (
+                        f'Failed to disable/evict denied pilot pkid={user_id} '
+                        f'on {target_server.name}: {exc}'
+                    )
+                    logger.warning(issue)
+                    result.errors.append(issue)
             result.deactivated += 1
             logger.info('Deactivated %s on %s (pkid=%d)', existing_row.username, target_server.name, user_id)
 
