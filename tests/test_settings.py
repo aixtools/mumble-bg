@@ -36,3 +36,6 @@ USE_I18N = True
 USE_TZ = True
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Keep unit tests deterministic and offline.
+BG_ESI_LOOKUP_ENABLED = False

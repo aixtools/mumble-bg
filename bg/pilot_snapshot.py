@@ -6,7 +6,9 @@ from typing import Any
 
 from django.db import transaction
 
+from bg.eve_lookup import resolve_and_cache_eve_objects
 from bg.state.models import (
+    EveObject,
     PilotAccountCache,
     PilotCharacterCache,
     PilotSnapshotSyncAudit,
@@ -115,19 +117,58 @@ def store_pilot_snapshot(
             int(row.pkid): row
             for row in PilotAccountCache.objects.filter(pkid__in=[account.pkid for account in snapshot.accounts])
         }
+        character_ids = {int(character.character_id) for account in snapshot.accounts for character in account.characters}
+        corp_ids = {
+            int(character.corporation_id)
+            for account in snapshot.accounts
+            for character in account.characters
+            if character.corporation_id is not None
+        }
+        alliance_ids = {
+            int(character.alliance_id)
+            for account in snapshot.accounts
+            for character in account.characters
+            if character.alliance_id is not None
+        }
+        resolve_and_cache_eve_objects(
+            character_ids=character_ids,
+            corporation_ids=corp_ids,
+            alliance_ids=alliance_ids,
+        )
+        eve_objects = {
+            (str(row.type), int(row.entity_id)): row
+            for row in EveObject.objects.filter(
+                entity_id__in=list(character_ids | corp_ids | alliance_ids),
+            )
+        }
         character_rows = []
         for account in snapshot.accounts:
             account_row = accounts_by_pkid[account.pkid]
             for character in account.characters:
+                character_name = str(character.character_name or '')
+                if not character_name:
+                    obj = eve_objects.get(('pilot', int(character.character_id)))
+                    character_name = str(getattr(obj, 'name', '') or '')
+
+                corporation_name = str(character.corporation_name or '')
+                if character.corporation_id is not None and not corporation_name:
+                    obj = eve_objects.get(('corporation', int(character.corporation_id)))
+                    corporation_name = str(getattr(obj, 'name', '') or '')
+
+                alliance_name = str(character.alliance_name or '')
+                if character.alliance_id is not None and not alliance_name:
+                    obj = eve_objects.get(('alliance', int(character.alliance_id)))
+                    alliance_name = str(getattr(obj, 'name', '') or '')
+
                 character_rows.append(
                     PilotCharacterCache(
                         account=account_row,
                         character_id=character.character_id,
-                        character_name=character.character_name,
+                        character_name=character_name,
                         corporation_id=character.corporation_id,
-                        corporation_name=character.corporation_name,
+                        corporation_name=corporation_name,
                         alliance_id=character.alliance_id,
-                        alliance_name=character.alliance_name,
+                        alliance_name=alliance_name,
                         is_main=character.is_main,
                     )
                 )

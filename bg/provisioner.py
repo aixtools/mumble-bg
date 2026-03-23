@@ -49,7 +49,7 @@ class ProvisionResult:
 
 
 def _load_access_rules():
-    return list(AccessRule.objects.values('entity_id', 'entity_type', 'deny'))
+    return list(AccessRule.objects.values('entity_id', 'entity_type', 'deny', 'acl_admin'))
 
 
 def _resolved_username_for_account(account, *, user_id: int, existing: MumbleUser | None = None) -> str:
@@ -62,6 +62,38 @@ def _resolved_username_for_account(account, *, user_id: int, existing: MumbleUse
     if auth_user is not None and str(auth_user.username or '').strip():
         return str(auth_user.username).strip()
     return f'pkid_{user_id}'
+
+
+def _account_matches_corp_or_alliance_deny(account, rs: dict[str, set[int]]) -> bool:
+    for character in account.characters:
+        if character.corporation_id in rs['denied_corps']:
+            return True
+        if character.alliance_id in rs['denied_alliances']:
+            return True
+    return False
+
+
+def _acl_admin_accounts(snapshot, rules: list[dict[str, object]], rs: dict[str, set[int]]) -> set[int]:
+    """Resolve pkids that should be Murmur admin from pilot ACL markers."""
+    admin_pilot_ids = {
+        int(rule['entity_id'])
+        for rule in rules
+        if rule.get('entity_type') == 'pilot'
+        and not bool(rule.get('deny', False))
+        and bool(rule.get('acl_admin', False))
+    }
+    if not admin_pilot_ids:
+        return set()
+
+    admin_accounts: set[int] = set()
+    for account in snapshot.accounts:
+        if _account_matches_corp_or_alliance_deny(account, rs):
+            continue
+        for character in account.characters:
+            if int(character.character_id) in admin_pilot_ids:
+                admin_accounts.add(int(account.pkid))
+                break
+    return admin_accounts
 
 
 def provision_registrations(
@@ -87,6 +119,7 @@ def provision_registrations(
     rs = build_rule_sets(rules)
     eligible = eligible_account_list_from_snapshot(snapshot, rs)
     blocked = blocked_main_list_from_snapshot(snapshot, rs)
+    admin_user_ids = _acl_admin_accounts(snapshot, rules, rs)
 
     eligible_by_pkid = {int(entry['pkid']): entry for entry in eligible}
     eligible_user_ids = set(eligible_by_pkid)
@@ -107,6 +140,7 @@ def provision_registrations(
         existing_row = existing.get(user_id)
         username = _resolved_username_for_account(account, user_id=user_id, existing=existing_row)
         display_name = account.display_name or username
+        target_is_admin = user_id in admin_user_ids
 
         if user_id in existing:
             mu = existing[user_id]
@@ -126,6 +160,9 @@ def provision_registrations(
             if mu.alliance_id != main.alliance_id:
                 mu.alliance_id = main.alliance_id
                 update_fields.append('alliance_id')
+            if mu.is_mumble_admin != target_is_admin:
+                mu.is_mumble_admin = target_is_admin
+                update_fields.append('is_mumble_admin')
             if not mu.is_active:
                 if not dry_run:
                     mu.is_active = True
@@ -167,17 +204,25 @@ def provision_registrations(
                 hashfn=password_record['hashfn'],
                 pw_salt=password_record['pw_salt'],
                 kdf_iterations=password_record['kdf_iterations'],
+                is_mumble_admin=target_is_admin,
                 is_active=True,
             )
         result.created += 1
         logger.info('Created %s (pkid=%d)', username, user_id)
 
     for user_id in sorted(blocked_user_ids):
-        if user_id in existing and existing[user_id].is_active:
+        if user_id in existing and (existing[user_id].is_active or existing[user_id].is_mumble_admin):
             mu = existing[user_id]
             if not dry_run:
-                mu.is_active = False
-                mu.save(update_fields=['is_active', 'updated_at'])
+                update_fields = []
+                if mu.is_active:
+                    mu.is_active = False
+                    update_fields.append('is_active')
+                if mu.is_mumble_admin:
+                    mu.is_mumble_admin = False
+                    update_fields.append('is_mumble_admin')
+                if update_fields:
+                    mu.save(update_fields=update_fields + ['updated_at'])
             result.deactivated += 1
             logger.info('Deactivated %s (pkid=%d)', mu.username, user_id)
 

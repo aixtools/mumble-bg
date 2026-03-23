@@ -27,10 +27,12 @@ from bg.state.models import (
     ENTITY_TYPE_CORPORATION,
     ENTITY_TYPE_PILOT,
     ControlChannelKey,
+    EveObject,
     MumbleServer,
     MumbleSession,
     MumbleUser,
 )
+from fgbg_common.entity_types import CATEGORY_TO_TYPE, TYPE_TO_CATEGORY, VALID_CATEGORIES
 from fgbg_common.snapshot import PilotSnapshot
 
 _PilotRegistrationSnapshot = MurmurRegistrationSnapshot
@@ -181,6 +183,7 @@ def _snapshot_access_rules() -> list[dict[str, Any]]:
             'entity_id',
             'entity_type',
             'deny',
+            'acl_admin',
             'note',
             'created_by',
         ).order_by('entity_id')
@@ -190,6 +193,7 @@ def _snapshot_access_rules() -> list[dict[str, Any]]:
             'entity_id': int(row['entity_id']),
             'entity_type': str(row['entity_type']),
             'deny': bool(row['deny']),
+            'acl_admin': bool(row.get('acl_admin', False)),
             'note': str(row['note'] or ''),
             'created_by': str(row['created_by'] or ''),
         }
@@ -204,6 +208,7 @@ def _normalize_access_rule_map(rules: list[dict[str, Any]]) -> list[dict[str, An
             'entity_id': int(rule['entity_id']),
             'entity_type': str(rule['entity_type']),
             'deny': bool(rule['deny']),
+            'acl_admin': bool(rule.get('acl_admin', False)),
             'note': str(rule.get('note') or ''),
             'created_by': str(rule.get('created_by') or ''),
         })
@@ -223,7 +228,7 @@ def _rules_changed(
         if prior is None:
             changed = True
             continue
-        for field in ('entity_type', 'deny', 'note', 'created_by'):
+        for field in ('entity_type', 'deny', 'acl_admin', 'note', 'created_by'):
             if prior.get(field) != row[field]:
                 changed = True
                 break
@@ -970,6 +975,57 @@ def pilot(request, pkid: int):
 _VALID_ENTITY_TYPES = {ENTITY_TYPE_ALLIANCE, ENTITY_TYPE_CORPORATION, ENTITY_TYPE_PILOT}
 
 
+def _validate_eve_objects(objects: list[Any]) -> list[dict[str, Any]]:
+    if not isinstance(objects, list):
+        raise _BadRequest('objects must be a list')
+    validated = []
+    seen_ids = set()
+    for idx, item in enumerate(objects):
+        if not isinstance(item, dict):
+            raise _BadRequest(f'objects[{idx}] must be an object')
+        entity_id = item.get('entity_id')
+        if entity_id is None:
+            raise _BadRequest(f'objects[{idx}].entity_id is required')
+        entity_id = _coerce_int(entity_id, field=f'objects[{idx}].entity_id')
+        if entity_id in seen_ids:
+            raise _BadRequest(f'objects[{idx}].entity_id={entity_id} is duplicated')
+        seen_ids.add(entity_id)
+
+        entity_type = item.get('type', '')
+        if entity_type not in _VALID_ENTITY_TYPES:
+            raise _BadRequest(
+                f'objects[{idx}].type must be one of: {", ".join(sorted(_VALID_ENTITY_TYPES))}'
+            )
+        category = item.get('category', '')
+        if category not in VALID_CATEGORIES:
+            raise _BadRequest(
+                f'objects[{idx}].category must be one of: {", ".join(sorted(VALID_CATEGORIES))}'
+            )
+        expected_category = TYPE_TO_CATEGORY[str(entity_type)]
+        if str(category) != expected_category:
+            raise _BadRequest(
+                f'objects[{idx}] category/type mismatch: expected category={expected_category!r} for type={entity_type!r}'
+            )
+        if CATEGORY_TO_TYPE[str(category)] != str(entity_type):
+            raise _BadRequest(f'objects[{idx}] type/category mismatch')
+        name = item.get('name', '')
+        if not isinstance(name, str):
+            raise _BadRequest(f'objects[{idx}].name must be a string')
+        ticker = item.get('ticker', '')
+        if not isinstance(ticker, str):
+            raise _BadRequest(f'objects[{idx}].ticker must be a string')
+        validated.append(
+            {
+                'entity_id': entity_id,
+                'type': str(entity_type),
+                'category': str(category),
+                'name': str(name or ''),
+                'ticker': str(ticker or ''),
+            }
+        )
+    return validated
+
+
 def _validate_access_rules(rules: list[Any]) -> list[dict[str, Any]]:
     if not isinstance(rules, list):
         raise _BadRequest('rules must be a list')
@@ -993,10 +1049,18 @@ def _validate_access_rules(rules: list[Any]) -> list[dict[str, Any]]:
         deny = rule.get('deny', False)
         if not isinstance(deny, bool):
             raise _BadRequest(f'rules[{idx}].deny must be a boolean')
+        acl_admin = rule.get('acl_admin', False)
+        if not isinstance(acl_admin, bool):
+            raise _BadRequest(f'rules[{idx}].acl_admin must be a boolean')
+        if acl_admin and entity_type != ENTITY_TYPE_PILOT:
+            raise _BadRequest(f'rules[{idx}].acl_admin is allowed only for pilot rules')
+        if acl_admin and deny:
+            raise _BadRequest(f'rules[{idx}].acl_admin cannot be true when deny is true')
         validated.append({
             'entity_id': entity_id,
             'entity_type': entity_type,
             'deny': deny,
+            'acl_admin': acl_admin,
             'note': str(rule.get('note', '') or '').strip(),
             'created_by': str(rule.get('created_by', '') or '').strip(),
         })
@@ -1044,6 +1108,7 @@ def access_rules_sync(request):
             defaults={
                 'entity_type': rule['entity_type'],
                 'deny': rule['deny'],
+                'acl_admin': rule['acl_admin'],
                 'note': rule['note'],
                 'created_by': rule['created_by'],
                 'synced_at': synced_at,
@@ -1114,7 +1179,7 @@ def access_rules(request):
     """Return the current access rule set."""
     rows = list(
         AccessRule.objects.values(
-            'entity_id', 'entity_type', 'deny', 'note', 'created_by', 'synced_at', 'updated_at',
+            'entity_id', 'entity_type', 'deny', 'acl_admin', 'note', 'created_by', 'synced_at', 'updated_at',
         ).order_by('entity_type', 'entity_id')
     )
     for row in rows:
@@ -1128,6 +1193,118 @@ def access_rules(request):
         'rules': rows,
         'rule_count': len(rows),
     })
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def eve_objects_sync(request):
+    """Upsert immutable EVE object dictionary rows from FG."""
+    try:
+        auth_source = _require_control_auth(request)
+        payload, request_id, requested_by, is_super = _sync_context(request)
+        _require_requested_by(requested_by)
+        _require_super(is_super)
+        objects = payload.get('objects')
+        if objects is None:
+            raise _BadRequest('objects is required')
+        validated = _validate_eve_objects(objects)
+        del auth_source
+    except _BadRequest as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
+    except _Unauthorized as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _Forbidden as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
+
+    synced_at = now()
+    created_count = 0
+    unchanged_count = 0
+    conflict_count = 0
+    conflicts: list[dict[str, Any]] = []
+    by_id = {
+        int(row.entity_id): row
+        for row in EveObject.objects.filter(entity_id__in=[item['entity_id'] for item in validated])
+    }
+    for item in validated:
+        existing = by_id.get(item['entity_id'])
+        if existing is None:
+            EveObject.objects.create(
+                entity_id=item['entity_id'],
+                type=item['type'],
+                category=item['category'],
+                name=item['name'],
+                ticker=item['ticker'],
+                synced_at=synced_at,
+            )
+            created_count += 1
+            continue
+
+        if (
+            existing.type != item['type']
+            or existing.category != item['category']
+            or str(existing.name or '') != item['name']
+            or str(existing.ticker or '') != item['ticker']
+        ):
+            conflict_count += 1
+            conflicts.append(
+                {
+                    'entity_id': item['entity_id'],
+                    'stored_type': existing.type,
+                    'incoming_type': item['type'],
+                    'stored_category': existing.category,
+                    'incoming_category': item['category'],
+                    'stored_name': str(existing.name or ''),
+                    'incoming_name': item['name'],
+                    'stored_ticker': str(existing.ticker or ''),
+                    'incoming_ticker': item['ticker'],
+                }
+            )
+            existing.synced_at = synced_at
+            existing.save(update_fields=['synced_at', 'updated_at'])
+            continue
+
+        existing.synced_at = synced_at
+        existing.save(update_fields=['synced_at', 'updated_at'])
+        unchanged_count += 1
+
+    return _response(
+        request_id,
+        'completed',
+        message='EVE object dictionary synchronized',
+        total=len(validated),
+        created=created_count,
+        unchanged=unchanged_count,
+        conflicts=conflict_count,
+        conflict_rows=conflicts,
+    )
+
+
+@require_http_methods(['GET'])
+def eve_objects(request):
+    rows = list(
+        EveObject.objects.values(
+            'entity_id',
+            'type',
+            'category',
+            'name',
+            'ticker',
+            'synced_at',
+            'updated_at',
+        ).order_by('type', 'entity_id')
+    )
+    for row in rows:
+        if row['synced_at']:
+            row['synced_at'] = row['synced_at'].isoformat()
+        if row['updated_at']:
+            row['updated_at'] = row['updated_at'].isoformat()
+    return JsonResponse(
+        {
+            'status': 'completed',
+            'request_id': now().strftime('%Y%m%dT%H%M%SZ'),
+            'objects': rows,
+            'object_count': len(rows),
+        }
+    )
 
 
 @csrf_exempt

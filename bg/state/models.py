@@ -175,6 +175,16 @@ ENTITY_TYPE_CHOICES = [
     (ENTITY_TYPE_PILOT, 'Pilot'),
 ]
 
+CATEGORY_ALLIANCE = 'alliance'
+CATEGORY_CORPORATION = 'corporation'
+CATEGORY_CHARACTER = 'character'
+
+CATEGORY_CHOICES = [
+    (CATEGORY_ALLIANCE, 'Alliance'),
+    (CATEGORY_CORPORATION, 'Corporation'),
+    (CATEGORY_CHARACTER, 'Character'),
+]
+
 
 class AccessRule(models.Model):
     """
@@ -205,6 +215,10 @@ class AccessRule(models.Model):
         default=False,
         help_text='False = permit (default). True = deny access.',
     )
+    acl_admin = models.BooleanField(
+        default=False,
+        help_text='Pilot-only Murmur admin marker. Ignored for alliance/corporation rules.',
+    )
     note = models.TextField(
         blank=True,
         default='',
@@ -227,10 +241,63 @@ class AccessRule(models.Model):
     class Meta:
         db_table = 'bg_access_rule'
         ordering = ['entity_type', 'entity_id']
+        constraints = [
+            models.CheckConstraint(
+                check=Q(acl_admin=False) | Q(entity_type=ENTITY_TYPE_PILOT),
+                name='bg_access_rule_acl_admin_pilot_only',
+            ),
+        ]
 
     def __str__(self):
         action = 'DENY' if self.deny else 'ALLOW'
         return f'{action} {self.entity_type} {self.entity_id}'
+
+    def save(self, *args, **kwargs):
+        if self.entity_type != ENTITY_TYPE_PILOT:
+            self.acl_admin = False
+        if self.deny:
+            self.acl_admin = False
+        return super().save(*args, **kwargs)
+
+
+class EveObject(models.Model):
+    """Immutable EVE object dictionary row synchronized from FG."""
+
+    entity_id = models.BigIntegerField(
+        unique=True,
+        help_text='EVE object ID (pilot, corporation, alliance).',
+    )
+    type = models.CharField(
+        max_length=16,
+        choices=ENTITY_TYPE_CHOICES,
+    )
+    category = models.CharField(
+        max_length=16,
+        choices=CATEGORY_CHOICES,
+    )
+    name = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+    )
+    ticker = models.CharField(
+        max_length=32,
+        blank=True,
+        default='',
+    )
+    synced_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'bg_eve_object'
+        ordering = ['type', 'entity_id']
+
+    def __str__(self):
+        return f'{self.type} ({self.category}) {self.entity_id} {self.name}'
 
 
 class AccessRuleSyncAudit(models.Model):

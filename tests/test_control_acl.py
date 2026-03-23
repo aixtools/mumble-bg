@@ -11,7 +11,15 @@ from unittest.mock import Mock, patch
 
 from django.test import TestCase, Client
 
-from bg.state.models import AccessRule, AccessRuleSyncAudit, MumbleServer, PilotAccountCache, PilotCharacterCache, PilotSnapshotSyncAudit
+from bg.state.models import (
+    AccessRule,
+    AccessRuleSyncAudit,
+    EveObject,
+    MumbleServer,
+    PilotAccountCache,
+    PilotCharacterCache,
+    PilotSnapshotSyncAudit,
+)
 from bg.provisioner import ProvisionResult
 
 
@@ -63,6 +71,22 @@ def _post_pilot_snapshot_sync(client, accounts, *, requested_by='test-user', is_
     )
 
 
+def _post_eve_objects_sync(client, objects, *, requested_by='test-user', is_super=True):
+    payload = {
+        'request_id': 'test-request-eve-objects',
+        'requested_by': requested_by,
+        'is_super': is_super,
+        'payload': {
+            'objects': objects,
+        },
+    }
+    return client.post(
+        '/v1/eve-objects/sync',
+        data=json.dumps(payload),
+        content_type='application/json',
+    )
+
+
 class AccessRulesSyncBasicTest(TestCase):
     """Test basic ACL sync: create, update, delete."""
 
@@ -73,7 +97,7 @@ class AccessRulesSyncBasicTest(TestCase):
         rules = [
             {'entity_id': 99000001, 'entity_type': 'alliance', 'deny': False, 'note': 'Main alliance'},
             {'entity_id': 98000001, 'entity_type': 'corporation', 'deny': True, 'note': 'Bad corp'},
-            {'entity_id': 90000001, 'entity_type': 'pilot', 'deny': False, 'note': 'Trusted pilot'},
+            {'entity_id': 90000001, 'entity_type': 'pilot', 'deny': False, 'acl_admin': True, 'note': 'Trusted pilot'},
         ]
         resp = _post_acl_sync(self.client, rules)
         self.assertEqual(resp.status_code, 200)
@@ -84,6 +108,7 @@ class AccessRulesSyncBasicTest(TestCase):
         self.assertEqual(data['deleted'], 0)
         self.assertEqual(data['total'], 3)
         self.assertEqual(AccessRule.objects.count(), 3)
+        self.assertTrue(AccessRule.objects.get(entity_id=90000001).acl_admin)
 
     def test_sync_updates_existing(self):
         AccessRule.objects.create(
@@ -213,6 +238,12 @@ class AccessRulesSyncFieldMappingTest(TestCase):
         self.assertEqual(rule.note, 'Main alliance')
         self.assertEqual(rule.created_by, 'admin_user')
 
+    def test_acl_admin_pilot_rule_stored(self):
+        rules = [{'entity_id': 90000001, 'entity_type': 'pilot', 'deny': False, 'acl_admin': True}]
+        _post_acl_sync(self.client, rules)
+        rule = AccessRule.objects.get(entity_id=90000001)
+        self.assertTrue(rule.acl_admin)
+
 
 class AccessRulesSyncValidationTest(TestCase):
     """Test validation and error handling."""
@@ -256,6 +287,11 @@ class AccessRulesSyncValidationTest(TestCase):
 
     def test_block_must_be_bool(self):
         rules = [{'entity_id': 99000001, 'entity_type': 'alliance', 'deny': 'yes'}]
+        resp = _post_acl_sync(self.client, rules)
+        self.assertEqual(resp.status_code, 400)
+
+    def test_acl_admin_requires_pilot_rule(self):
+        rules = [{'entity_id': 98000001, 'entity_type': 'corporation', 'deny': False, 'acl_admin': True}]
         resp = _post_acl_sync(self.client, rules)
         self.assertEqual(resp.status_code, 400)
 
@@ -348,12 +384,62 @@ class AccessRulesReadEndpointTest(TestCase):
     def test_returns_stored_rules(self):
         AccessRule.objects.create(entity_id=99000001, entity_type='alliance', deny=False, note='Test')
         AccessRule.objects.create(entity_id=98000001, entity_type='corporation', deny=True)
+        AccessRule.objects.create(entity_id=90000001, entity_type='pilot', deny=False, acl_admin=True)
         resp = self.client.get('/v1/access-rules')
         data = resp.json()
-        self.assertEqual(len(data['rules']), 2)
+        self.assertEqual(len(data['rules']), 3)
         rule_map = {r['entity_id']: r for r in data['rules']}
         self.assertFalse(rule_map[99000001]['deny'])
         self.assertTrue(rule_map[98000001]['deny'])
+        self.assertTrue(rule_map[90000001]['acl_admin'])
+
+
+class EveObjectsEndpointTest(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+    def test_sync_creates_dictionary_rows(self):
+        resp = _post_eve_objects_sync(
+            self.client,
+            [
+                {'entity_id': 99000001, 'type': 'alliance', 'category': 'alliance', 'name': 'Alliance One', 'ticker': 'ALLY'},
+                {'entity_id': 98000001, 'type': 'corporation', 'category': 'corporation', 'name': 'Corp One', 'ticker': 'CORP'},
+                {'entity_id': 90000001, 'type': 'pilot', 'category': 'character', 'name': 'Pilot One', 'ticker': ''},
+            ],
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['created'], 3)
+        self.assertEqual(EveObject.objects.count(), 3)
+
+    def test_sync_reports_conflict_without_overwriting_stored_name(self):
+        EveObject.objects.create(
+            entity_id=99000001,
+            type='alliance',
+            category='alliance',
+            name='Alliance One',
+            ticker='ALLY',
+        )
+        resp = _post_eve_objects_sync(
+            self.client,
+            [{'entity_id': 99000001, 'type': 'alliance', 'category': 'alliance', 'name': 'Alliance Renamed', 'ticker': 'ALLY'}],
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['conflicts'], 1)
+        row = EveObject.objects.get(entity_id=99000001)
+        self.assertEqual(row.name, 'Alliance One')
+
+    def test_read_endpoint_returns_dictionary_rows(self):
+        EveObject.objects.create(entity_id=90000001, type='pilot', category='character', name='Pilot One', ticker='')
+        resp = self.client.get('/v1/eve-objects')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['status'], 'completed')
+        self.assertEqual(data['object_count'], 1)
+        self.assertEqual(data['objects'][0]['name'], 'Pilot One')
+        self.assertEqual(data['objects'][0]['type'], 'pilot')
+        self.assertEqual(data['objects'][0]['category'], 'character')
 
 
 class PilotSnapshotSyncEndpointTest(TestCase):
@@ -462,6 +548,60 @@ class PilotSnapshotSyncEndpointTest(TestCase):
         self.assertFalse(second.json()['changed'])
         self.assertEqual(first.json()['pilot_hashes'], second.json()['pilot_hashes'])
         self.assertEqual(PilotSnapshotSyncAudit.objects.count(), 1)
+
+    def test_sync_enriches_missing_names_from_eve_object_dictionary(self):
+        EveObject.objects.create(entity_id=9001, type='pilot', category='character', name='Pilot One', ticker='')
+        EveObject.objects.create(entity_id=77, type='corporation', category='corporation', name='Corp One', ticker='CORP')
+        EveObject.objects.create(entity_id=88, type='alliance', category='alliance', name='Alliance One', ticker='ALLY')
+
+        resp = _post_pilot_snapshot_sync(
+            self.client,
+            [
+                {
+                    'pkid': 42,
+                    'characters': [
+                        {
+                            'character_id': 9001,
+                            'corporation_id': 77,
+                            'alliance_id': 88,
+                            'is_main': True,
+                        }
+                    ],
+                }
+            ],
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        row = PilotCharacterCache.objects.get(character_id=9001)
+        self.assertEqual(row.character_name, 'Pilot One')
+        self.assertEqual(row.corporation_name, 'Corp One')
+        self.assertEqual(row.alliance_name, 'Alliance One')
+
+    @patch('bg.pilot_snapshot.resolve_and_cache_eve_objects')
+    def test_sync_invokes_esi_resolver_when_dictionary_rows_missing(self, mock_resolver):
+        resp = _post_pilot_snapshot_sync(
+            self.client,
+            [
+                {
+                    'pkid': 42,
+                    'characters': [
+                        {
+                            'character_id': 9001,
+                            'corporation_id': 77,
+                            'alliance_id': 88,
+                            'is_main': True,
+                        }
+                    ],
+                }
+            ],
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        mock_resolver.assert_called_once()
+        _, kwargs = mock_resolver.call_args
+        self.assertEqual(kwargs['character_ids'], {9001})
+        self.assertEqual(kwargs['corporation_ids'], {77})
+        self.assertEqual(kwargs['alliance_ids'], {88})
 
 
 class ProvisionEndpointTest(TestCase):
