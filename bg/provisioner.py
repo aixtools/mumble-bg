@@ -9,9 +9,10 @@ import secrets
 
 from django.contrib.auth.models import User
 
+from bg.eve_lookup import resolve_and_cache_eve_objects
 from bg.passwords import build_murmur_password_record
 from bg.pilot_snapshot import current_pilot_snapshot
-from bg.state.models import AccessRule, MumbleServer, MumbleUser
+from bg.state.models import AccessRule, EveObject, MumbleServer, MumbleUser, PilotAccountCache
 from fgbg_common.eligibility import (
     build_rule_sets,
     blocked_main_list_from_snapshot,
@@ -82,6 +83,45 @@ def _account_matches_corp_or_alliance_deny(account, rs: dict[str, set[int]]) -> 
     return False
 
 
+def _display_name_needs_resolution(value: str) -> bool:
+    normalized = str(value or '').strip()
+    return not normalized or '????' in normalized
+
+
+def _display_name_from_account_with_eve_objects(account, *, eve_objects_by_key: dict[tuple[str, int], EveObject]) -> str:
+    main = account.main_character
+    if main is None:
+        fallback = str(getattr(account, 'account_username', '') or '').strip()
+        return fallback or f'pkid_{int(account.pkid)}'
+
+    character_name = str(main.character_name or '').strip()
+    if not character_name:
+        pilot_obj = eve_objects_by_key.get(('pilot', int(main.character_id)))
+        character_name = str(getattr(pilot_obj, 'name', '') or '').strip()
+    if not character_name:
+        character_name = str(getattr(account, 'account_username', '') or '').strip() or f'pkid_{int(account.pkid)}'
+
+    tags: list[str] = []
+    if main.alliance_id is not None:
+        alliance_obj = eve_objects_by_key.get(('alliance', int(main.alliance_id)))
+        tags.append(str(getattr(alliance_obj, 'ticker', '') or '').strip() or '????')
+    if main.corporation_id is not None:
+        corp_obj = eve_objects_by_key.get(('corporation', int(main.corporation_id)))
+        tags.append(str(getattr(corp_obj, 'ticker', '') or '').strip() or '????')
+
+    if tags:
+        return f'[{" ".join(tags)}] {character_name}'
+    return character_name
+
+
+def _resolved_display_name_for_account(account, *, eve_objects_by_key: dict[tuple[str, int], EveObject]) -> str:
+    current = str(getattr(account, 'display_name', '') or '').strip()
+    if current and not _display_name_needs_resolution(current):
+        return current
+    resolved = _display_name_from_account_with_eve_objects(account, eve_objects_by_key=eve_objects_by_key)
+    return str(resolved or current or '').strip()
+
+
 def _acl_admin_accounts(snapshot, rules: list[dict[str, object]], rs: dict[str, set[int]]) -> set[int]:
     """Resolve pkids that should be Murmur admin from pilot ACL markers."""
     admin_pilot_ids = {
@@ -138,6 +178,40 @@ def provision_registrations(
     blocked_user_ids = {int(entry['pkid']) for entry in blocked}
 
     accounts_by_pkid = {int(account.pkid): account for account in snapshot.accounts}
+    character_ids: set[int] = set()
+    corporation_ids: set[int] = set()
+    alliance_ids: set[int] = set()
+    for account in accounts_by_pkid.values():
+        for character in account.characters:
+            character_ids.add(int(character.character_id))
+            if character.corporation_id is not None:
+                corporation_ids.add(int(character.corporation_id))
+            if character.alliance_id is not None:
+                alliance_ids.add(int(character.alliance_id))
+
+    needs_display_resolution = any(
+        _display_name_needs_resolution(str(getattr(account, 'display_name', '') or ''))
+        for account in accounts_by_pkid.values()
+    )
+    if needs_display_resolution:
+        resolve_and_cache_eve_objects(
+            character_ids=character_ids,
+            corporation_ids=corporation_ids,
+            alliance_ids=alliance_ids,
+        )
+    eve_objects_by_key = {
+        (str(row.type), int(row.entity_id)): row
+        for row in EveObject.objects.filter(entity_id__in=list(character_ids | corporation_ids | alliance_ids))
+    }
+    resolved_display_by_pkid: dict[int, str] = {
+        pkid: _resolved_display_name_for_account(account, eve_objects_by_key=eve_objects_by_key)
+        for pkid, account in accounts_by_pkid.items()
+    }
+    if not dry_run:
+        for pkid, resolved_display in resolved_display_by_pkid.items():
+            cached_display = str(getattr(accounts_by_pkid[pkid], 'display_name', '') or '').strip()
+            if resolved_display and resolved_display != cached_display:
+                PilotAccountCache.objects.filter(pkid=pkid).update(display_name=resolved_display)
 
     server_ids = [int(item.id) for item in servers]
     existing = {
@@ -157,7 +231,7 @@ def provision_registrations(
             main = account.main_character
             existing_row = existing.get((server_id, user_id))
             username = _resolved_username_for_account(account, user_id=user_id, existing=existing_row)
-            display_name = account.display_name or username
+            display_name = str(resolved_display_by_pkid.get(user_id) or account.display_name or username)
             target_is_admin = user_id in admin_user_ids
 
             if existing_row is not None:
