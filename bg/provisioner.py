@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+import re
 import secrets
 
 from django.contrib.auth.models import User
@@ -28,6 +29,7 @@ def _new_password(length: int = 16) -> str:
 
 
 logger = logging.getLogger(__name__)
+_USERNAME_SANITIZE_RE = re.compile(r'[^a-z0-9_]+')
 
 
 @dataclass
@@ -53,14 +55,27 @@ def _load_access_rules():
 
 
 def _resolved_username_for_account(account, *, user_id: int, existing: MumbleUser | None = None) -> str:
-    username = str(getattr(account, 'account_username', '') or '').strip()
+    username = _USERNAME_SANITIZE_RE.sub(
+        '',
+        str(getattr(account, 'account_username', '') or '').strip().lower().replace(' ', ''),
+    )
     if username:
         return username
+    fallback = _USERNAME_SANITIZE_RE.sub(
+        '',
+        str(getattr(account.main_character, 'character_name', '') or '').strip().lower().replace(' ', ''),
+    )
+    if fallback:
+        return fallback
     if existing is not None and str(existing.username or '').strip():
-        return str(existing.username).strip()
+        existing_username = _USERNAME_SANITIZE_RE.sub('', str(existing.username).strip().lower().replace(' ', ''))
+        if existing_username:
+            return existing_username
     auth_user = User.objects.filter(pk=user_id).only('username').first()
     if auth_user is not None and str(auth_user.username or '').strip():
-        return str(auth_user.username).strip()
+        auth_username = _USERNAME_SANITIZE_RE.sub('', str(auth_user.username).strip().lower().replace(' ', ''))
+        if auth_username:
+            return auth_username
     return f'pkid_{user_id}'
 
 

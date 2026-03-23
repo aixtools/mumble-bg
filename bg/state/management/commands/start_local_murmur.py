@@ -8,6 +8,7 @@ import shutil
 import socket
 import subprocess
 import time
+from urllib.parse import urlparse
 
 from django.core.management.base import BaseCommand, CommandError
 
@@ -15,10 +16,37 @@ from bg.state.models import MumbleServer
 
 
 def _pick_free_tcp_port(host: str = "127.0.0.1") -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind((host, 0))
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
+        if family == socket.AF_INET6:
+            sock.bind((host, 0, 0, 0))
+        else:
+            sock.bind((host, 0))
         sock.listen(1)
         return int(sock.getsockname()[1])
+
+
+def _default_probe_host(bind_host: str) -> str:
+    host = str(bind_host or "").strip()
+    if host == "0.0.0.0":
+        return "127.0.0.1"
+    if host == "::":
+        return "::1"
+    return host or "127.0.0.1"
+
+
+def _format_client_address(host: str, port: int) -> str:
+    text = str(host or "").strip()
+    if not text:
+        return f"127.0.0.1:{int(port)}"
+
+    if "://" in text:
+        parsed = urlparse(text)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+    if ":" in text and not text.startswith("["):
+        return f"[{text}]:{int(port)}"
+    return f"{text}:{int(port)}"
 
 
 def _wait_for_port(host: str, port: int, *, timeout: float = 5.0) -> bool:
@@ -50,6 +78,9 @@ class LocalMurmurHarness:
         root_dir: Path,
         server_name: str,
         bind_host: str,
+        probe_host: str,
+        ice_host: str,
+        address_host: str,
         client_port: int,
         ice_port: int,
         ice_secret: str,
@@ -58,6 +89,9 @@ class LocalMurmurHarness:
         self.root_dir = root_dir
         self.server_name = server_name
         self.bind_host = bind_host
+        self.probe_host = probe_host
+        self.ice_host = ice_host
+        self.address_host = address_host
         self.client_port = client_port
         self.ice_port = ice_port
         self.ice_secret = ice_secret
@@ -119,7 +153,7 @@ class LocalMurmurHarness:
                 "bonjour=False",
                 "sendversion=True",
                 f"registerName={self.server_name}",
-                f'ice="tcp -h {self.bind_host} -p {self.ice_port}"',
+                f'ice="tcp -h {self.ice_host} -p {self.ice_port}"',
                 f"icesecretwrite={self.ice_secret}",
                 "",
             ]
@@ -130,7 +164,7 @@ class LocalMurmurHarness:
         pid_path = Path(self.paths.pid_path)
         if pid_path.exists():
             existing_pid = int(pid_path.read_text().strip() or "0")
-            if existing_pid > 0 and _wait_for_port(self.bind_host, self.client_port, timeout=0.2):
+            if existing_pid > 0 and _wait_for_port(self.probe_host, self.client_port, timeout=0.2):
                 return existing_pid
             pid_path.unlink(missing_ok=True)
 
@@ -145,7 +179,7 @@ class LocalMurmurHarness:
         finally:
             log_handle.close()
         pid_path.write_text(f"{process.pid}\n")
-        if not _wait_for_port(self.bind_host, self.client_port, timeout=timeout):
+        if not _wait_for_port(self.probe_host, self.client_port, timeout=timeout):
             process.poll()
             log_tail = Path(self.paths.log_path).read_text(errors="replace")[-2000:]
             raise CommandError(
@@ -162,6 +196,8 @@ class Command(BaseCommand):
         parser.add_argument("--name", default="Local BG Test")
         parser.add_argument("--root-dir", default="/tmp/mumble-bg-local-murmur")
         parser.add_argument("--bind-host", default="127.0.0.1")
+        parser.add_argument("--ice-host", default="")
+        parser.add_argument("--address-host", default="")
         parser.add_argument("--client-port", type=int)
         parser.add_argument("--ice-port", type=int)
         parser.add_argument("--ice-secret")
@@ -170,7 +206,10 @@ class Command(BaseCommand):
         parser.add_argument("--json", action="store_true")
 
     def handle(self, *args, **options):
-        bind_host = options["bind_host"]
+        bind_host = str(options["bind_host"]).strip()
+        probe_host = _default_probe_host(bind_host)
+        ice_host = str(options["ice_host"] or "").strip() or probe_host
+        address_host = str(options["address_host"] or "").strip() or bind_host
         client_port = options["client_port"] or _pick_free_tcp_port(bind_host)
         ice_port = options["ice_port"] or _pick_free_tcp_port(bind_host)
         ice_secret = options["ice_secret"] or secrets.token_urlsafe(24)
@@ -178,6 +217,9 @@ class Command(BaseCommand):
             root_dir=Path(options["root_dir"]),
             server_name=options["name"],
             bind_host=bind_host,
+            probe_host=probe_host,
+            ice_host=ice_host,
+            address_host=address_host,
             client_port=client_port,
             ice_port=ice_port,
             ice_secret=ice_secret,
@@ -189,8 +231,8 @@ class Command(BaseCommand):
         server, _created = MumbleServer.objects.update_or_create(
             name=options["name"],
             defaults={
-                "address": f"{bind_host}:{client_port}",
-                "ice_host": bind_host,
+                "address": _format_client_address(address_host, client_port),
+                "ice_host": ice_host,
                 "ice_port": ice_port,
                 "ice_secret": ice_secret,
                 "virtual_server_id": options["virtual_server_id"],
