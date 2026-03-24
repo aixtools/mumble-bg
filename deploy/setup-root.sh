@@ -11,11 +11,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="${APP_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 APP_USER="${APP_USER:-$(stat -c '%U' "${APP_DIR}")}"
 APP_HOME="${APP_HOME:-$(getent passwd "${APP_USER}" | cut -d: -f6)}"
+APP_GROUP="${APP_GROUP:-$(id -gn "${APP_USER}")}"
 VENV_DIR="${VENV_DIR:-${APP_HOME}/.venv/mumble-bg}"
 ENV_DIR="${ENV_DIR:-${APP_HOME}/.env}"
 ENV_FILE="${ENV_FILE:-${ENV_DIR}/mumble-bg}"
-SERVICE_NAME="mumble-bg-auth"
-SERVICE_DEST="/etc/systemd/system/${SERVICE_NAME}.service"
+BG_KEY_DIR="${BG_KEY_DIR:-/etc/mumble-bg/keys}"
+SERVICE_UNITS=("bg-control" "bg-authd")
+SERVICE_FILES=(
+    "/etc/systemd/system/bg-control.service"
+    "/etc/systemd/system/bg-authd.service"
+)
+LEGACY_SERVICE="mumble-bg-auth"
+LEGACY_SERVICE_FILE="/etc/systemd/system/${LEGACY_SERVICE}.service"
 
 if [ ! -d "${APP_DIR}" ]; then
     echo "Expected repo checkout at ${APP_DIR}"
@@ -147,36 +154,47 @@ esac
 sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${APP_DIR}/requirements.txt"
 sudo -u "${APP_USER}" env \
     BG_DBMS="${BG_DBMS}" \
-    "${VENV_DIR}/bin/python" "${APP_DIR}/manage.py" migrate --noinput
+    ENV_FILE="${ENV_FILE}" \
+    VENV_DIR="${VENV_DIR}" \
+    APP_DIR="${APP_DIR}" \
+    bash <<'EOF'
+set -euo pipefail
+set -a
+source "${ENV_FILE}"
+set +a
+export BG_DBMS
+"${VENV_DIR}/bin/python" "${APP_DIR}/manage.py" migrate --noinput
+EOF
+
+if systemctl list-unit-files "${LEGACY_SERVICE}.service" >/dev/null 2>&1; then
+    systemctl stop "${LEGACY_SERVICE}" || true
+    systemctl disable "${LEGACY_SERVICE}" || true
+fi
+rm -f "${LEGACY_SERVICE_FILE}"
 
 cat > /etc/sudoers.d/mumble-bg <<EOF
-${APP_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart ${SERVICE_NAME}, /bin/systemctl status ${SERVICE_NAME}, /bin/systemctl is-active ${SERVICE_NAME}, /bin/systemctl daemon-reload, /bin/bash ${APP_DIR}/deploy/create-db.sh *
+${APP_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart bg-control, /bin/systemctl restart bg-authd, /bin/systemctl status bg-control, /bin/systemctl status bg-authd, /bin/systemctl is-active bg-control, /bin/systemctl is-active bg-authd, /bin/systemctl daemon-reload, /bin/bash ${APP_DIR}/deploy/create-db.sh *
 EOF
 chmod 440 /etc/sudoers.d/mumble-bg
 
-cat > "${SERVICE_DEST}" <<EOF
-[Unit]
-Description=mumble-bg ICE authenticator
-After=network.target postgresql.service mumble-server.service
+"${VENV_DIR}/bin/python" "${APP_DIR}/manage.py" print_systemd_bg_control \
+    --env-file "${ENV_FILE}" \
+    --working-dir "${APP_DIR}" \
+    --user "${APP_USER}" \
+    --group "${APP_GROUP}" \
+    --key-dir "${BG_KEY_DIR}" \
+    > "${SERVICE_FILES[0]}"
 
-[Service]
-User=${APP_USER}
-Group=${APP_USER}
-WorkingDirectory=${APP_DIR}
-EnvironmentFile=${ENV_FILE}
-Environment=BG_ENV_FILE=${ENV_FILE}
-Environment=PYTHONUNBUFFERED=1
-ExecStart=${VENV_DIR}/bin/python -I -m bg.authd
-Restart=always
-RestartSec=5
+"${VENV_DIR}/bin/python" "${APP_DIR}/manage.py" print_systemd_bg_authd \
+    --env-file "${ENV_FILE}" \
+    --working-dir "${APP_DIR}" \
+    --user "${APP_USER}" \
+    --group "${APP_GROUP}" \
+    > "${SERVICE_FILES[1]}"
 
-[Install]
-WantedBy=multi-user.target
-EOF
-
-chmod 0644 "${SERVICE_DEST}"
+chmod 0644 "${SERVICE_FILES[@]}"
 systemctl daemon-reload
-systemctl enable "${SERVICE_NAME}"
-systemctl restart "${SERVICE_NAME}"
+systemctl enable "${SERVICE_UNITS[@]}"
+systemctl restart "${SERVICE_UNITS[@]}"
 
-echo "[OK] ${SERVICE_NAME} installed and restarted."
+echo "[OK] ${SERVICE_UNITS[*]} installed and restarted."

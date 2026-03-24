@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import textwrap
 from typing import Any
@@ -15,6 +16,12 @@ from bg.db import MmblBgDBA, PilotDBError, db_config_from_env
 from bg.envtools import resolve_bg_bind
 from bg.ice_inventory import list_current_ice_inventory, parse_ice_env
 from bg.state.models import PilotAccountCache, PilotCharacterCache
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+REQUIRED_STATE_TABLES = (
+    "bg_pilot_account",
+    "bg_pilot_character",
+)
 
 
 def _connectivity(host: str, port: int, timeout: float = 1.0) -> tuple[bool, str]:
@@ -121,7 +128,12 @@ class Command(BaseCommand):
             max_widths=(16, 10, 90),
         )
 
-        if report["checks"]["schema"]["status"] != "ok":
+        migrate_hint_needed = (
+            report["checks"]["schema"]["status"] != "ok"
+            or "run python manage.py migrate" in report["checks"]["pilot_snapshot"]["message"]
+            or "run python manage.py migrate" in report["checks"]["authd_registration"]["message"]
+        )
+        if migrate_hint_needed:
             self.stdout.write("")
             self.stdout.write("Recommended next step: python manage.py migrate")
 
@@ -232,6 +244,30 @@ class Command(BaseCommand):
                 "status": "warning",
                 "message": "state.0000_initial is not applied (run python manage.py migrate)",
             }
+
+        try:
+            existing = self._existing_tables()
+        except (ProgrammingError, OperationalError) as exc:
+            if self._is_missing_relation_error(exc):
+                return {
+                    "status": "warning",
+                    "message": "BG schema not migrated yet (run python manage.py migrate)",
+                }
+            return {
+                "status": "error",
+                "message": f"could not inspect BG tables: {exc}",
+            }
+
+        missing_tables = [table for table in REQUIRED_STATE_TABLES if table not in existing]
+        if missing_tables:
+            missing_list = ", ".join(missing_tables)
+            return {
+                "status": "warning",
+                "message": (
+                    "state.0000_initial is recorded, but required BG table(s) are missing: "
+                    f"{missing_list} (run python manage.py migrate; if nothing applies, repair stale migration state)"
+                ),
+            }
         return {
             "status": "ok",
             "message": "state.0000_initial applied",
@@ -247,6 +283,10 @@ class Command(BaseCommand):
             or getattr(exc, 'pgcode', None) == '42P01'
         )
 
+    @staticmethod
+    def _existing_tables() -> set[str]:
+        return set(connection.introspection.table_names())
+
     def _check_pilot_snapshot(self) -> dict[str, Any]:
         try:
             account_count = PilotAccountCache.objects.count()
@@ -255,7 +295,10 @@ class Command(BaseCommand):
             if self._is_missing_relation_error(exc):
                 return {
                     "status": "warning",
-                    "message": "BG schema not migrated yet (run python manage.py migrate)",
+                    "message": (
+                        "pilot snapshot tables are missing (run python manage.py migrate; "
+                        "if nothing applies, repair stale migration state)"
+                    ),
                 }
             return {
                 "status": "error",
@@ -409,7 +452,7 @@ class Command(BaseCommand):
         max_widths: tuple[int, ...] | None = None,
     ) -> None:
         all_rows = [headers, *rows]
-        widths = [max(len(str(row[idx])) for row in all_rows) for idx in range(len(headers))]
+        widths = [max(self._display_width(str(row[idx])) for row in all_rows) for idx in range(len(headers))]
         if max_widths:
             widths = [min(widths[idx], int(max_widths[idx])) for idx in range(len(widths))]
 
@@ -417,6 +460,8 @@ class Command(BaseCommand):
             return "+" + "+".join("-" * (width + 2) for width in widths) + "+"
 
         def wrap_cell(text: str, width: int) -> list[str]:
+            if ANSI_RE.search(str(text)):
+                return [str(text)]
             lines = []
             for segment in str(text).splitlines() or [""]:
                 wrapped = textwrap.wrap(
@@ -438,8 +483,9 @@ class Command(BaseCommand):
                 rendered.append(
                     "| "
                     + " | ".join(
-                        (wrapped_cells[col_idx][line_idx] if line_idx < len(wrapped_cells[col_idx]) else "").ljust(
-                            widths[col_idx]
+                        self._pad_cell(
+                            wrapped_cells[col_idx][line_idx] if line_idx < len(wrapped_cells[col_idx]) else "",
+                            widths[col_idx],
                         )
                         for col_idx in range(len(widths))
                     )
@@ -455,3 +501,12 @@ class Command(BaseCommand):
             for line in render(row):
                 self.stdout.write(line)
         self.stdout.write(border())
+
+    @staticmethod
+    def _display_width(text: str) -> int:
+        return len(ANSI_RE.sub("", str(text)))
+
+    @classmethod
+    def _pad_cell(cls, text: str, width: int) -> str:
+        visible_width = cls._display_width(text)
+        return f"{text}{' ' * max(width - visible_width, 0)}"
