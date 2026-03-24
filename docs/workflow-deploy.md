@@ -36,8 +36,10 @@ Set secrets before running either workflow.
 
 Required in the `mumble-bg` repo:
 
-- `CUBE_DEV_CUBE` (or your selected deploy-target secret name)
-  - JSON with host access and target paths (`host`, `user`, `key`; optional `home_dir`, `project_dir`, `env_file`, `venv_dir`, `service_name`).
+- `TARGETHOST:<hostname>`
+  - Hostname string for the deploy target.
+- `TARGETUSER`
+  - JSON with SSH user/key and target paths (`user`, `key`; optional `home_dir`, `project_dir`, `env_file`, `venv_dir`, `service_name`).
 - `BG_DBMS`
   - BG database JSON object.
 - `ICE`
@@ -51,16 +53,102 @@ Common optional secrets/vars used by BG deploy:
 - `BG_ENGINE`
 - `BG_RESET_DB_ON_DEPLOY` (repo variable or secret)
 
+Templates:
+
+`TARGETHOST:<hostname>`
+
+```text
+bg-dev.example.net
+```
+
+`TARGETUSER`
+
+```json
+{
+  "user": "cube",
+  "key": "-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----",
+  "home_dir": "/home/cube",
+  "project_dir": "/home/cube/mumble-bg",
+  "env_file": "/home/cube/.env/mumble-bg",
+  "venv_dir": "/home/cube/.venv/mumble-bg",
+  "service_name": "bg-authd"
+}
+```
+
+`BG_DBMS`
+
+```json
+{
+  "name": "authd bg",
+  "host": "127.0.0.1",
+  "username": "bg_username",
+  "database": "bg_database",
+  "password": "bg_secretPassword"
+}
+```
+
+`ICE`
+
+```json
+[
+  {
+    "icehost": "127.0.0.1",
+    "address": "voice-dev.example.net:64738",
+    "name": "Country 1",
+    "virtual_server_id": 1,
+    "icewrite": "write-secret",
+    "iceport": 6502,
+    "iceread": "read-secret"
+  }
+]
+```
+
+`BG_PSK`
+
+```text
+your-shared-control-secret
+```
+
 ### FG Secrets
 
 Required in the `mumble-fg` repo:
 
-- `CUBE_DEV_CUBE` (or your selected deploy-target secret name)
-  - JSON with host access and FG target paths (`host`, `user`, `key`; optional `home_dir`, `project_dir`, `env_file`, `bg_env_file`, `service_units`).
+- `TARGETHOST:<hostname>`
+  - Same hostname value used for BG target.
+- `TARGETUSER`
+  - JSON with SSH user/key and FG target paths (`user`, `key`; optional `home_dir`, `project_dir`, `env_file`, `bg_env_file`, `service_units`).
 - `BG_PSK`
   - Same exact value as BG `BG_PSK`.
 
 FG deploy can also import `BG_PSK` from `bg_env_file` on the host when configured.
+
+Templates:
+
+`TARGETHOST:<hostname>`
+
+```text
+bg-dev.example.net
+```
+
+`TARGETUSER`
+
+```json
+{
+  "user": "cube",
+  "key": "-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----",
+  "home_dir": "/home/cube",
+  "project_dir": "/home/cube/mumble-fg",
+  "env_file": "/home/cube/Cube/.env",
+  "bg_env_file": "/home/cube/.env/mumble-bg",
+  "service_units": ["cube-django", "cube-celery", "cube-celery-beat"]
+}
+```
+
+`BG_PSK`
+
+```text
+your-shared-control-secret
+```
 
 ## What The GitHub Workflow Does
 
