@@ -5,17 +5,10 @@ on:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      deploy_target_name:
-        description: 'Host-user label naming the deploy target secret (for example CUBE_DEV_CUBE)'
-        required: false
-        default: 'CUBE_DEV_CUBE'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      DEPLOY_TARGET_NAME: ${{ github.event.inputs.deploy_target_name || 'CUBE_DEV_CUBE' }}
 
     steps:
       - name: Checkout code
@@ -23,7 +16,8 @@ jobs:
 
       - name: Resolve deploy target
         env:
-          DEPLOY_TARGET_JSON: ${{ secrets[github.event.inputs.deploy_target_name || 'CUBE_DEV_CUBE'] }}
+          TARGETHOST: ${{ secrets.TARGETHOST }}
+          TARGETUSER: ${{ secrets.TARGETUSER }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -31,75 +25,40 @@ jobs:
           python3 - <<'PY'
           import json
           import os
-          from json import JSONDecodeError
           from pathlib import Path
 
-          def _parse_target_payload(raw: str, target_name: str) -> dict:
+          def _parse_target_payload(raw: str, secret_name: str) -> dict:
               try:
                   payload = json.loads(raw)
-              except JSONDecodeError:
-                  # Common operator input mistake: literal newlines in "key" JSON string.
-                  key_field = '"key"'
-                  key_index = raw.find(key_field)
-                  if key_index < 0:
-                      raise
-                  colon_index = raw.find(':', key_index + len(key_field))
-                  if colon_index < 0:
-                      raise
-                  quote_start = raw.find('"', colon_index + 1)
-                  if quote_start < 0:
-                      raise
-
-                  i = quote_start + 1
-                  while i < len(raw):
-                      if raw[i] == '"' and raw[i - 1] != '\\':
-                          break
-                      i += 1
-                  if i >= len(raw):
-                      raise
-
-                  key_raw = raw[quote_start + 1:i]
-                  key_escaped = (
-                      key_raw
-                      .replace('\\', '\\\\')
-                      .replace('\r', '\\r')
-                      .replace('\n', '\\n')
-                      .replace('\t', '\\t')
-                  )
-                  repaired = raw[:quote_start + 1] + key_escaped + raw[i:]
-                  payload = json.loads(repaired)
+              except json.JSONDecodeError as exc:
+                  raise SystemExit(f"{secret_name} must be valid JSON") from exc
 
               if not isinstance(payload, dict):
-                  raise SystemExit(f"Secret {target_name} must be a JSON object")
+                  raise SystemExit(f"Secret {secret_name} must be a JSON object")
               return payload
 
-          target_name = os.environ.get("DEPLOY_TARGET_NAME", "").strip()
-          raw = os.environ.get("DEPLOY_TARGET_JSON", "").strip()
-          if not target_name:
-              raise SystemExit("DEPLOY_TARGET_NAME is empty")
+          host = str(os.environ.get("TARGETHOST", "")).strip()
+          raw = os.environ.get("TARGETUSER", "").strip()
+          if not host:
+              raise SystemExit("TARGETHOST is empty")
           if not raw:
-              raise SystemExit(
-                  f"Missing deploy target secret payload for {target_name}. "
-                  f"Create a secret named {target_name} with JSON fields host/user/key."
-              )
+              raise SystemExit("TARGETUSER is empty")
 
-          payload = _parse_target_payload(raw, target_name)
+          payload = _parse_target_payload(raw, "TARGETUSER")
 
-          host = str(payload.get("host", "")).strip()
           user = str(payload.get("user", "")).strip()
           key = payload.get("key", "")
           home_dir = str(payload.get("home_dir", "")).strip()
           project_dir = str(payload.get("project_dir", "")).strip()
           env_file = str(payload.get("env_file", "")).strip()
           venv_dir = str(payload.get("venv_dir", "")).strip()
+          service_units = payload.get("service_units", [])
           service_name = str(payload.get("service_name", "")).strip()
 
-          if not host:
-              raise SystemExit(f"Secret {target_name} missing required field: host")
           if not user:
-              raise SystemExit(f"Secret {target_name} missing required field: user")
+              raise SystemExit("TARGETUSER missing required field: user")
           if not isinstance(key, str) or not key.strip():
-              raise SystemExit(f"Secret {target_name} missing required field: key")
+              raise SystemExit("TARGETUSER missing required field: key")
 
           if not home_dir:
               home_dir = f"/home/{user}"
@@ -109,8 +68,15 @@ jobs:
               env_file = f"{home_dir}/.env/mumble-bg"
           if not venv_dir:
               venv_dir = f"{home_dir}/.venv/mumble-bg"
-          if not service_name:
-              service_name = "mumble-bg-auth"
+          if service_units is None:
+              service_units = []
+          if not isinstance(service_units, list):
+              raise SystemExit("TARGETUSER field service_units must be a JSON list")
+          service_units = [str(unit).strip() for unit in service_units if str(unit).strip()]
+          if not service_units and service_name:
+              service_units = [service_name]
+          if not service_units:
+              service_units = ["bg-control", "bg-authd"]
 
           key_path = Path.home() / ".ssh" / "deploy_key"
           key_path.write_text(key.replace("\\n", "\n").rstrip() + "\n", encoding="utf-8")
@@ -124,7 +90,7 @@ jobs:
               fh.write(f"DEPLOY_PROJECT_DIR={project_dir}\n")
               fh.write(f"DEPLOY_ENV_FILE={env_file}\n")
               fh.write(f"DEPLOY_VENV_DIR={venv_dir}\n")
-              fh.write(f"DEPLOY_SERVICE_NAME={service_name}\n")
+              fh.write(f"DEPLOY_SERVICE_UNITS_CSV={','.join(service_units)}\n")
           PY
 
       - name: Set up SSH known hosts
@@ -153,11 +119,11 @@ jobs:
             "DEPLOY_ENV_DIR='${DEPLOY_ENV_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' bash -s" <<'EOF'
           mkdir -p "${DEPLOY_ENV_DIR}"
           cat > "${DEPLOY_ENV_FILE}" <<'ENVFILE'
-          BG_DBMS='${{ secrets.BG_DBMS || secrets.DATABASES }}'
+          BG_DBMS='${{ secrets.BG_DBMS }}'
           ICE='${{ secrets.ICE }}'
           MURMUR_PROBE='${{ secrets.MURMUR_PROBE }}'
           BG_RESET_DB_ON_DEPLOY=${{ secrets.BG_RESET_DB_ON_DEPLOY || vars.BG_RESET_DB_ON_DEPLOY }}
-          FGBG_PSK='${{ secrets.FGBG_PSK || secrets.MURMUR_CONTROL_PSK }}'
+          BG_PSK='${{ secrets.BG_PSK }}'
           ENVFILE
           chmod 600 "${DEPLOY_ENV_FILE}"
           EOF
@@ -176,24 +142,17 @@ jobs:
           set -a
           source "${DEPLOY_ENV_FILE}"
           set +a
-          BG_DBMS="${BG_DBMS:-${DATABASES:-}}"
           export BG_DBMS
-          FGBG_PSK="${FGBG_PSK:-${MURMUR_CONTROL_PSK:-}}"
-          export FGBG_PSK
-          MURMUR_CONTROL_PSK="${MURMUR_CONTROL_PSK:-${FGBG_PSK:-}}"
-          export MURMUR_CONTROL_PSK
 
           # Optional suffix trigger: if the configured FG/BG PSK ends with ":reset",
           # strip the suffix for runtime and reset DB control-key state.
-          FGBG_PSK_RESET_REQUESTED=0
-          if [ -n "${FGBG_PSK:-}" ] && [ "${FGBG_PSK%:reset}" != "${FGBG_PSK}" ]; then
-            FGBG_PSK_RESET_REQUESTED=1
-            FGBG_PSK="${FGBG_PSK%:reset}"
-            export FGBG_PSK
-            MURMUR_CONTROL_PSK="${FGBG_PSK}"
-            export MURMUR_CONTROL_PSK
-            esc_psk="$(printf '%s' "${FGBG_PSK}" | sed "s/[\\/&]/\\\\&/g")"
-            sed -i "s|^FGBG_PSK=.*$|FGBG_PSK='${esc_psk}'|" "${DEPLOY_ENV_FILE}"
+          BG_PSK_RESET_REQUESTED=0
+          if [ -n "${BG_PSK:-}" ] && [ "${BG_PSK%:reset}" != "${BG_PSK}" ]; then
+            BG_PSK_RESET_REQUESTED=1
+            BG_PSK="${BG_PSK%:reset}"
+            export BG_PSK
+            esc_psk="$(printf '%s' "${BG_PSK}" | sed "s/[\\/&]/\\\\&/g")"
+            sed -i "s|^BG_PSK=.*$|BG_PSK='${esc_psk}'|" "${DEPLOY_ENV_FILE}"
           fi
 
           json_field() {
@@ -300,19 +259,45 @@ jobs:
 
           "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" migrate --noinput
 
-          if [ "${FGBG_PSK_RESET_REQUESTED}" -eq 1 ]; then
+          if [ "${BG_PSK_RESET_REQUESTED}" -eq 1 ]; then
             "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" reset_murmur_control_key --yes
           fi
           EOF
 
-      - name: Restart service
+      - name: Restart services
         run: |
           set -euo pipefail
+          if [ -z "${DEPLOY_SERVICE_UNITS_CSV:-}" ]; then
+            echo "No service_units configured; skipping restarts."
+            exit 0
+          fi
           ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
-            "sudo systemctl restart '${DEPLOY_SERVICE_NAME}'"
+            "DEPLOY_SERVICE_UNITS_CSV='${DEPLOY_SERVICE_UNITS_CSV}' bash -s" <<'EOF'
+          set -euo pipefail
+          IFS=',' read -r -a service_units <<< "${DEPLOY_SERVICE_UNITS_CSV}"
+          for service_unit in "${service_units[@]}"; do
+            if sudo systemctl list-unit-files "${service_unit}" >/dev/null 2>&1; then
+              sudo systemctl restart "${service_unit}"
+            else
+              echo "Unit not present: ${service_unit}"
+            fi
+          done
+          EOF
 
       - name: Health check
         run: |
           set -euo pipefail
+          if [ -z "${DEPLOY_SERVICE_UNITS_CSV:-}" ]; then
+            echo "No service_units configured; skipping health check."
+            exit 0
+          fi
           ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
-            "sudo systemctl is-active '${DEPLOY_SERVICE_NAME}'"
+            "DEPLOY_SERVICE_UNITS_CSV='${DEPLOY_SERVICE_UNITS_CSV}' bash -s" <<'EOF'
+          set -euo pipefail
+          IFS=',' read -r -a service_units <<< "${DEPLOY_SERVICE_UNITS_CSV}"
+          for service_unit in "${service_units[@]}"; do
+            if sudo systemctl list-unit-files "${service_unit}" >/dev/null 2>&1; then
+              sudo systemctl is-active "${service_unit}"
+            fi
+          done
+          EOF
