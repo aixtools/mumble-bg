@@ -23,9 +23,9 @@ If not root, then this will need to run ONCE by the root user, or using sudo.
 
 Current standalone defaults are:
 
-- repo checkout: `/home/cube/mumble-bg`
-- virtualenv: `/home/cube/.venv/mumble-bg`
-- environment file: `/home/cube/.env/mumble-bg`
+- repo checkout: `~${WorkflowUser}/mumble-bg`
+- virtualenv: `~${WorkflowUser}/.venv/mumble-bg`
+- environment file: `~${WorkflowUser}/.env/mumble-bg`
 - default restarted service: `mumble-bg-auth`
 
 ## What The GitHub Workflow Does

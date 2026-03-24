@@ -38,9 +38,9 @@ Use the repo-local installation materials:
 
 For the current standalone background-service phase, the default layout is:
 
-- repo checkout: `/home/cube/mumble-bg`
-- virtualenv: `/home/cube/.venv/mumble-bg`
-- environment file: `/home/cube/.env/mumble-bg`
+- repo checkout: `~${WorkflowUser}/mumble-bg`
+- virtualenv: `~${WorkflowUser}/.venv/mumble-bg`
+- environment file: `~${WorkflowUser}/.env/mumble-bg`
 - systemd unit: `mumble-bg-auth.service`
 
 Relevant files:

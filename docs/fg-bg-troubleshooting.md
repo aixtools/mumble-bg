@@ -19,13 +19,13 @@ Run these in order before deeper debugging:
      - `/tmp/mumble-bg-control-debug-0320.log`
 
 3. Verify Cube/FG env has required control variables:
-   - `rg -n '^(OPTIONAL_APPS|MURMUR_CONTROL_URL|BG_PSK|BG_PSK)=' /home/cube/Cube/.env`
+   - `rg -n '^(OPTIONAL_APPS|MURMUR_CONTROL_URL|BG_PSK)=' ~${WorkflowUser}/Cube/.env`
    - `OPTIONAL_APPS` must include `mumble_ui.apps.MumbleUiConfig`.
    - `MURMUR_CONTROL_URL` must point to BG control endpoint.
    - `BG_PSK` must match BG.
 
 4. Verify BG env has matching control secret:
-   - `rg -n '^(MURMUR_CONTROL_URL|BG_PSK|BG_PSK|DJANGO_SETTINGS_MODULE)=' ~/.env/mumble-bg`
+   - `rg -n '^(MURMUR_CONTROL_URL|BG_PSK|DJANGO_SETTINGS_MODULE)=' ~/.env/mumble-bg`
 
 5. Run explicit FG-to-BG ACL sync diagnostic from Cube:
    - `python manage.py sync_mumble_acl --traceback`
@@ -114,7 +114,7 @@ Usually shared secret mismatch:
 - `BG_PSK` in Cube does not exactly match BG `BG_PSK`.
 
 Check both files directly and compare exact values (including quoting/whitespace handling):
-- `/home/cube/Cube/.env`
+- `~${WorkflowUser}/Cube/.env`
 - `~/.env/mumble-bg`
 
 ### Q: `install_assistant` is OK, but UI sync still fails. What next?
@@ -151,5 +151,5 @@ When reporting an integration issue, include:
   - `/tmp/mumble-bg-control-debug-0320.log`
   - `/tmp/mumble-bg-authd-debug-0320.log`
 - Relevant env lines from:
-  - `/home/cube/Cube/.env`
+  - `~${WorkflowUser}/Cube/.env`
   - `~/.env/mumble-bg`

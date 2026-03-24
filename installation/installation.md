@@ -163,13 +163,13 @@ source venv/bin/activate
 Optional dry-run check:
 
 ```bash
-pip install --dry-run /home/cube/mumble_fg-<version>-py3-none-any.whl
+pip install --dry-run ~${WorkflowUser}/mumble_fg-<version>-py3-none-any.whl
 ```
 
 Example dry-run output:
 
 ```text
-Processing /home/cube/mumble_fg-0.3.1.dev5-py3-none-any.whl
+Processing ~${WorkflowUser}/mumble_fg-0.3.1.dev5-py3-none-any.whl
 Requirement already satisfied: django<5.0,>=4.2 in ./venv/lib/python3.12/site-packages (from mumble-fg==0.3.1.dev5) (4.2.28)
 Requirement already satisfied: asgiref<4,>=3.6.0 in ./venv/lib/python3.12/site-packages (from django<5.0,>=4.2->mumble-fg==0.3.1.dev5) (3.11.1)
 Requirement already satisfied: sqlparse>=0.3.1 in ./venv/lib/python3.12/site-packages (from django<5.0,>=4.2->mumble-fg==0.3.1.dev5) (0.5.5)
