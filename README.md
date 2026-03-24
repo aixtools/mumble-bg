@@ -24,7 +24,6 @@ Treat the three documents above as authoritative for current BG behavior.
 ## Supplemental Documents
 
 - [docs/bg_testing.md](./docs/bg_testing.md)
-- [docs/http_surface_review.md](./docs/http_surface_review.md)
 - [docs/prod_workflow_migration.md](./docs/prod_workflow_migration.md)
 
 Supplemental docs are working notes for testing, rollout, and later hardening work.
