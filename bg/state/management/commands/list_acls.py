@@ -8,6 +8,11 @@ from typing import Any
 
 from django.core.management.base import BaseCommand
 
+from bg.eligibility import (
+    build_rule_sets,
+    blocked_main_list_from_snapshot,
+    eligible_account_list_from_snapshot,
+)
 from bg.pilot_snapshot import current_pilot_snapshot
 from bg.state.models import AccessRule, MumbleUser
 
@@ -166,32 +171,22 @@ class Command(BaseCommand):
         }
         report.update(_bg_state_lists())
 
-        try:
-            from fgbg_common.eligibility import (
-                build_rule_sets,
-                blocked_main_list_from_snapshot,
-                eligible_account_list_from_snapshot,
-            )
-        except Exception:
-            report['fg_status'] = 'unavailable'
-            report['fg_message'] = 'fg not configured/installed'
+        snapshot = current_pilot_snapshot()
+        if not snapshot.accounts:
+            report['fg_status'] = 'no_data'
+            report['fg_message'] = 'no data to evaluate (no cached FG pilot snapshot)'
         else:
-            snapshot = current_pilot_snapshot()
-            if not snapshot.accounts:
-                report['fg_status'] = 'no_data'
-                report['fg_message'] = 'no data to evaluate (no cached FG pilot snapshot)'
-            else:
-                rs = build_rule_sets(_load_access_rules())
-                report['fg_allowed'] = [
-                    {'id': int(row['pkid']), 'pilot_name': str(row['character_name'] or '')}
-                    for row in eligible_account_list_from_snapshot(snapshot, rs)
-                ]
-                report['fg_denied'] = [
-                    {'id': int(row['pkid']), 'pilot_name': str(row['character_name'] or '')}
-                    for row in blocked_main_list_from_snapshot(snapshot, rs)
-                ]
-                report['fg_status'] = 'ok'
-                report['fg_message'] = 'evaluated via fgbg_common using cached pilot snapshot'
+            rs = build_rule_sets(_load_access_rules())
+            report['fg_allowed'] = [
+                {'id': int(row['pkid']), 'pilot_name': str(row['character_name'] or '')}
+                for row in eligible_account_list_from_snapshot(snapshot, rs)
+            ]
+            report['fg_denied'] = [
+                {'id': int(row['pkid']), 'pilot_name': str(row['character_name'] or '')}
+                for row in blocked_main_list_from_snapshot(snapshot, rs)
+            ]
+            report['fg_status'] = 'ok'
+            report['fg_message'] = 'evaluated using cached pilot snapshot'
 
         report['comparison_rows'] = _build_comparison_rows(report)
 

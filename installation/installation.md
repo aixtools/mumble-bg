@@ -35,7 +35,7 @@ source ~/.env/mumble-bg
 set +a
 ```
 
-BG variables are maintained in `~/.env/mumble-bg`. For FG/Cube integration, treat this file as the operator source of truth for shared control values (for example `MURMUR_CONTROL_URL`, `FGBG_PSK`, optional `BG_PUBLIC_KEY_PATH`) and copy/append those into Cube-side env configuration during deployment.
+BG variables are maintained in `~/.env/mumble-bg`. For FG/Cube integration, treat this file as the operator source of truth for shared control values (for example `MURMUR_CONTROL_URL`, `BG_PSK`, optional `BG_PUBLIC_KEY_PATH`) and copy/append those into Cube-side env configuration during deployment.
 
 Default command pattern after loading env:
 
@@ -163,13 +163,13 @@ source venv/bin/activate
 Optional dry-run check:
 
 ```bash
-pip install --dry-run /home/cube/mumble_fg-<version>-py3-none-any.whl
+pip install --dry-run ~${WorkflowUser}/mumble_fg-<version>-py3-none-any.whl
 ```
 
 Example dry-run output:
 
 ```text
-Processing /home/cube/mumble_fg-0.3.1.dev5-py3-none-any.whl
+Processing ~${WorkflowUser}/mumble_fg-0.3.1.dev5-py3-none-any.whl
 Requirement already satisfied: django<5.0,>=4.2 in ./venv/lib/python3.12/site-packages (from mumble-fg==0.3.1.dev5) (4.2.28)
 Requirement already satisfied: asgiref<4,>=3.6.0 in ./venv/lib/python3.12/site-packages (from django<5.0,>=4.2->mumble-fg==0.3.1.dev5) (3.11.1)
 Requirement already satisfied: sqlparse>=0.3.1 in ./venv/lib/python3.12/site-packages (from django<5.0,>=4.2->mumble-fg==0.3.1.dev5) (0.5.5)
@@ -189,17 +189,17 @@ After install/migrate/collectstatic, start `cube-django` again.
 ```bash
 env | rg '^OPTIONAL_APPS='
 env | rg '^MURMUR_CONTROL_URL='
-env | rg '^FGBG_PSK='
+env | rg '^BG_PSK='
 ```
 
 Required runtime env:
 - `OPTIONAL_APPS` includes `mumble_ui.apps.MumbleUiConfig`
 - `MURMUR_CONTROL_URL` points to BG control endpoint
-- `FGBG_PSK` matches BG control secret
+- `BG_PSK` matches BG control secret
 
 Copy from BG-side config:
 - Default BG control URL is `http://127.0.0.1:18080` (adjust if BG is on another host/port).
-- `FGBG_PSK` in Cube/FG must exactly match BG `FGBG_PSK`.
+- `BG_PSK` in Cube/FG must exactly match BG `BG_PSK`.
 - If FG reads BG public key from file, set `BG_PUBLIC_KEY_PATH` to BG public key path (default `/etc/mumble-bg/keys/public_key.pem`).
 
 Quick BG URL check from Cube host:

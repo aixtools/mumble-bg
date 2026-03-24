@@ -19,7 +19,7 @@ This document captures explicit contracts and implicit conventions between:
 - Integration is API-only (control/probe endpoints).
 
 ### 1.2 Control Channel Auth
-- FG calls BG control endpoints with shared secret auth (`FGBG_PSK`).
+- FG calls BG control endpoints with shared secret auth (`BG_PSK`).
 - Missing/invalid secret is rejected (`401`).
 - If BG is unreachable, FG treats operations as unavailable.
 
@@ -130,8 +130,8 @@ When FG UI reports ACL sync failed, run this minimal diagnostic path:
 2. From BG:
    - `curl -sS http://127.0.0.1:18080/v1/health`
 3. Compare control env values:
-   - Cube: `MURMUR_CONTROL_URL`, `FGBG_PSK`
-   - BG: `FGBG_PSK`
+   - Cube: `MURMUR_CONTROL_URL`, `BG_PSK`
+   - BG: `BG_PSK`
 
 Interpretation:
 - No BG log entry for the sync attempt usually means FG/Cube never reached BG control (URL/service/network issue).

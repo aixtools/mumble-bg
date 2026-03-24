@@ -136,8 +136,6 @@ class Command(BaseCommand):
 
         value = (
             os.environ.get("BG_PSK")
-            or os.environ.get("FGBG_PSK")
-            or os.environ.get("MURMUR_CONTROL_PSK")
             or ""
         ).strip()
         if value:

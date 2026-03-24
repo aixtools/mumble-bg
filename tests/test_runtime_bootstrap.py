@@ -51,26 +51,14 @@ def test_control_main_resolves_bind_from_environment():
     )
 
 
-def test_bootstrap_bg_environment_maps_fgbg_psk_to_legacy_alias(tmp_path):
+def test_bootstrap_bg_environment_loads_bg_psk(tmp_path):
     env_file = tmp_path / "mumble-bg.env"
-    env_file.write_text("FGBG_PSK='fresh-shared-secret'\n", encoding="utf-8")
+    env_file.write_text("BG_PSK='fresh-shared-secret'\n", encoding="utf-8")
 
     with patch.dict(os.environ, {"BG_ENV_FILE": str(env_file)}, clear=True):
         bootstrap_bg_environment()
 
-        assert os.environ["FGBG_PSK"] == "fresh-shared-secret"
-        assert os.environ["MURMUR_CONTROL_PSK"] == "fresh-shared-secret"
-
-
-def test_bootstrap_bg_environment_maps_legacy_psk_to_fgbg_psk(tmp_path):
-    env_file = tmp_path / "mumble-bg.env"
-    env_file.write_text("MURMUR_CONTROL_PSK='legacy-shared-secret'\n", encoding="utf-8")
-
-    with patch.dict(os.environ, {"BG_ENV_FILE": str(env_file)}, clear=True):
-        bootstrap_bg_environment()
-
-        assert os.environ["FGBG_PSK"] == "legacy-shared-secret"
-        assert os.environ["MURMUR_CONTROL_PSK"] == "legacy-shared-secret"
+        assert os.environ["BG_PSK"] == "fresh-shared-secret"
 
 
 def test_authd_main_loads_bg_env_file_before_service_import(tmp_path):

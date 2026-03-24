@@ -20,7 +20,7 @@ fi
 mkdir -p "$(dirname "$target")"
 
 declare -A current=()
-vars=(DJANGO_SETTINGS_MODULE BG_PKI_PASSPHRASE BG_KEY_PASSPHRASE BG_BIND BG_DBMS BG_PSK FGBG_PSK MURMUR_CONTROL_PSK MURMUR_CONTROL_URL DATABASES ICE MURMUR_PROBE)
+vars=(DJANGO_SETTINGS_MODULE BG_PKI_PASSPHRASE BG_KEY_PASSPHRASE BG_BIND BG_DBMS BG_PSK MURMUR_CONTROL_URL DATABASES ICE MURMUR_PROBE)
 
 if [[ -n "$backup_file" ]]; then
   extracted="$(mktemp)"
@@ -63,7 +63,7 @@ val_or_default() {
 dj_settings="$(val_or_default DJANGO_SETTINGS_MODULE "bg.settings")"
 bg_passphrase="$(val_or_default BG_PKI_PASSPHRASE "$(val_or_default BG_KEY_PASSPHRASE "CHANGE_ME")")"
 bg_bind="$(val_or_default BG_BIND "")"
-control_psk="$(val_or_default BG_PSK "$(val_or_default FGBG_PSK "$(val_or_default MURMUR_CONTROL_PSK "CHANGE_ME")")")"
+control_psk="$(val_or_default BG_PSK "CHANGE_ME")"
 control_url="$(val_or_default MURMUR_CONTROL_URL "http://127.0.0.1:18080")"
 databases_json="$(val_or_default BG_DBMS "$(val_or_default DATABASES '{
   "name": "authd bg",

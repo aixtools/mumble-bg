@@ -19,8 +19,6 @@ ENV_KEYS = [
     "BG_BIND",
     "BG_DBMS",
     "BG_PSK",
-    "FGBG_PSK",
-    "MURMUR_CONTROL_PSK",
     "MURMUR_CONTROL_URL",
     "DATABASES",
     "ICE",
@@ -194,50 +192,11 @@ def load_env_file_into_environment(
         os.environ["BG_DBMS"] = legacy_value
         applied["BG_DBMS"] = legacy_value
     if _is_missing_env_value("BG_PSK") and (
-        env_values.get("FGBG_PSK")
-        or os.environ.get("FGBG_PSK")
-        or env_values.get("MURMUR_CONTROL_PSK")
-        or os.environ.get("MURMUR_CONTROL_PSK")
+        env_values.get("BG_PSK") or os.environ.get("BG_PSK")
     ):
-        current_value = str(
-            env_values.get("FGBG_PSK")
-            or os.environ.get("FGBG_PSK")
-            or env_values.get("MURMUR_CONTROL_PSK")
-            or os.environ.get("MURMUR_CONTROL_PSK")
-            or ""
-        )
+        current_value = str(env_values.get("BG_PSK") or os.environ.get("BG_PSK") or "")
         os.environ["BG_PSK"] = current_value
         applied["BG_PSK"] = current_value
-    if _is_missing_env_value("FGBG_PSK") and (
-        env_values.get("BG_PSK")
-        or os.environ.get("BG_PSK")
-        or env_values.get("MURMUR_CONTROL_PSK")
-        or os.environ.get("MURMUR_CONTROL_PSK")
-    ):
-        legacy_value = str(
-            env_values.get("BG_PSK")
-            or os.environ.get("BG_PSK")
-            or env_values.get("MURMUR_CONTROL_PSK")
-            or os.environ.get("MURMUR_CONTROL_PSK")
-            or ""
-        )
-        os.environ["FGBG_PSK"] = legacy_value
-        applied["FGBG_PSK"] = legacy_value
-    if _is_missing_env_value("MURMUR_CONTROL_PSK") and (
-        env_values.get("BG_PSK")
-        or os.environ.get("BG_PSK")
-        or
-        env_values.get("FGBG_PSK") or os.environ.get("FGBG_PSK")
-    ):
-        current_value = str(
-            env_values.get("BG_PSK")
-            or os.environ.get("BG_PSK")
-            or env_values.get("FGBG_PSK")
-            or os.environ.get("FGBG_PSK")
-            or ""
-        )
-        os.environ["MURMUR_CONTROL_PSK"] = current_value
-        applied["MURMUR_CONTROL_PSK"] = current_value
     if _is_missing_env_value("BG_PKI_PASSPHRASE") and (
         env_values.get("BG_KEY_PASSPHRASE") or os.environ.get("BG_KEY_PASSPHRASE")
     ):

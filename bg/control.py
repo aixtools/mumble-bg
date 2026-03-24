@@ -67,7 +67,7 @@ def _new_password(length: int = 16) -> str:
 
 
 def _env_bootstrap_psk() -> str | None:
-    value = (os.getenv('BG_PSK') or os.getenv('FGBG_PSK') or os.getenv('MURMUR_CONTROL_PSK') or '').strip()
+    value = (os.getenv('BG_PSK') or '').strip()
     return value or None
 
 
