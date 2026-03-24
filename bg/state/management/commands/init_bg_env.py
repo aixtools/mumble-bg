@@ -69,7 +69,7 @@ class Command(BaseCommand):
         dj_settings = cur_or_default("DJANGO_SETTINGS_MODULE", "bg.settings")
         passphrase = cur_or_default("BG_PKI_PASSPHRASE", cur_or_default("BG_KEY_PASSPHRASE", "CHANGE_ME"))
         bg_bind = cur_or_default("BG_BIND", "")
-        psk = cur_or_default("BG_PSK", cur_or_default("FGBG_PSK", cur_or_default("MURMUR_CONTROL_PSK", "CHANGE_ME")))
+        psk = cur_or_default("BG_PSK", "CHANGE_ME")
         control_url = cur_or_default("MURMUR_CONTROL_URL", "http://127.0.0.1:18080")
         databases = cur_or_default("BG_DBMS", cur_or_default("DATABASES", DEFAULT_DATABASES))
         ice = cur_or_default("ICE", DEFAULT_ICE)

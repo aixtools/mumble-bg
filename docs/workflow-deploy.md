@@ -39,7 +39,7 @@ The workflow in `.github/workflows/deploy-dev.yml` currently:
 - creates `<venv_dir>` if missing and installs `requirements.txt`
 - bootstraps `BG_DBMS` through `deploy/create-db.sh` when the BG DB host is local (`127.0.0.1` or `localhost`)
 - optionally resets the local PostgreSQL BG database before migrate when `BG_RESET_DB_ON_DEPLOY` is enabled
-- strips a `:reset` suffix from `FGBG_PSK`, writes the stripped value back to `<env_file>`, and runs `manage.py reset_murmur_control_key --yes`
+- strips a `:reset` suffix from `BG_PSK`, writes the stripped value back to `<env_file>`, and runs `manage.py reset_murmur_control_key --yes`
 - runs `manage.py migrate --noinput`
 - restarts one configured systemd service, defaulting to `mumble-bg-auth`
 - verifies the restarted service with `systemctl is-active`
@@ -133,7 +133,7 @@ Optional deploy/runtime values:
 - `MURMUR_PROBE`
 - `BG_ENGINE`
 - `BG_RESET_DB_ON_DEPLOY`
-- `FGBG_PSK`
+- `BG_PSK`
 - `BG_KEY_PASSPHRASE`
 
 If you want the guided first-time env workflow and key-generation checks, use
@@ -244,7 +244,7 @@ Optional deploy/runtime configuration:
 - `MURMUR_PROBE`
 - `BG_ENGINE`
 - `BG_RESET_DB_ON_DEPLOY`
-- `FGBG_PSK`
+- `BG_PSK`
 
 ### Deploy Target Host-User Label
 
@@ -350,12 +350,12 @@ Optional per probe target:
 - `dbport`
 - `dbengine`
 
-### `FGBG_PSK` Notes
+### `BG_PSK` Notes
 
 - when set, the workflow writes it into `<env_file>`
 - if the value ends with `:reset`, deploy strips the suffix for runtime and runs `manage.py reset_murmur_control_key --yes`
 - this supports a one-shot control-key reset during deploy without leaving the suffix in runtime config
-- legacy GitHub secret name `MURMUR_CONTROL_PSK` is still accepted as a workflow fallback, but `FGBG_PSK` is the primary branch name
+- GitHub secret and runtime env variable should both use `BG_PSK`
 
 ## After Bootstrap
 
