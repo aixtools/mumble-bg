@@ -96,7 +96,6 @@ Required in the `mumble-bg` repo:
 Common optional secrets/vars used by BG deploy:
 
 - `MURMUR_PROBE`
-- `BG_ENGINE`
 - `BG_RESET_DB_ON_DEPLOY` (repo variable or secret)
 
 Templates:
@@ -272,10 +271,10 @@ At minimum, define:
 Optional deploy/runtime values:
 
 - `MURMUR_PROBE`
-- `BG_ENGINE`
 - `BG_RESET_DB_ON_DEPLOY`
 - `BG_PSK`
 - `BG_KEY_PASSPHRASE`
+- `BG_ENGINE` (optional runtime override only; default bootstrap engine is PostgreSQL, set `BG_ENGINE=mysql` only when needed)
 
 If you want the guided first-time env workflow and key-generation checks, use
 `installation/installation.md` and `python -m django init_bg_env` instead of
@@ -295,7 +294,7 @@ bash <project_dir>/deploy/setup-root.sh
 This script currently:
 
 - ensures `python3` and `python3-venv` are installed
-- installs a DB client matching `BG_ENGINE`
+- installs a PostgreSQL DB client by default (override with `BG_ENGINE=mysql` only when needed)
 - creates `<venv_dir>` if missing
 - bootstraps a local BG database when the current `BG_DBMS` host is local
 - installs Python requirements
@@ -384,9 +383,9 @@ Required deploy configuration:
 Optional deploy/runtime configuration:
 
 - `MURMUR_PROBE`
-- `BG_ENGINE`
 - `BG_RESET_DB_ON_DEPLOY`
 - `BG_PSK`
+- `BG_ENGINE` (optional runtime override only; default bootstrap engine is PostgreSQL)
 
 ### Deploy Target Secret Pattern
 

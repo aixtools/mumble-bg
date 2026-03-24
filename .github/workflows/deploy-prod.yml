@@ -151,7 +151,7 @@ jobs:
           # Write env file content locally for scp to remote.
           env_file_local = Path("/tmp/mumble-bg.env")
           lines = []
-          for k in ["DATABASES", "ICE", "MURMUR_PROBE", "BG_ENGINE",
+          for k in ["DATABASES", "ICE", "MURMUR_PROBE",
                      "BG_RESET_DB_ON_DEPLOY", "MURMUR_CONTROL_PSK"]:
               v = env_payload.get(k)
               if v is None or v == "":
@@ -219,6 +219,7 @@ jobs:
           set -a
           source "${DEPLOY_ENV_FILE}"
           set +a
+          # Default bootstrap engine is PostgreSQL; override only if needed with BG_ENGINE=mysql.
           BG_ENGINE_EFFECTIVE="${BG_ENGINE:-postgres}"
           case "$(printf '%s' "${BG_ENGINE_EFFECTIVE}" | tr '[:upper:]' '[:lower:]')" in
             ''|postgres|postgresql|psql)
@@ -336,6 +337,7 @@ jobs:
           BG_DATABASE_HOST="$(json_field DATABASES bg host)"
           BG_DATABASE_USER="$(json_field DATABASES bg username)"
           BG_DATABASE_PASSWORD="$(json_field DATABASES bg password)"
+          # Default bootstrap engine is PostgreSQL; override only if needed with BG_ENGINE=mysql.
           BG_ENGINE_EFFECTIVE="${BG_ENGINE:-postgres}"
 
           case "$(printf '%s' "${BG_ENGINE_EFFECTIVE}" | tr '[:upper:]' '[:lower:]')" in
