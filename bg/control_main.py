@@ -37,10 +37,12 @@ def main(argv=None):
         bind_source = bind_info["source"]
         bind_detail = bind_info["detail"]
 
-    print(
-        f"mumble-bg control bind={bind} source={bind_source} detail={bind_detail}",
-        flush=True,
-    )
+    if bind_source == "default":
+        log_message = f"mumble-bg control {bind_detail}, using {bind}"
+    else:
+        log_message = f"mumble-bg control bind={bind} source={bind_source} detail={bind_detail}"
+
+    print(log_message, flush=True)
 
     from django.core.management import execute_from_command_line
 

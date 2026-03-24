@@ -43,9 +43,30 @@ def test_control_main_resolves_bind_from_environment():
         },
         clear=True,
     ):
-        with patch("django.core.management.execute_from_command_line") as execute:
-            control_main(["--noreload"])
+        with patch("builtins.print") as print_mock:
+            with patch("django.core.management.execute_from_command_line") as execute:
+                control_main(["--noreload"])
 
+    print_mock.assert_called_once_with(
+        "mumble-bg control bind=127.0.0.1:18080 source=MURMUR_CONTROL_URL detail=MURMUR_CONTROL_URL literal IP",
+        flush=True,
+    )
+
+    execute.assert_called_once_with(
+        ["django", "runserver", "127.0.0.1:18080", "--noreload"]
+    )
+
+
+def test_control_main_logs_default_bind_as_fallback():
+    with patch.dict(os.environ, {}, clear=True):
+        with patch("builtins.print") as print_mock:
+            with patch("django.core.management.execute_from_command_line") as execute:
+                control_main(["--noreload"])
+
+    print_mock.assert_called_once_with(
+        "mumble-bg control MURMUR_CONTROL_URL not set, using 127.0.0.1:18080",
+        flush=True,
+    )
     execute.assert_called_once_with(
         ["django", "runserver", "127.0.0.1:18080", "--noreload"]
     )
