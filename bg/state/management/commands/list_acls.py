@@ -8,6 +8,7 @@ from typing import Any
 
 from django.core.management.base import BaseCommand
 
+from bg.eligibility import blocked_main_list_from_snapshot, eligible_account_list_from_snapshot
 from bg.pilot_snapshot import current_pilot_snapshot
 from bg.state.models import AccessRule, MumbleUser
 
@@ -167,11 +168,7 @@ class Command(BaseCommand):
         report.update(_bg_state_lists())
 
         try:
-            from fgbg_common.eligibility import (
-                build_rule_sets,
-                blocked_main_list_from_snapshot,
-                eligible_account_list_from_snapshot,
-            )
+            from fgbg_common.eligibility import build_rule_sets
         except Exception:
             report['fg_status'] = 'unavailable'
             report['fg_message'] = 'fg not configured/installed'
