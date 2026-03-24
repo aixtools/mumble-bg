@@ -1,4 +1,4 @@
-# Deploy Workflow
+# Deploy using GIT Workflows
 
 This document describes the current github deployment workflow for `mumble-bg`.
 It covers:
@@ -10,7 +10,48 @@ It covers:
 For manual (ie, not using workflow actions) full FG + BG bring-up, control-service verification, and key-generation steps,
 see `installation/installation.md`.
 
-## Current Split
+## To prepare for workflow deployment
+
+### On the TARGETHOST for BG
+- create the deploy user
+- create workflow PKI keys `.ssh/id_deploy` and `id_deploy.pub`
+- append or create `~/.ssh/authorized_keys` with the content of `id_deploy.pub`.
+- Ensure a DBMS package such as postgresql or mariadb is installed
+- create a DB user+password and DB databaase for BG
+- collect ICE credentials for each Murmur server BG will register users with
+- if the deploy userid is not root, clone the repo to it's intended location and, as root, run the ./deploy/setup-root.sh script.
+- Create BG *SECRETS* to your fork of mumble-bg (see below)
+
+Several of these steps have examples in the broader install guide in `installation/installation.md`.
+
+### On the TARGETHOST for FG
+- use the same user as the main application FG will run in
+- create workflow PKI keys. Note: BG_PKI must match BG_PKI from the BG secrets - often these will reuse the values from the main application.
+- create workflow SECRETS (See below)
+- ensure BG_URL points at BG:TARGETHOST, or localhost if both are on the same host
+- you need the name of the "owning" application env file so variables can be appended or updated.
+
+## What The GitHub Workflow Does
+
+The workflow in `.github/workflows/deploy-dev.yml` currently:
+
+- resolves a deploy target from two JSON secrets containing `host` +  `user`, and `key`
+- incorporates the SSH private key from the *USER* secret in the *TARGETDEST* `GITHUB_ENV` to execute commands using ssh
+- if needed, adds the target host to `known_hosts`
+- rsyncs the repository to `<project_dir>`
+- writes `<env_file>` from GitHub secrets
+- creates `<venv_dir>` if missing and installs `requirements.txt`
+- optional test steps occur here (see below)
+- runs `manage.py migrate --noinput`
+- restarts one configured systemd service, defaulting to `mumble-bg-auth`
+- verifies the restarted service with `systemctl is-active`
+
+### Testing aids for BG
+- bootstraps `BG_DBMS` through `deploy/create-db.sh` when the BG DB host is local (`127.0.0.1` or `localhost`)
+- optionally resets the local PostgreSQL BG database before migrate when `BG_RESET_DB_ON_DEPLOY` is enabled
+- strips a `:reset` suffix from `BG_PSK`, writes the stripped value back to `<env_file>`, and runs `manage.py reset_murmur_control_key --yes`
+
+## Workflow Content in repository
 
 There are two different directories `./deploy` and `./.gitbub/workflows`. They focus on different problems:
 
@@ -19,24 +60,29 @@ There are two different directories `./deploy` and `./.gitbub/workflows`. They f
 If not root, then this will need to run ONCE by the root user, or using sudo.
 - `deploy/unsetup-root.sh` removes the auth-service bootstrap artifacts if you need a clean reinstall. Basically, undoes the steps performed by `setup-root.sh`
 
-## Default Layout
+## Default Layout for BG
 
-Current standalone defaults are:
+Note: BG may operate on a different TARGETDEST than FG
+
+Current defaults for bg environment are:
 
 - repo checkout: `~${WorkflowUser}/mumble-bg`
 - virtualenv: `~${WorkflowUser}/.venv/mumble-bg`
 - environment file: `~${WorkflowUser}/.env/mumble-bg`
 - systemctl managed services: `bg-control` and `bg-authd`
 
+Defaults for fg environment are owned by the application (e.g., cube)
+: 
 ## Preparing GitHub Secrets
 
 Set secrets before running either workflow.
+Use single-value secret notation in documentation as `NAME = value`.
 
 ### BG Secrets
 
 Required in the `mumble-bg` repo:
 
-- `TARGETHOST:<hostname>`
+- `TARGETHOST`
   - Hostname string for the deploy target.
 - `TARGETUSER`
   - JSON with SSH user/key and target paths (`user`, `key`; optional `home_dir`, `project_dir`, `env_file`, `venv_dir`, `service_name`).
@@ -55,7 +101,7 @@ Common optional secrets/vars used by BG deploy:
 
 Templates:
 
-`TARGETHOST:<hostname>`
+`TARGETHOST`
 
 ```text
 bg-dev.example.net
@@ -113,7 +159,7 @@ your-shared-control-secret
 
 Required in the `mumble-fg` repo:
 
-- `TARGETHOST:<hostname>`
+- `TARGETHOST`
   - Same hostname value used for BG target.
 - `TARGETUSER`
   - JSON with SSH user/key and FG target paths (`user`, `key`; optional `home_dir`, `project_dir`, `env_file`, `service_units`).
@@ -122,7 +168,7 @@ Required in the `mumble-fg` repo:
 
 Templates:
 
-`TARGETHOST:<hostname>`
+`TARGETHOST`
 
 ```text
 bg-dev.example.net
@@ -152,37 +198,6 @@ Service-units note:
 ```text
 your-shared-control-secret
 ```
-
-## What The GitHub Workflow Does
-
-The workflow in `.github/workflows/deploy-dev.yml` currently:
-
-- resolves a deploy target from one JSON secret containing `host`, `user`, and `key`
-- writes that SSH private key into the runner and records target defaults in `GITHUB_ENV`
-- adds the target host to `known_hosts`
-- rsyncs this repository to `<project_dir>`
-- writes `<env_file>` from GitHub secrets
-- creates `<venv_dir>` if missing and installs `requirements.txt`
-- bootstraps `BG_DBMS` through `deploy/create-db.sh` when the BG DB host is local (`127.0.0.1` or `localhost`)
-- optionally resets the local PostgreSQL BG database before migrate when `BG_RESET_DB_ON_DEPLOY` is enabled
-- strips a `:reset` suffix from `BG_PSK`, writes the stripped value back to `<env_file>`, and runs `manage.py reset_murmur_control_key --yes`
-- runs `manage.py migrate --noinput`
-- restarts one configured systemd service, defaulting to `mumble-bg-auth`
-- verifies the restarted service with `systemctl is-active`
-
-## What The Workflow Does Not Do
-
-The current workflow does not:
-
-- create the deploy user
-- install the target SSH public key into `authorized_keys`
-- install Murmur or a database server package
-- install or manage the `mumble-bg-control` systemd unit
-- generate BG encryption keys or export the BG public key to FG
-- deploy or configure `mumble-fg`
-- trigger FG-to-BG ACL sync or pilot-snapshot sync after deploy
-
-Those steps remain operator work or are covered by the broader install guide in `installation/installation.md`.
 
 ## Branch-Specific Runtime Contract
 
@@ -361,7 +376,8 @@ explicitly; the current workflow does not restart both services for you.
 
 Required deploy configuration:
 
-- deploy target JSON secret, identified by a host-user label, default label `CUBE_DEV_CUBE`
+- `TARGETHOST` secret (single hostname value)
+- `TARGETUSER` secret (JSON with SSH user/key and optional path fields)
 - `BG_DBMS`
 - `ICE`
 
@@ -372,29 +388,35 @@ Optional deploy/runtime configuration:
 - `BG_RESET_DB_ON_DEPLOY`
 - `BG_PSK`
 
-### Deploy Target Host-User Label
+### Deploy Target Secret Pattern
 
-The deploy target is selected by a host-user label. The default label is
-`CUBE_DEV_CUBE`, which is a GitHub-secret-safe host-user label.
+The deploy target is selected from two secrets:
 
-Default target secret example:
+- `TARGETHOST` with a single hostname value.
+- `TARGETUSER` with JSON containing connection/user/path details.
+
+`TARGETHOST` example:
+
+```text
+bg-dev.example.net
+```
+
+`TARGETUSER` example:
 
 ```json
 {
-  "host": "<deploy_host>",
   "user": "<deploy_user>",
   "key": "-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----",
-  "home_dir": "/home/<deploy_user>",
-  "project_dir": "/home/<deploy_user>/mumble-bg",
-  "env_file": "/home/<deploy_user>/.env/mumble-bg",
-  "venv_dir": "/home/<deploy_user>/.venv/mumble-bg",
-  "service_name": "mumble-bg-auth"
+  "home_dir": "~<deploy_user>",
+  "project_dir": "~<deploy_user>/mumble-bg",
+  "env_file": "~<deploy_user>/.env/mumble-bg",
+  "venv_dir": "~<deploy_user>/.venv/mumble-bg",
+  "service_name": "bg-authd"
 }
 ```
 
 Required target fields:
 
-- `host`
 - `user`
 - `key`
 
@@ -412,7 +434,7 @@ Defaults:
 - `project_dir`: `<home_dir>/mumble-bg`
 - `env_file`: `<home_dir>/.env/mumble-bg`
 - `venv_dir`: `<home_dir>/.venv/mumble-bg`
-- `service_name`: `mumble-bg-auth`
+- `service_name`: `bg-authd`
 
 ### ICE Secret Shape
 
