@@ -153,7 +153,7 @@ jobs:
           env_file_local = Path("/tmp/mumble-bg.env")
           lines = []
           for k in ["DATABASES", "ICE", "MURMUR_PROBE",
-                     "BG_RESET_DB_ON_DEPLOY", "MURMUR_CONTROL_PSK", "BG_PKI_PASSPHRASE"]:
+                     "MURMUR_CONTROL_PSK", "BG_PKI_PASSPHRASE"]:
               v = env_payload.get(k)
               if v is None or v == "":
                   continue
@@ -377,6 +377,9 @@ jobs:
               ;;
           esac
 
+          # Test-only local reset hook: honored only when explicitly placed in
+          # the target env file by an operator. The normal workflow no longer
+          # sources this from GitHub secrets or workflow vars.
           BG_RESET_DB_NORMALIZED="$(printf '%s' "${BG_RESET_DB_ON_DEPLOY:-}" | tr '[:upper:]' '[:lower:]')"
           if [ "${BG_RESET_DB_NORMALIZED}" = "1" ] || [ "${BG_RESET_DB_NORMALIZED}" = "true" ] || [ "${BG_RESET_DB_NORMALIZED}" = "yes" ]; then
             if [ "${BG_ENGINE_EFFECTIVE}" != "postgres" ]; then

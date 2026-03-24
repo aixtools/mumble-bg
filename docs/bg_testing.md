@@ -37,6 +37,18 @@ These can be run with only BG, its own DB, and optional local Murmur/ICE endpoin
 - `python -m django verify_auth_fallback`
   Exercises authd-vs-Murmur login fallback behavior against a test setup.
 
+### Disposable reset flag for test-only runs
+
+For disposable local test runs, `BG_RESET_DB_ON_DEPLOY=True` may be placed in the local BG env file before running the deploy/bootstrap path.
+
+Important constraints:
+
+- this is test-only and is not part of the normal GitHub workflow secret model
+- stop `mumble-server` before invoking the reset path
+- remove or unset `BG_RESET_DB_ON_DEPLOY` after the reset run
+
+Use it only when the target BG and Murmur data are disposable.
+
 ### Runtime observation
 
 - `curl http://127.0.0.1:18080/v1/health`
