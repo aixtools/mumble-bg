@@ -26,7 +26,7 @@ Current standalone defaults are:
 - repo checkout: `~${WorkflowUser}/mumble-bg`
 - virtualenv: `~${WorkflowUser}/.venv/mumble-bg`
 - environment file: `~${WorkflowUser}/.env/mumble-bg`
-- default restarted service: `mumble-bg-auth`
+- systemctl managed services: `bg-control` and `bg-authd`
 
 ## What The GitHub Workflow Does
 
