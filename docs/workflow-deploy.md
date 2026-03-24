@@ -28,6 +28,40 @@ Current standalone defaults are:
 - environment file: `~${WorkflowUser}/.env/mumble-bg`
 - systemctl managed services: `bg-control` and `bg-authd`
 
+## Preparing GitHub Secrets
+
+Set secrets before running either workflow.
+
+### BG Secrets
+
+Required in the `mumble-bg` repo:
+
+- `CUBE_DEV_CUBE` (or your selected deploy-target secret name)
+  - JSON with host access and target paths (`host`, `user`, `key`; optional `home_dir`, `project_dir`, `env_file`, `venv_dir`, `service_name`).
+- `BG_DBMS`
+  - BG database JSON object.
+- `ICE`
+  - ICE inventory JSON list.
+- `BG_PSK`
+  - FG/BG control shared secret.
+
+Common optional secrets/vars used by BG deploy:
+
+- `MURMUR_PROBE`
+- `BG_ENGINE`
+- `BG_RESET_DB_ON_DEPLOY` (repo variable or secret)
+
+### FG Secrets
+
+Required in the `mumble-fg` repo:
+
+- `CUBE_DEV_CUBE` (or your selected deploy-target secret name)
+  - JSON with host access and FG target paths (`host`, `user`, `key`; optional `home_dir`, `project_dir`, `env_file`, `bg_env_file`, `service_units`).
+- `BG_PSK`
+  - Same exact value as BG `BG_PSK`.
+
+FG deploy can also import `BG_PSK` from `bg_env_file` on the host when configured.
+
 ## What The GitHub Workflow Does
 
 The workflow in `.github/workflows/deploy-dev.yml` currently:
