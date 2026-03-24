@@ -9,6 +9,7 @@ import secrets
 from django.contrib.auth.models import User
 
 from bg.eligibility import (
+    build_rule_sets,
     blocked_main_list_from_snapshot,
     eligible_account_list_from_snapshot,
 )
@@ -22,7 +23,6 @@ from bg.pilot.registrations import (
 )
 from bg.pilot_snapshot import current_pilot_snapshot
 from bg.state.models import AccessRule, EveObject, MumbleServer, MumbleUser, PilotAccountCache
-from fgbg_common.eligibility import build_rule_sets
 
 _FORBIDDEN_PASSWORD_CHARS = {" ", "'", '"', '`', '\\'}
 _PASSWORD_CHARS = ''.join(

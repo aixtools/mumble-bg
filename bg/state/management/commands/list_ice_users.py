@@ -6,7 +6,7 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
 
-from bg.eligibility import account_acl_state_by_pkid
+from bg.eligibility import account_acl_state_by_pkid, build_rule_sets
 from bg.pilot_snapshot import current_pilot_snapshot
 from bg.state.models import AccessRule, MumbleServer, MumbleUser
 from bg.pulse.reconciler import MurmurReconcileError, _MurmurServerAdapter
@@ -21,10 +21,6 @@ def _acl_by_pkid() -> dict[int, str]:
     Return ACL state per pkid from shared FG/BG eligibility logic.
     Values: permit | block
     """
-    try:
-        from fgbg_common.eligibility import build_rule_sets
-    except Exception:
-        return {}
     snapshot = current_pilot_snapshot()
     if not snapshot.accounts:
         return {}

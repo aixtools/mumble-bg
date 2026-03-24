@@ -9,6 +9,7 @@ from typing import Any
 from django.core.management.base import BaseCommand
 
 from bg.eligibility import (
+    build_rule_sets,
     blocked_main_list_from_snapshot,
     eligible_account_list_from_snapshot,
 )
@@ -55,24 +56,18 @@ class Command(BaseCommand):
         fg_allow_by_id: dict[int, set[str]] = defaultdict(set)
         fg_deny_by_id: dict[int, set[str]] = defaultdict(set)
 
-        try:
-            from fgbg_common.eligibility import build_rule_sets
-        except Exception:
-            report['fg_status'] = 'unavailable'
-            report['fg_message'] = 'fg not configured/installed'
+        snapshot = current_pilot_snapshot()
+        if not snapshot.accounts:
+            report['fg_status'] = 'no_data'
+            report['fg_message'] = 'no data to evaluate (no cached FG pilot snapshot)'
         else:
-            snapshot = current_pilot_snapshot()
-            if not snapshot.accounts:
-                report['fg_status'] = 'no_data'
-                report['fg_message'] = 'no data to evaluate (no cached FG pilot snapshot)'
-            else:
-                rule_sets = build_rule_sets(_load_access_rules())
-                for row in eligible_account_list_from_snapshot(snapshot, rule_sets):
-                    fg_allow_by_id[int(row['pkid'])].add(str(row['character_name'] or ''))
-                for row in blocked_main_list_from_snapshot(snapshot, rule_sets):
-                    fg_deny_by_id[int(row['pkid'])].add(str(row['character_name'] or ''))
-                report['fg_status'] = 'ok'
-                report['fg_message'] = 'evaluated via fgbg_common using cached pilot snapshot'
+            rule_sets = build_rule_sets(_load_access_rules())
+            for row in eligible_account_list_from_snapshot(snapshot, rule_sets):
+                fg_allow_by_id[int(row['pkid'])].add(str(row['character_name'] or ''))
+            for row in blocked_main_list_from_snapshot(snapshot, rule_sets):
+                fg_deny_by_id[int(row['pkid'])].add(str(row['character_name'] or ''))
+            report['fg_status'] = 'ok'
+            report['fg_message'] = 'evaluated using cached pilot snapshot'
 
         bg_rows = list(
             MumbleUser.objects.select_related('user', 'server')
