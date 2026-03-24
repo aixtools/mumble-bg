@@ -6,9 +6,18 @@ class StateConfig(AppConfig):
     name = 'bg.state'
 
     def ready(self):
+        import logging
         from bg import crypto
+        logger = logging.getLogger('bg.crypto')
         try:
             crypto.initialize()
+        except TypeError as exc:
+            if 'Password was not given but private key is encrypted' in str(exc):
+                logger.warning(
+                    'Crypto not fully initialized: encrypted private key present but '
+                    'BG_PKI_PASSPHRASE is not set'
+                )
+            else:
+                logger.exception('Failed to initialize crypto')
         except Exception:
-            import logging
-            logging.getLogger('bg.crypto').exception('Failed to initialize crypto')
+            logger.exception('Failed to initialize crypto')

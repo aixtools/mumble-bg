@@ -8,6 +8,7 @@ import textwrap
 from typing import Any
 
 from django.core.management.base import BaseCommand
+from django.db import OperationalError, ProgrammingError
 
 from bg.db import MmblBgDBA, PilotDBError, db_config_from_env
 from bg.envtools import resolve_bg_bind
@@ -195,9 +196,30 @@ class Command(BaseCommand):
 
         return {"status": "warning", "message": "inactive: crypto not fully initialized"}
 
+    @staticmethod
+    def _is_missing_relation_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return (
+            'does not exist' in message
+            or 'undefinedtable' in message
+            or 'no such table' in message
+            or getattr(exc, 'pgcode', None) == '42P01'
+        )
+
     def _check_pilot_snapshot(self) -> dict[str, Any]:
-        account_count = PilotAccountCache.objects.count()
-        character_count = PilotCharacterCache.objects.count()
+        try:
+            account_count = PilotAccountCache.objects.count()
+            character_count = PilotCharacterCache.objects.count()
+        except (ProgrammingError, OperationalError) as exc:
+            if self._is_missing_relation_error(exc):
+                return {
+                    "status": "warning",
+                    "message": "BG schema not migrated yet (run python manage.py migrate)",
+                }
+            return {
+                "status": "error",
+                "message": f"could not query cached pilot snapshot tables: {exc}",
+            }
         if account_count == 0:
             return {
                 "status": "warning",
@@ -302,7 +324,18 @@ class Command(BaseCommand):
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "message": f"failed to load authd probe: {exc}"}
 
-        result = probe_authenticator_registration()
+        try:
+            result = probe_authenticator_registration()
+        except (ProgrammingError, OperationalError) as exc:
+            if self._is_missing_relation_error(exc):
+                return {
+                    "status": "warning",
+                    "message": "BG schema not migrated yet (run python manage.py migrate)",
+                }
+            return {
+                "status": "error",
+                "message": f"authd probe failed: {exc}",
+            }
         registered = int(result.get("registered", 0))
         errors = result.get("errors") or []
         if registered > 0 and not errors:
