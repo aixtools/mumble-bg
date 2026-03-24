@@ -45,13 +45,13 @@ For the current standalone background-service phase, the default layout is:
 
 Relevant files:
 
-- [deploy/setup-hetzner.sh](/home/michael/prj/mumble-bg/deploy/setup-hetzner.sh)
-- [deploy/undeploy-hetzner.sh](/home/michael/prj/mumble-bg/deploy/undeploy-hetzner.sh)
+- [deploy/setup-root.sh](/home/michael/prj/mumble-bg/deploy/setup-root.sh)
+- [deploy/unsetup-root.sh](/home/michael/prj/mumble-bg/deploy/unsetup-root.sh)
 - [deploy/systemd/mumble-bg-auth.service](/home/michael/prj/mumble-bg/deploy/systemd/mumble-bg-auth.service)
 - [.github/workflows/deploy-dev.yml](/home/michael/prj/mumble-bg/.github/workflows/deploy-dev.yml)
 - [docs/workflow-deploy.md](./docs/workflow-deploy.md)
 
-`deploy/setup-hetzner.sh` is the one-time root install path. The GitHub workflow is for ordinary code updates after that setup exists.
+`deploy/setup-root.sh` is the one-time root install path. The GitHub workflow is for ordinary code updates after that setup exists.
 
 ## Pilot Eligibility Rules
 

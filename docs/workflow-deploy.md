@@ -1,22 +1,23 @@
 # Deploy Workflow
 
-This document describes the current dev-host deployment workflow for `mumble-bg`.
+This document describes the current github deployment workflow for `mumble-bg`.
 It covers:
 
 - one-time host bootstrap
 - ordinary code updates through GitHub Actions
 - the runtime/deploy secret contract used by the current branch
 
-For full FG + BG bring-up, control-service verification, and key-generation steps,
+For manual (ie, not using workflow actions) full FG + BG bring-up, control-service verification, and key-generation steps,
 see `installation/installation.md`.
 
 ## Current Split
 
-There are two different paths, and they solve different problems:
+There are two different directories `./deploy` and `./.gitbub/workflows`. They focus on different problems:
 
-- `deploy/setup-hetzner.sh` is the one-time root bootstrap path
-- `.github/workflows/deploy-dev.yml` is the routine update path after bootstrap exists
-- `deploy/undeploy-hetzner.sh` removes the auth-service bootstrap artifacts if you need a clean reinstall
+- `.github/workflows/deploy-dev.yml` - This file directs the workflow action from github - to push the repo to a destination.
+- `deploy/setup-root.sh` is the one-time root bootstrap path. If the user credentials are root the workflow can execute it.
+If not root, then this will need to run ONCE by the root user, or using sudo.
+- `deploy/unsetup-root.sh` removes the auth-service bootstrap artifacts if you need a clean reinstall. Basically, undoes the steps performed by `setup-root.sh`
 
 ## Default Layout
 
@@ -238,7 +239,7 @@ Run these steps once on the target host before relying on GitHub Actions updates
 
 ### 1. Put the repo on the target host
 
-`deploy/setup-hetzner.sh` expects a repo checkout at `<project_dir>`.
+`deploy/setup-root.sh` expects a repo checkout at `<project_dir>`.
 Use a normal clone or copy the repository there by some other operator-controlled means.
 
 Example:
@@ -289,7 +290,7 @@ APP_HOME=/home/<deploy_user> \
 APP_DIR=<project_dir> \
 VENV_DIR=<venv_dir> \
 ENV_FILE=<env_file> \
-bash <project_dir>/deploy/setup-hetzner.sh
+bash <project_dir>/deploy/setup-root.sh
 ```
 
 This script currently:
@@ -328,17 +329,17 @@ APP_HOME=/home/<deploy_user> \
 APP_DIR=<project_dir> \
 VENV_DIR=<venv_dir> \
 ENV_FILE=<env_file> \
-bash <project_dir>/deploy/undeploy-hetzner.sh
+bash <project_dir>/deploy/unsetup-root.sh
 
 APP_USER=<deploy_user> \
 APP_HOME=/home/<deploy_user> \
 APP_DIR=<project_dir> \
 VENV_DIR=<venv_dir> \
 ENV_FILE=<env_file> \
-bash <project_dir>/deploy/setup-hetzner.sh
+bash <project_dir>/deploy/setup-root.sh
 ```
 
-`deploy/undeploy-hetzner.sh` removes:
+`deploy/unsetup-root.sh` removes:
 
 - the `mumble-bg-auth` systemd unit
 - the matching sudoers file
