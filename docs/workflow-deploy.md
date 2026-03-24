@@ -65,7 +65,7 @@ bg-dev.example.net
 
 ```json
 {
-  "user": "cube",
+  "user": "${WorkflowUser}",
   "key": "-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----",
   "home_dir": "~${WorkflowUser}",
   "project_dir": "~${WorkflowUser}/mumble-bg",
@@ -132,7 +132,7 @@ bg-dev.example.net
 
 ```json
 {
-  "user": "cube",
+  "user": "${WorkflowUser}",
   "key": "-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----",
   "home_dir": "~${WorkflowUser}",
   "project_dir": "~${WorkflowUser}/mumble-fg",
