@@ -410,6 +410,7 @@ jobs:
             fi
           fi
 
+          echo "Running Django migrations automatically..."
           "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" migrate --noinput
           "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" sync_ice_inventory
 

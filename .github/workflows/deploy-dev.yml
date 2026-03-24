@@ -260,6 +260,7 @@ jobs:
             fi
           fi
 
+          echo "Running Django migrations automatically..."
           "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" migrate --noinput
 
           if [ "${BG_PSK_RESET_REQUESTED}" -eq 1 ]; then
