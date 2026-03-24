@@ -67,10 +67,10 @@ bg-dev.example.net
 {
   "user": "cube",
   "key": "-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----",
-  "home_dir": "/home/cube",
-  "project_dir": "/home/cube/mumble-bg",
-  "env_file": "/home/cube/.env/mumble-bg",
-  "venv_dir": "/home/cube/.venv/mumble-bg",
+  "home_dir": "~${WorkflowUser}",
+  "project_dir": "~${WorkflowUser}/mumble-bg",
+  "env_file": "~${WorkflowUser}/.env/mumble-bg",
+  "venv_dir": "~${WorkflowUser}/.venv/mumble-bg",
   "service_name": "bg-authd"
 }
 ```
@@ -116,11 +116,9 @@ Required in the `mumble-fg` repo:
 - `TARGETHOST:<hostname>`
   - Same hostname value used for BG target.
 - `TARGETUSER`
-  - JSON with SSH user/key and FG target paths (`user`, `key`; optional `home_dir`, `project_dir`, `env_file`, `bg_env_file`, `service_units`).
+  - JSON with SSH user/key and FG target paths (`user`, `key`; optional `home_dir`, `project_dir`, `env_file`, `service_units`).
 - `BG_PSK`
   - Same exact value as BG `BG_PSK`.
-
-FG deploy can also import `BG_PSK` from `bg_env_file` on the host when configured.
 
 Templates:
 
@@ -136,10 +134,9 @@ bg-dev.example.net
 {
   "user": "cube",
   "key": "-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----",
-  "home_dir": "/home/cube",
-  "project_dir": "/home/cube/mumble-fg",
-  "env_file": "/home/cube/Cube/.env",
-  "bg_env_file": "/home/cube/.env/mumble-bg",
+  "home_dir": "~${WorkflowUser}",
+  "project_dir": "~${WorkflowUser}/mumble-fg",
+  "env_file": "~${WorkflowUser}/Cube/.env",
   "service_units": ["cube-django", "cube-celery", "cube-celery-beat"]
 }
 ```
