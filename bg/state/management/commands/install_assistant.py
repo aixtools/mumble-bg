@@ -8,7 +8,8 @@ import textwrap
 from typing import Any
 
 from django.core.management.base import BaseCommand
-from django.db import OperationalError, ProgrammingError
+from django.db import OperationalError, ProgrammingError, connection
+from django.db.migrations.recorder import MigrationRecorder
 
 from bg.db import MmblBgDBA, PilotDBError, db_config_from_env
 from bg.envtools import resolve_bg_bind
@@ -43,12 +44,13 @@ class Command(BaseCommand):
             "checks": {},
         }
 
+        report["checks"]["bg_db"] = self._check_bg_db()
         report["checks"]["control_psk"] = self._check_control_psk()
         report["checks"]["control_url"] = self._check_control_url()
         report["checks"]["control_bind"] = self._check_control_bind()
         report["checks"]["encryption"] = self._check_encryption()
+        report["checks"]["schema"] = self._check_schema_migration()
         report["checks"]["pilot_snapshot"] = self._check_pilot_snapshot()
-        report["checks"]["bg_db"] = self._check_bg_db()
         report["checks"]["ice"] = self._check_ice_endpoints()
         report["checks"]["authd_registration"] = self._check_authd_registration()
 
@@ -88,6 +90,11 @@ class Command(BaseCommand):
                 report["checks"]["encryption"]["message"],
             ),
             (
+                "Schema",
+                report["checks"]["schema"]["status"],
+                report["checks"]["schema"]["message"],
+            ),
+            (
                 "Pilot Snapshot",
                 report["checks"]["pilot_snapshot"]["status"],
                 report["checks"]["pilot_snapshot"]["message"],
@@ -113,6 +120,10 @@ class Command(BaseCommand):
             rows=[(name, self._format_status(status), detail) for name, status, detail in rows],
             max_widths=(16, 10, 90),
         )
+
+        if report["checks"]["schema"]["status"] != "ok":
+            self.stdout.write("")
+            self.stdout.write("Recommended next step: python manage.py migrate")
 
         endpoint_rows = report["checks"]["ice"].get("endpoints", [])
         if endpoint_rows:
@@ -195,6 +206,36 @@ class Command(BaseCommand):
             }
 
         return {"status": "warning", "message": "inactive: crypto not fully initialized"}
+
+    def _check_schema_migration(self) -> dict[str, Any]:
+        try:
+            recorder = MigrationRecorder(connection)
+            if not recorder.has_table():
+                return {
+                    "status": "warning",
+                    "message": "migration recorder is missing (run python manage.py migrate)",
+                }
+            applied = recorder.applied_migrations()
+        except (ProgrammingError, OperationalError) as exc:
+            if self._is_missing_relation_error(exc):
+                return {
+                    "status": "warning",
+                    "message": "BG schema not migrated yet (run python manage.py migrate)",
+                }
+            return {
+                "status": "error",
+                "message": f"could not inspect migration state: {exc}",
+            }
+
+        if ("state", "0000_initial") not in applied:
+            return {
+                "status": "warning",
+                "message": "state.0000_initial is not applied (run python manage.py migrate)",
+            }
+        return {
+            "status": "ok",
+            "message": "state.0000_initial applied",
+        }
 
     @staticmethod
     def _is_missing_relation_error(exc: Exception) -> bool:

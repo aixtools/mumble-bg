@@ -50,7 +50,7 @@ Dev workflow currently:
 - creates venv if needed
 - installs requirements
 - optionally bootstraps a local BG database
-- runs migrations
+- runs `python manage.py migrate --noinput` automatically
 - restarts configured service units
 
 The dev workflow now writes `BG_DBMS` and `BG_PSK` directly instead of legacy aliases.
@@ -73,7 +73,7 @@ Prod workflow currently:
 - writes the target env file from the env JSON secret
 - bootstraps system packages, venv, and systemd units on first deploy
 - installs requirements
-- migrates
+- runs `python manage.py migrate --noinput` automatically
 - restarts the configured service
 
 The remaining prod migration work is tracked in:
