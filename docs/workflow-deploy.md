@@ -56,7 +56,148 @@ The current workflow does not:
 - deploy or configure `mumble-fg`
 - trigger FG-to-BG ACL sync or pilot-snapshot sync after deploy
 
-Those steps remain operator work or are covered by the broader install guide in `installation/installation.md`.
+- `.github/workflows/deploy-dev.yml` - This file directs the workflow action from github - to push the repo to a destination.
+- `deploy/setup-root.sh` is the one-time root bootstrap path. If the user credentials are root the workflow can execute it.
+If not root, then this will need to run ONCE by the root user, or using sudo.
+- `deploy/unsetup-root.sh` removes the auth-service bootstrap artifacts if you need a clean reinstall. Basically, undoes the steps performed by `setup-root.sh`
+
+## Default Layout for BG
+
+Note: BG may operate on a different TARGETDEST than FG
+
+Current defaults for bg environment are:
+
+- repo checkout: `~${WorkflowUser}/mumble-bg`
+- virtualenv: `~${WorkflowUser}/.venv/mumble-bg`
+- environment file: `~${WorkflowUser}/.env/mumble-bg`
+- systemctl managed services: `bg-control` and `bg-authd`
+
+Defaults for fg environment are owned by the application (e.g., cube)
+: 
+## Preparing GitHub Secrets
+
+Set secrets before running either workflow.
+Use single-value secret notation in documentation as `NAME = value`.
+
+### BG Secrets
+
+Required in the `mumble-bg` repo:
+
+- `TARGETHOST`
+  - Hostname string for the deploy target.
+- `TARGETUSER`
+  - JSON with SSH user/key and target paths (`user`, `key`; optional `home_dir`, `project_dir`, `env_file`, `venv_dir`, `service_name`).
+- `BG_DBMS`
+  - BG database JSON object.
+- `ICE`
+  - ICE inventory JSON list.
+- `BG_PSK`
+  - FG/BG control shared secret.
+
+Common optional secrets/vars used by BG deploy:
+
+- `MURMUR_PROBE`
+- `BG_RESET_DB_ON_DEPLOY` (repo variable or secret)
+
+Templates:
+
+`TARGETHOST`
+
+```text
+bg-dev.example.net
+```
+
+`TARGETUSER`
+
+```json
+{
+  "user": "${WorkflowUser}",
+  "key": "-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----",
+  "home_dir": "~${WorkflowUser}",
+  "project_dir": "~${WorkflowUser}/mumble-bg",
+  "env_file": "~${WorkflowUser}/.env/mumble-bg",
+  "venv_dir": "~${WorkflowUser}/.venv/mumble-bg",
+  "service_name": "bg-authd"
+}
+```
+
+`BG_DBMS`
+
+```json
+{
+  "name": "authd bg",
+  "host": "127.0.0.1",
+  "username": "bg_username",
+  "database": "bg_database",
+  "password": "bg_secretPassword"
+}
+```
+
+`ICE`
+
+```json
+[
+  {
+    "icehost": "127.0.0.1",
+    "address": "voice-dev.example.net:64738",
+    "name": "Country 1",
+    "virtual_server_id": 1,
+    "icewrite": "write-secret",
+    "iceport": 6502,
+    "iceread": "read-secret"
+  }
+]
+```
+
+`BG_PSK`
+
+```text
+your-shared-control-secret
+```
+
+### FG Secrets
+
+Required in the `mumble-fg` repo:
+
+- `TARGETHOST`
+  - Same hostname value used for BG target.
+- `TARGETUSER`
+  - JSON with SSH user/key and FG target paths (`user`, `key`; optional `home_dir`, `project_dir`, `env_file`, `service_units`).
+- `BG_PSK`
+  - Same exact value as BG `BG_PSK`.
+
+Templates:
+
+`TARGETHOST`
+
+```text
+bg-dev.example.net
+```
+
+`TARGETUSER`
+
+```json
+{
+  "user": "${WorkflowUser}",
+  "key": "-----BEGIN OPENSSH PRIVATE KEY-----\\n...\\n-----END OPENSSH PRIVATE KEY-----",
+  "home_dir": "~${WorkflowUser}",
+  "project_dir": "~${WorkflowUser}/mumble-fg",
+  "env_file": "~${WorkflowUser}/Cube/.env",
+  "service_units": ["cube-django"]
+}
+```
+
+Service-units note:
+
+- `service_units` assumes the main host application is already configured under the same `TARGETUSER` credentials.
+- `TARGETUSER` must be allowed to run `sudo systemctl restart ...` for listed units.
+- In this example, only `cube-django` is required.
+
+`BG_PSK`
+
+```text
+your-shared-control-secret
+```
 
 ## Branch-Specific Runtime Contract
 
@@ -131,10 +272,10 @@ At minimum, define:
 Optional deploy/runtime values:
 
 - `MURMUR_PROBE`
-- `BG_ENGINE`
 - `BG_RESET_DB_ON_DEPLOY`
 - `BG_PSK`
 - `BG_KEY_PASSPHRASE`
+- `BG_ENGINE` (optional runtime override only; default bootstrap engine is PostgreSQL, set `BG_ENGINE=mysql` only when needed)
 
 If you want the guided first-time env workflow and key-generation checks, use
 `installation/installation.md` and `python -m django init_bg_env` instead of
@@ -154,7 +295,7 @@ bash <project_dir>/deploy/setup-hetzner.sh
 This script currently:
 
 - ensures `python3` and `python3-venv` are installed
-- installs a DB client matching `BG_ENGINE`
+- installs a PostgreSQL DB client by default (override with `BG_ENGINE=mysql` only when needed)
 - creates `<venv_dir>` if missing
 - bootstraps a local BG database when the current `BG_DBMS` host is local
 - installs Python requirements
@@ -242,9 +383,9 @@ Required deploy configuration:
 Optional deploy/runtime configuration:
 
 - `MURMUR_PROBE`
-- `BG_ENGINE`
 - `BG_RESET_DB_ON_DEPLOY`
 - `BG_PSK`
+- `BG_ENGINE` (optional runtime override only; default bootstrap engine is PostgreSQL)
 
 ### Deploy Target Host-User Label
 

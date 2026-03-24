@@ -90,6 +90,8 @@ print(value)
 PY
 }
 
+# Default DB bootstrap engine is PostgreSQL.
+# Override only when needed: export BG_ENGINE=mysql
 BG_ENGINE="${BG_ENGINE:-postgres}"
 
 case "${BG_ENGINE}" in
