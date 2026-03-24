@@ -45,8 +45,11 @@ Common optional variables:
 - `MURMUR_PROBE`
 - `BG_BIND`
 - `MURMUR_CONTROL_URL`
-- `BG_PKI_PASSPHRASE`
 - `BG_KEY_DIR`
+
+Required when the BG private key is encrypted:
+
+- `BG_PKI_PASSPHRASE`
 
 JSON env values SHALL remain both valid JSON and shell-parseable. If a literal apostrophe must appear inside a JSON string, encode it as `\\u0027`.
 
@@ -76,6 +79,8 @@ export BG_PKI_PASSPHRASE='<passphrase>'
 python -m django generate_bg_keypair --key-dir /etc/mumble-bg/keys
 python -m django install_assistant
 ```
+
+If the generated private key is encrypted, `BG_PKI_PASSPHRASE` must remain available in the runtime env file before `bg.control_main`, `bg.authd`, or `install_assistant` are started.
 
 ## 5. Migrate and run BG
 

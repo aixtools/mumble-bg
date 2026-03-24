@@ -25,6 +25,7 @@ Common optional values:
 
 - `MURMUR_PROBE`
 - `BG_RESET_DB_ON_DEPLOY`
+- `BG_PKI_PASSPHRASE`
 
 `TARGETHOST` is a single hostname value.
 
@@ -54,6 +55,7 @@ Dev workflow currently:
 - restarts configured service units
 
 The dev workflow now writes `BG_DBMS` and `BG_PSK` directly instead of legacy aliases.
+If BG uses an encrypted private key, the dev workflow also needs `BG_PKI_PASSPHRASE` so deployed services can decrypt the key at runtime.
 
 ## 3. Prod Workflow
 
@@ -77,6 +79,8 @@ Prod workflow currently:
 The remaining prod migration work is tracked in:
 
 - [docs/prod_workflow_migration.md](./prod_workflow_migration.md)
+
+When BG uses an encrypted private key, prod deployment also requires `BG_PKI_PASSPHRASE`. The current prod workflow will write it from the dedicated repo secret when present, otherwise it may be carried inside the legacy env JSON secret.
 
 ## 4. Database Engine Note
 
