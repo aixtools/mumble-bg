@@ -137,9 +137,15 @@ bg-dev.example.net
   "home_dir": "~${WorkflowUser}",
   "project_dir": "~${WorkflowUser}/mumble-fg",
   "env_file": "~${WorkflowUser}/Cube/.env",
-  "service_units": ["cube-django", "cube-celery", "cube-celery-beat"]
+  "service_units": ["cube-django"]
 }
 ```
+
+Service-units note:
+
+- `service_units` assumes the main host application is already configured under the same `TARGETUSER` credentials.
+- `TARGETUSER` must be allowed to run `sudo systemctl restart ...` for listed units.
+- In this example, only `cube-django` is required.
 
 `BG_PSK`
 
