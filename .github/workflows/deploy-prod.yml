@@ -293,6 +293,7 @@ jobs:
             python3 -m venv "${DEPLOY_VENV_DIR}"
           fi
           "${DEPLOY_VENV_DIR}/bin/pip" install --quiet -r "${DEPLOY_PROJECT_DIR}/requirements.txt"
+          "${DEPLOY_VENV_DIR}/bin/pip" install --quiet --no-deps "${DEPLOY_PROJECT_DIR}"
           set -a
           source "${DEPLOY_ENV_FILE}"
           set +a

@@ -152,6 +152,7 @@ case "${BG_DATABASE_HOST}" in
 esac
 
 sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet -r "${APP_DIR}/requirements.txt"
+sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --quiet --no-deps "${APP_DIR}"
 sudo -u "${APP_USER}" env \
     BG_DBMS="${BG_DBMS}" \
     ENV_FILE="${ENV_FILE}" \
