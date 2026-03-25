@@ -172,13 +172,35 @@ class _MurmurServerAdapter:
             raise MurmurReconcileError("ZeroC ICE is not installed in this environment") from exc
 
         M = load_ice_module()
-        communicator = Ice.initialize(["--Ice.ImplicitContext=Shared", "--Ice.Default.EncodingVersion=1.0"])
+
+        props: list[str] = ["--Ice.ImplicitContext=Shared", "--Ice.Default.EncodingVersion=1.0"]
+        use_tls = bool(self._server.ice_tls_cert)
+        if use_tls:
+            cert = (self._server.ice_tls_cert or "").strip()
+            key = (self._server.ice_tls_key or "").strip() or cert
+            ca = (self._server.ice_tls_ca or "").strip() or cert
+            props.extend(
+                [
+                    "Ice.Plugin.IceSSL=IceSSL:createIceSSL",
+                    f"IceSSL.CertFile={cert}",
+                    f"IceSSL.KeyFile={key}",
+                    f"IceSSL.CACertFile={ca}",
+                    # self-signed in test env; caller can tighten to VerifyPeer=1 later
+                    "IceSSL.VerifyPeer=0",
+                ]
+            )
+            key_pass = os.environ.get("BG_ICE_KEY_PASSPHRASE", "").strip()
+            if key_pass:
+                props.append(f"IceSSL.Password={key_pass}")
+
+        communicator = Ice.initialize(props)
         try:
             if self._server.ice_secret:
                 communicator.getImplicitContext().put("secret", self._server.ice_secret)
 
+            proto = "ssl" if use_tls else "tcp"
             proxy = communicator.stringToProxy(
-                f"Meta:tcp -h {self._server.ice_host} -p {self._server.ice_port}"
+                f"Meta:{proto} -h {self._server.ice_host} -p {self._server.ice_port}"
             )
             meta = M.MetaPrx.checkedCast(proxy)
             if not meta:
