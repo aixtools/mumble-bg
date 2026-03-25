@@ -20,6 +20,19 @@ This project enforces TLS for background (BG) communications with Murmur ICE end
 - Supply `IceSSL.KeyPassphrase` when a passphrase is used; keep it in `BG_ICE_KEY_PASSPHRASE` and push it through the deploy workflow.
 - Continue to set per-server secrets (`ice_secret`) via ICE inventory JSON to protect shared secrets on top of TLS.
 
+## Registering the IceSSL plugin
+
+Even with the certificate/key files in place, Murmur still needs to load the IceSSL plugin before the communicator starts. Add the following flat properties to `mumble-server.ini` so that Ice registers the plugin automatically:
+
+```
+Ice.Plugin.IceSSL=IceSSL:createIceSSL
+IceSSL.CertFile=/etc/mumble-server/certs/server.pfx
+IceSSL.CACertFile=/etc/mumble-server/certs/ca.pem
+IceSSL.Password=<passphrase-if-required>
+```
+
+`Ice.Plugin.IceSSL` is the only new entry; the other lines mirror the cert bundle you already provision for TLS. Once Murmur sees those keys it will log that IceSSL is initialized and will listen on `ssl://` endpoints.
+
 ## Key rotation
 
 - Unique certs per ICE endpoint are supported but optional. A single cert/CA combo simplifies rotation because you only need to update one set of files, while unique certs limit blast radius.
