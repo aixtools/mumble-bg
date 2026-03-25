@@ -67,6 +67,7 @@ class LocalMurmurPaths:
     sqlite_path: str
     cert_path: str
     key_path: str
+    ca_path: str
     log_path: str
     pid_path: str
 
@@ -102,6 +103,7 @@ class LocalMurmurHarness:
             sqlite_path=str(root_dir / "murmur.sqlite"),
             cert_path=str(root_dir / "cert.pem"),
             key_path=str(root_dir / "key.pem"),
+            ca_path=str(root_dir / "cert.pem"),
             log_path=str(root_dir / "mumble-server.log"),
             pid_path=str(root_dir / "mumble-server.pid"),
         )
@@ -149,11 +151,14 @@ class LocalMurmurHarness:
                 f"port={self.client_port}",
                 f"sslCert={self.paths.cert_path}",
                 f"sslKey={self.paths.key_path}",
+                f"IceSSL.CertFile={self.paths.cert_path}",
+                f"IceSSL.KeyFile={self.paths.key_path}",
+                f"IceSSL.CACertFile={self.paths.ca_path}",
                 "users=32",
                 "bonjour=False",
                 "sendversion=True",
                 f"registerName={self.server_name}",
-                f'ice="tcp -h {self.ice_host} -p {self.ice_port}"',
+                f'ice="tcp -h {self.ice_host} -p {self.ice_port}; ssl -h {self.ice_host} -p {self.ice_port}"',
                 f"icesecretwrite={self.ice_secret}",
                 "",
             ]
@@ -238,6 +243,9 @@ class Command(BaseCommand):
                 "virtual_server_id": options["virtual_server_id"],
                 "display_order": options["display_order"],
                 "is_active": True,
+                "ice_tls_cert": harness.paths.cert_path,
+                "ice_tls_key": harness.paths.key_path,
+                "ice_tls_ca": harness.paths.ca_path,
             },
         )
 

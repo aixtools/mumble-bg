@@ -14,6 +14,27 @@ class MumbleServer(models.Model):
         blank=True,
         help_text='Target Murmur virtual server ID on this ICE endpoint. Leave blank only if the endpoint hosts a single booted server.',
     )
+    ice_tls_cert = models.CharField(
+        max_length=1024,
+        blank=True,
+        null=True,
+        default=None,
+        help_text='Optional ICE SSL/TLS certificate file path exposed to BG.',
+    )
+    ice_tls_key = models.CharField(
+        max_length=1024,
+        blank=True,
+        null=True,
+        default=None,
+        help_text='Optional ICE SSL/TLS key file path exposed to BG.',
+    )
+    ice_tls_ca = models.CharField(
+        max_length=1024,
+        blank=True,
+        null=True,
+        default=None,
+        help_text='Optional CA certificate that BG should trust for this ICE endpoint.',
+    )
     is_active = models.BooleanField(default=True)
     display_order = models.PositiveIntegerField(default=0, help_text='Ordering on the profile page (lower = first)')
 
