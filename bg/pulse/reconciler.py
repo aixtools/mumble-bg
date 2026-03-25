@@ -175,7 +175,7 @@ class _MurmurServerAdapter:
         M = load_ice_module()
 
         props: list[str] = ["--Ice.ImplicitContext=Shared", "--Ice.Default.EncodingVersion=1.0"]
-        use_tls = bool(self._server.ice_tls_cert)
+        use_tls = str(os.environ.get("BG_ENABLE_ICE_SSL", "")).lower() not in ("", "0", "false", "no")
         if use_tls:
             cert = (self._server.ice_tls_cert or "").strip()
             key = (self._server.ice_tls_key or "").strip() or cert
