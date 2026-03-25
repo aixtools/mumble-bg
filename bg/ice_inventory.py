@@ -21,6 +21,9 @@ class IceInventoryEntry:
     ice_secret: str | None
     virtual_server_id: int | None
     is_active: bool = True
+    ice_tls_cert: str | None = None
+    ice_tls_key: str | None = None
+    ice_tls_ca: str | None = None
 
 
 BG_DB_ADAPTER = MmblBgDBA(
@@ -177,6 +180,14 @@ def parse_ice_env(raw: str | None = None) -> list[IceInventoryEntry]:
         if not ice_secret:
             ice_secret = None
 
+        def _tls_value(*keys: str) -> str | None:
+            val = _first_nonempty(row, keys, default="")
+            return val if val else None
+
+        ice_tls_cert = _tls_value("ice_tls_cert", "ice_ssl_cert", "ssl_cert", "server_cert")
+        ice_tls_key = _tls_value("ice_tls_key", "ice_ssl_key", "ssl_key", "key_cert")
+        ice_tls_ca = _tls_value("ice_tls_ca", "ice_ssl_ca", "ca_cert")
+
         address = _first_nonempty(row, ("address", "mumble_address"), default="")
         if not address:
             raise PilotDBError(f"ICE[{idx}] is missing required address")
@@ -188,17 +199,20 @@ def parse_ice_env(raw: str | None = None) -> list[IceInventoryEntry]:
         if not display_name:
             display_name = str(address)
 
-        entries.append(
-            IceInventoryEntry(
-                name=display_name,
-                address=address,
-                ice_host=ice_host,
-                ice_port=ice_port,
-                ice_secret=ice_secret,
-                virtual_server_id=virtual_server_id,
-                is_active=_parse_bool(row.get("is_active"), default=True),
+            entries.append(
+                IceInventoryEntry(
+                    name=display_name,
+                    address=address,
+                    ice_host=ice_host,
+                    ice_port=ice_port,
+                    ice_secret=ice_secret,
+                    virtual_server_id=virtual_server_id,
+                    is_active=_parse_bool(row.get("is_active"), default=True),
+                    ice_tls_cert=ice_tls_cert,
+                    ice_tls_key=ice_tls_key,
+                    ice_tls_ca=ice_tls_ca,
+                )
             )
-        )
 
     return entries
 
@@ -212,7 +226,19 @@ def list_current_ice_inventory() -> list[dict]:
             cur,
             conn,
             """
-            SELECT id, name, address, ice_host, ice_port, ice_secret, virtual_server_id, is_active, display_order
+            SELECT
+                id,
+                name,
+                address,
+                ice_host,
+                ice_port,
+                ice_secret,
+                virtual_server_id,
+                is_active,
+                display_order,
+                ice_tls_cert,
+                ice_tls_key,
+                ice_tls_ca
             FROM mumble_server
             ORDER BY display_order, id
             """,
@@ -229,6 +255,9 @@ def list_current_ice_inventory() -> list[dict]:
                 "virtual_server_id": int(row[6]) if row[6] is not None else None,
                 "is_active": bool(row[7]),
                 "display_order": int(row[8]),
+                "ice_tls_cert": row[9] or None,
+                "ice_tls_key": row[10] or None,
+                "ice_tls_ca": row[11] or None,
             }
             for row in rows
         ]
@@ -266,7 +295,19 @@ def sync_ice_inventory_from_env(*, additive: bool = True, dry_run: bool = False)
             cur,
             conn,
             """
-            SELECT id, name, address, ice_host, ice_port, ice_secret, virtual_server_id, is_active, display_order
+            SELECT
+                id,
+                name,
+                address,
+                ice_host,
+                ice_port,
+                ice_secret,
+                virtual_server_id,
+                is_active,
+                display_order,
+                ice_tls_cert,
+                ice_tls_key,
+                ice_tls_ca
             FROM mumble_server
             ORDER BY id
             """,
@@ -303,8 +344,18 @@ def sync_ice_inventory_from_env(*, additive: bool = True, dry_run: bool = False)
                     conn,
                     """
                     INSERT INTO mumble_server (
-                        name, address, ice_host, ice_port, ice_secret, virtual_server_id, is_active, display_order
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        name,
+                        address,
+                        ice_host,
+                        ice_port,
+                        ice_secret,
+                        virtual_server_id,
+                        is_active,
+                        display_order,
+                        ice_tls_cert,
+                        ice_tls_key,
+                        ice_tls_ca
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         entry.name,
@@ -315,6 +366,9 @@ def sync_ice_inventory_from_env(*, additive: bool = True, dry_run: bool = False)
                         entry.virtual_server_id,
                         bool(entry.is_active),
                         max_display_order,
+                        entry.ice_tls_cert,
+                        entry.ice_tls_key,
+                        entry.ice_tls_ca,
                     ),
                 )
                 continue
@@ -324,6 +378,9 @@ def sync_ice_inventory_from_env(*, additive: bool = True, dry_run: bool = False)
             current_address = current[2] or ""
             current_secret = current[5] if current[5] else None
             current_active = bool(current[7])
+            current_tls_cert = current[9] or None
+            current_tls_key = current[10] or None
+            current_tls_ca = current[11] or None
             updates = {}
             if current_name != entry.name:
                 updates["name"] = entry.name
@@ -333,6 +390,12 @@ def sync_ice_inventory_from_env(*, additive: bool = True, dry_run: bool = False)
                 updates["ice_secret"] = entry.ice_secret
             if current_active != bool(entry.is_active):
                 updates["is_active"] = bool(entry.is_active)
+            if current_tls_cert != entry.ice_tls_cert:
+                updates["ice_tls_cert"] = entry.ice_tls_cert
+            if current_tls_key != entry.ice_tls_key:
+                updates["ice_tls_key"] = entry.ice_tls_key
+            if current_tls_ca != entry.ice_tls_ca:
+                updates["ice_tls_ca"] = entry.ice_tls_ca
 
             if not updates:
                 result["unchanged"] += 1

@@ -79,3 +79,26 @@ def test_parse_ice_env_requires_separate_icehost_and_address():
             ]
             """
         )
+
+
+def test_parse_ice_env_accepts_tls_fields():
+    entries = parse_ice_env(
+        """
+        [
+          {
+            "icehost": "127.0.0.1",
+            "address": "127.0.0.1:64738",
+            "virtual_server_id": 1,
+            "icewrite": "secret",
+            "iceport": 6502,
+            "ice_tls_cert": "/tmp/cert.pem",
+            "ice_tls_key": "/tmp/key.pem",
+            "ice_tls_ca": "/tmp/ca.pem"
+          }
+        ]
+        """
+    )
+
+    assert entries[0].ice_tls_cert == "/tmp/cert.pem"
+    assert entries[0].ice_tls_key == "/tmp/key.pem"
+    assert entries[0].ice_tls_ca == "/tmp/ca.pem"
