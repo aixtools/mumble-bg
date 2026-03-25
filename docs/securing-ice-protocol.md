@@ -71,4 +71,10 @@ If Ice still rejects your `ssl://` endpoints, keep these friendly reminders hand
 3. Double-check that `IceSSL.CertFile`, `IceSSL.CACertFile`, and `IceSSL.Password` (when the key is encrypted) point at the files already mentioned in your BG environment (`BG_ICE_CERT_PATH`, `BG_ICE_CA_PATH`, `BG_ICE_KEY_PASSPHRASE`).
 4. After restarting Murmur, scan the log for the IceSSL plugin banner and run `strings /usr/bin/mumble-server | grep -i IceSSL` or `ldd /usr/bin/mumble-server | grep -i ice` to confirm the plugin symbols are present.
 
+## TODO: Murmur username regex
+
+Murmur’s default registered-username regex does not allow spaces. Our desired display format (`[ALLIANCE:CORP] Pilot Name`) includes spaces, so `registerUser` fails with `InvalidUserException`. Planned mitigation:
+- Patch Murmur’s username regex to allow spaces.
+- Until then, BG/authd will normalize Murmur usernames to `[ALLI:CORP]_Pilot_Name` (colon between tickers, underscore for spaces) while keeping display_name unchanged for clients.
+
 Take those four steps together and the TLS listener will behave predictably, even if different agents have different expectations about what the `.deb` ships.
