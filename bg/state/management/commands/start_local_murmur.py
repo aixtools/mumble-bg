@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import os
 import json
 from pathlib import Path
 import secrets
@@ -97,6 +98,12 @@ class LocalMurmurHarness:
         self.ice_port = ice_port
         self.ice_secret = ice_secret
         self.server_id = server_id
+        self.use_ssl = str(os.environ.get("BG_ENABLE_ICE_SSL", "0")).lower() not in (
+            "",
+            "0",
+            "false",
+            "no",
+        )
         self.paths = LocalMurmurPaths(
             root_dir=str(root_dir),
             ini_path=str(root_dir / "mumble-server.ini"),
@@ -144,25 +151,34 @@ class LocalMurmurHarness:
         )
 
     def _write_ini(self) -> None:
-        ini = "\n".join(
-            [
-                f"database={self.paths.sqlite_path}",
-                f"host={self.bind_host}",
-                f"port={self.client_port}",
-                f"sslCert={self.paths.cert_path}",
-                f"sslKey={self.paths.key_path}",
+        ice_endpoint = (
+            f'ice="ssl -h {self.ice_host} -p {self.ice_port}"'
+            if self.use_ssl
+            else f'ice="tcp -h {self.ice_host} -p {self.ice_port}"'
+        )
+        ini_lines = [
+            f"database={self.paths.sqlite_path}",
+            f"host={self.bind_host}",
+            f"port={self.client_port}",
+            f"sslCert={self.paths.cert_path}",
+            f"sslKey={self.paths.key_path}",
+            "users=32",
+            "bonjour=False",
+            "sendversion=True",
+            f"registerName={self.server_name}",
+            ice_endpoint,
+            f"icesecretwrite={self.ice_secret}",
+            "",
+        ]
+        if self.use_ssl:
+            ini_lines[3:3] = [
                 f"IceSSL.CertFile={self.paths.cert_path}",
                 f"IceSSL.KeyFile={self.paths.key_path}",
                 f"IceSSL.CACertFile={self.paths.ca_path}",
-                "users=32",
-                "bonjour=False",
-                "sendversion=True",
-                f"registerName={self.server_name}",
-                f'ice="tcp -h {self.ice_host} -p {self.ice_port}; ssl -h {self.ice_host} -p {self.ice_port}"',
-                f"icesecretwrite={self.ice_secret}",
-                "",
+                "Ice.Plugin.IceSSL=IceSSL:createIceSSL",
+                "IceSSL.VerifyPeer=0",
             ]
-        )
+        ini = "\n".join(ini_lines)
         Path(self.paths.ini_path).write_text(ini)
 
     def start(self, *, timeout: float = 5.0) -> int:
