@@ -249,14 +249,11 @@ def _normalize_username(value: object | None) -> str:
     if value is None:
         return ""
     text = str(value).strip()
-    # Murmur default username regex does not allow spaces; normalize to underscores
-    text = "_".join(text.split())
     return text.casefold()
 
 
 def _build_registration_info(M, mumble_user: MumbleUser):
-    username = "_".join(str(mumble_user.username or "").split())
-    info = {M.UserInfo.UserName: username}
+    info = {M.UserInfo.UserName: mumble_user.username}
     if mumble_user.certhash:
         info[M.UserInfo.UserHash] = mumble_user.certhash
     if mumble_user.display_name:
