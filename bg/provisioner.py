@@ -65,18 +65,10 @@ def _resolved_username_for_account(
     resolved_display_name: str,
     existing: MumbleUser | None = None,
 ) -> str:
-    """Username contract: use pkid account username (no spaces), avoid unresolved placeholders."""
+    """Username contract: use the FG account username exactly; skip if unresolved/blank."""
     base = str(getattr(account, 'account_username', '') or '').strip()
     if not base:
-        base = f'pkid_{int(account.pkid)}'
-
-    if ' ' in base:
-        base = base.replace(' ', '_')
-
-    existing_username = str(getattr(existing, 'username', '') or '').strip()
-    if existing_username and '????' not in existing_username:
-        return existing_username
-
+        return ''
     if '????' in base:
         return ''
     return base
