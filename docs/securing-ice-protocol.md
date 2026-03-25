@@ -55,3 +55,14 @@ grep -i ices ssl /tmp/murmur-icescan.log
 
 - Unique certs per ICE endpoint are supported but optional. A single cert/CA combo simplifies rotation because you only need to update one set of files, while unique certs limit blast radius.
 - Document whichever approach you choose so teammates know how to rotate and reconfigure both sides.
+
+## Troubleshooting recap
+
+If Ice still rejects your `ssl://` endpoints, keep these friendly reminders handy:
+
+1. The `.deb` itself doesn’t bundle IceSSL; it simply depends on `libzeroc-ice3.7t64`. Install that package (or let the package manager satisfy the dependency) so `libIceSSL` is available on the host.
+2. `Ice.Plugin.IceSSL=IceSSL:createIceSSL` must appear in `mumble-server.ini` before the communicator initializes. Without it the cert/key values remain unused and no TLS listener is started.
+3. Double-check that `IceSSL.CertFile`, `IceSSL.CACertFile`, and `IceSSL.Password` (when the key is encrypted) point at the files already mentioned in your BG environment (`BG_ICE_CERT_PATH`, `BG_ICE_CA_PATH`, `BG_ICE_KEY_PASSPHRASE`).
+4. After restarting Murmur, scan the log for the IceSSL plugin banner and run `strings /usr/bin/mumble-server | grep -i IceSSL` or `ldd /usr/bin/mumble-server | grep -i ice` to confirm the plugin symbols are present.
+
+Take those four steps together and the TLS listener will behave predictably, even if different agents have different expectations about what the `.deb` ships.
