@@ -61,6 +61,12 @@ grep -i ices ssl /tmp/murmur-icescan.log
 If Ice still rejects your `ssl://` endpoints, keep these friendly reminders handy:
 
 1. The `.deb` itself doesn’t bundle IceSSL; it simply depends on `libzeroc-ice3.7t64`. Install that package (or let the package manager satisfy the dependency) so `libIceSSL` is available on the host.
+   - Quick check/install:
+     ```
+     dpkg -l | grep -i zeroc-ice3.7 || sudo apt-get install -y libzeroc-ice3.7t64
+     ldd /usr/bin/mumble-server | grep -i IceSSL   # should show libIceSSL*
+     ```
+     If `ldd` does not list `libIceSSL`, the server binary was built without IceSSL support and must be rebuilt/installed with IceSSL enabled.
 2. `Ice.Plugin.IceSSL=IceSSL:createIceSSL` must appear in `mumble-server.ini` before the communicator initializes. Without it the cert/key values remain unused and no TLS listener is started.
 3. Double-check that `IceSSL.CertFile`, `IceSSL.CACertFile`, and `IceSSL.Password` (when the key is encrypted) point at the files already mentioned in your BG environment (`BG_ICE_CERT_PATH`, `BG_ICE_CA_PATH`, `BG_ICE_KEY_PASSPHRASE`).
 4. After restarting Murmur, scan the log for the IceSSL plugin banner and run `strings /usr/bin/mumble-server | grep -i IceSSL` or `ldd /usr/bin/mumble-server | grep -i ice` to confirm the plugin symbols are present.
