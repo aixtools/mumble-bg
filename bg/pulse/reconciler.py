@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 import logging
+import os
 
 from bg.ice import load_ice_module
 from bg.state.models import MumbleServer, MumbleUser
