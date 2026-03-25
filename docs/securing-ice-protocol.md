@@ -33,6 +33,24 @@ IceSSL.Password=<passphrase-if-required>
 
 `Ice.Plugin.IceSSL` is the only new entry; the other lines mirror the cert bundle you already provision for TLS. Once Murmur sees those keys it will log that IceSSL is initialized and will listen on `ssl://` endpoints.
 
+## Verifying IceSSL is present
+
+Use these quick checks on the target host to confirm the murmur binary has IceSSL:
+
+```
+# Binary symbols (should print lines containing IceSSL if present)
+strings /usr/bin/mumble-server | grep -i IceSSL | head
+
+# Linked libraries (look for libIceSSL alongside libIce)
+ldd /usr/bin/mumble-server | grep -i ice
+
+# Safe runtime probe; succeeds silently when IceSSL is available
+mumble-server -ini /etc/mumble/mumble-server.ini -supw test >/tmp/murmur-icescan.log 2>&1
+grep -i ices ssl /tmp/murmur-icescan.log
+# Expect to see IceSSL plugin lines or ssl listener messages; if you see
+# EndpointParseException for ssl endpoints, IceSSL is not built in.
+```
+
 ## Key rotation
 
 - Unique certs per ICE endpoint are supported but optional. A single cert/CA combo simplifies rotation because you only need to update one set of files, while unique certs limit blast radius.
