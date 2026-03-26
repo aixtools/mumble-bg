@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from enum import Enum
 
 import logging
-import os
 
 from bg.ice import load_ice_module
+from bg.ice_meta import build_ice_client_props, connect_meta_with_fallback
 from bg.state.models import MumbleServer, MumbleUser
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,7 @@ class _MurmurServerAdapter:
         self._communicator = None
         self._M = None
         self._server_proxy = None
+        self._meta_protocol = None
 
     def __enter__(self):
         self._open()
@@ -175,42 +176,22 @@ class _MurmurServerAdapter:
             raise MurmurReconcileError("ZeroC ICE is not installed in this environment") from exc
 
         M = load_ice_module()
-
-        props: list[str] = ["--Ice.ImplicitContext=Shared", "--Ice.Default.EncodingVersion=1.0"]
-        use_tls = str(os.environ.get("BG_ENABLE_ICE_SSL", "")).lower() not in ("", "0", "false", "no")
-        if use_tls:
-            cert = (self._server.ice_tls_cert or "").strip()
-            key = (self._server.ice_tls_key or "").strip() or cert
-            ca = (self._server.ice_tls_ca or "").strip() or cert
-            props.extend(
-                [
-                    "--Ice.Plugin.IceSSL=IceSSL:createIceSSL",
-                    f"--IceSSL.CertFile={cert}",
-                    f"--IceSSL.KeyFile={key}",
-                    f"--IceSSL.CAs={ca}",
-                    # self-signed in test env; caller can tighten to VerifyPeer=1 later
-                    "--IceSSL.VerifyPeer=0",
-                ]
+        communicator = Ice.initialize(
+            build_ice_client_props(
+                tls_cert=self._server.ice_tls_cert or "",
+                tls_key=self._server.ice_tls_key or "",
+                tls_ca=self._server.ice_tls_ca or "",
             )
-            key_pass = os.environ.get("BG_ICE_KEY_PASSPHRASE", "").strip()
-            if key_pass:
-                props.append(f"--IceSSL.Password={key_pass}")
-
-        communicator = Ice.initialize(props)
+        )
         try:
-            if self._server.ice_secret:
-                communicator.getImplicitContext().put("secret", self._server.ice_secret)
-
-            proto = "ssl" if use_tls else "tcp"
-            proxy = communicator.stringToProxy(
-                f"Meta:{proto} -h {self._server.ice_host} -p {self._server.ice_port}"
+            meta, protocol, _attempts = connect_meta_with_fallback(
+                communicator,
+                M,
+                host=self._server.ice_host,
+                port=self._server.ice_port,
+                secret=self._server.ice_secret or "",
             )
-            meta = M.MetaPrx.checkedCast(proxy)
-            if not meta:
-                raise MurmurReconcileError(
-                    f"Failed to connect to ICE Meta on {self._server.ice_host}:{self._server.ice_port}"
-                )
-
+            self._meta_protocol = protocol
             booted_servers = meta.getBootedServers()
             if not booted_servers:
                 raise MurmurReconcileError(

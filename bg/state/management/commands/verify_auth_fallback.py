@@ -11,6 +11,7 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError
 
 from bg.ice import load_ice_module
+from bg.ice_meta import build_ice_client_props, connect_meta_with_fallback
 from bg.state.models import BgAudit, MumbleServer
 
 
@@ -75,14 +76,21 @@ def _connect_server_proxy(server: MumbleServer):
         raise CommandError("ZeroC ICE is not installed") from exc
 
     M = load_ice_module()
-    communicator = Ice.initialize(["--Ice.ImplicitContext=Shared", "--Ice.Default.EncodingVersion=1.0"])
+    communicator = Ice.initialize(
+        build_ice_client_props(
+            tls_cert=server.ice_tls_cert or "",
+            tls_key=server.ice_tls_key or "",
+            tls_ca=server.ice_tls_ca or "",
+        )
+    )
     try:
-        if server.ice_secret:
-            communicator.getImplicitContext().put("secret", server.ice_secret)
-        proxy = communicator.stringToProxy(f"Meta:tcp -h {server.ice_host} -p {server.ice_port}")
-        meta = M.MetaPrx.checkedCast(proxy)
-        if not meta:
-            raise CommandError(f"Failed to connect to ICE meta at {server.ice_host}:{server.ice_port}")
+        meta, _protocol, _attempts = connect_meta_with_fallback(
+            communicator,
+            M,
+            host=server.ice_host,
+            port=server.ice_port,
+            secret=server.ice_secret or "",
+        )
         servers = meta.getBootedServers()
         if not servers:
             raise CommandError("No booted Murmur servers found")

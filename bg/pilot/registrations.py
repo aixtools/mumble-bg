@@ -1,4 +1,5 @@
 from bg.ice import load_ice_module
+from bg.ice_meta import build_ice_client_props, connect_meta_with_fallback
 import hashlib
 
 
@@ -23,19 +24,21 @@ def _open_target_server(server_config):
         raise MurmurSyncError('ZeroC ICE is not installed in this environment') from exc
 
     M = _load_slice()
-    communicator = Ice.initialize(['--Ice.ImplicitContext=Shared', '--Ice.Default.EncodingVersion=1.0'])
-    try:
-        if server_config.ice_secret:
-            communicator.getImplicitContext().put('secret', server_config.ice_secret)
-
-        proxy = communicator.stringToProxy(
-            f'Meta:tcp -h {server_config.ice_host} -p {server_config.ice_port}'
+    communicator = Ice.initialize(
+        build_ice_client_props(
+            tls_cert=getattr(server_config, "ice_tls_cert", "") or "",
+            tls_key=getattr(server_config, "ice_tls_key", "") or "",
+            tls_ca=getattr(server_config, "ice_tls_ca", "") or "",
         )
-        meta = M.MetaPrx.checkedCast(proxy)
-        if not meta:
-            raise MurmurSyncError(
-                f'Failed to connect to ICE on {server_config.ice_host}:{server_config.ice_port}'
-            )
+    )
+    try:
+        meta, _protocol, _attempts = connect_meta_with_fallback(
+            communicator,
+            M,
+            host=server_config.ice_host,
+            port=server_config.ice_port,
+            secret=server_config.ice_secret or "",
+        )
         booted_servers = meta.getBootedServers()
         if not booted_servers:
             raise MurmurSyncError(

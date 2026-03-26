@@ -32,6 +32,7 @@ from bg.db import (
 )
 from bg.ice_inventory import sync_ice_inventory_from_env
 from bg.ice import load_ice_module
+from bg.ice_meta import build_ice_client_props, connect_meta_with_fallback
 from bg.passwords import verify_murmur_password
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -522,7 +523,7 @@ def probe_authenticator_registration():
         result['errors'].append({'error': 'No active MumbleServer configs found'})
         return result
 
-    with Ice.initialize(['--Ice.ImplicitContext=Shared', '--Ice.Default.EncodingVersion=1.0']) as communicator:
+    with Ice.initialize(build_ice_client_props()) as communicator:
         adapter = communicator.createObjectAdapterWithEndpoints('MumbleBgAuthProbe', 'tcp -h 0.0.0.0')
         adapter.activate()
 
@@ -544,20 +545,13 @@ def probe_authenticator_registration():
                     def idToTexture(self, id, current=None):
                         return bytes()
 
-                if ice_secret:
-                    communicator.getImplicitContext().put('secret', ice_secret)
-
-                proxy = communicator.stringToProxy(f'Meta:tcp -h {ice_host} -p {ice_port}')
-                meta = M.MetaPrx.checkedCast(proxy)
-                if not meta:
-                    result['errors'].append(
-                        {
-                            'server_id': int(server_id),
-                            'endpoint': f'{ice_host}:{ice_port}',
-                            'error': 'Failed to connect to ICE meta',
-                        }
-                    )
-                    continue
+                meta, _protocol, _attempts = connect_meta_with_fallback(
+                    communicator,
+                    M,
+                    host=ice_host,
+                    port=ice_port,
+                    secret=ice_secret or '',
+                )
 
                 servers = meta.getBootedServers()
                 if not servers:
@@ -617,7 +611,7 @@ def main():
 
     server_configs = wait_for_server_configs(retry_interval=30)
 
-    with Ice.initialize(['--Ice.ImplicitContext=Shared', '--Ice.Default.EncodingVersion=1.0']) as communicator:
+    with Ice.initialize(build_ice_client_props()) as communicator:
         adapter = communicator.createObjectAdapterWithEndpoints(
             'MumbleBgAuth', 'tcp -h 0.0.0.0'
         )
@@ -664,16 +658,13 @@ def main():
                         return bytes()
 
                 # Connect to this server's ICE endpoint
-                if ice_secret:
-                    communicator.getImplicitContext().put('secret', ice_secret)
-
-                proxy = communicator.stringToProxy(
-                    f'Meta:tcp -h {ice_host} -p {ice_port}'
+                meta, _protocol, _attempts = connect_meta_with_fallback(
+                    communicator,
+                    M,
+                    host=ice_host,
+                    port=ice_port,
+                    secret=ice_secret or '',
                 )
-                meta = M.MetaPrx.checkedCast(proxy)
-                if not meta:
-                    logger.error('Failed to connect to ICE on %s:%s (server_id=%d)', ice_host, ice_port, server_id)
-                    continue
 
                 servers = meta.getBootedServers()
                 if not servers:
