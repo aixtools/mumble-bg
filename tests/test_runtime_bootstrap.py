@@ -58,7 +58,7 @@ def test_control_main_resolves_bind_from_environment():
 
 
 def test_control_main_logs_default_bind_as_fallback():
-    with patch.dict(os.environ, {}, clear=True):
+    with patch.dict(os.environ, {"HOME": "/tmp/bg-no-env-home"}, clear=True):
         with patch("builtins.print") as print_mock:
             with patch("django.core.management.execute_from_command_line") as execute:
                 control_main(["--noreload"])
@@ -80,6 +80,21 @@ def test_bootstrap_bg_environment_loads_bg_psk(tmp_path):
         bootstrap_bg_environment()
 
         assert os.environ["BG_PSK"] == "fresh-shared-secret"
+
+
+def test_bootstrap_bg_environment_uses_default_user_env_file(tmp_path):
+    home_dir = tmp_path / "home"
+    env_dir = home_dir / ".env"
+    env_dir.mkdir(parents=True)
+    env_file = env_dir / "mumble-bg"
+    env_file.write_text("BG_PKI_PASSPHRASE='secret-passphrase'\n", encoding="utf-8")
+
+    with patch.dict(os.environ, {"HOME": str(home_dir)}, clear=True):
+        loaded = bootstrap_bg_environment()
+        assert loaded == str(env_file)
+        assert os.environ["BG_ENV_FILE"] == str(env_file)
+        assert os.environ["BG_PKI_PASSPHRASE"] == "secret-passphrase"
+        assert os.environ["DJANGO_SETTINGS_MODULE"] == "bg.settings"
 
 
 def test_authd_main_loads_bg_env_file_before_service_import(tmp_path):
