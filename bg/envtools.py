@@ -221,8 +221,13 @@ def bootstrap_bg_environment(
     env_file_var: str = "BG_ENV_FILE",
     default_settings_module: str = "bg.settings",
 ) -> str | None:
-    """Load BG env from BG_ENV_FILE when present, then ensure settings."""
+    """Load BG env from BG_ENV_FILE or ~/.env/mumble-bg, then ensure settings."""
     env_file = (os.environ.get(env_file_var) or "").strip()
+    if not env_file:
+        default_env = Path("~/.env/mumble-bg").expanduser()
+        if default_env.exists():
+            env_file = str(default_env)
+            os.environ[env_file_var] = env_file
     if env_file:
         load_env_file_into_environment(env_file, override=False)
     if not str(os.environ.get("DJANGO_SETTINGS_MODULE") or "").strip():

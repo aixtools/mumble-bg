@@ -39,6 +39,7 @@ Minimum variables:
 - `BG_DBMS`
 - `ICE`
 - `BG_PSK`
+  - When ICE uses TLS, follow `docs/securing-ice-protocol.md` to place cert/key files and `BG_ICE_KEY_PASSPHRASE`.
 
 Common optional variables:
 

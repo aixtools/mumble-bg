@@ -10,6 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from bg.ice import load_ice_module
+from bg.ice_meta import build_ice_client_props, connect_meta_with_fallback
 from bg.state.models import MumbleServer, MumbleSession, MumbleUser
 
 logger = logging.getLogger(__name__)
@@ -409,11 +410,13 @@ class _EndpointRuntime:
         if self._meta is not None:
             return self._meta
 
-        endpoint = f'Meta:tcp -h {self._host} -p {self._port}'
-        proxy = self._communicator.stringToProxy(endpoint)
-        meta = self._M.MetaPrx.checkedCast(proxy)
-        if not meta:
-            raise MurmurPulseError(f'Failed to connect to ICE Meta at {self._host}:{self._port}')
+        meta, _protocol, _attempts = connect_meta_with_fallback(
+            self._communicator,
+            self._M,
+            host=self._host,
+            port=self._port,
+            secret=self._secret or '',
+        )
         self._meta = self._with_secret(meta)
         self._register_meta_callback()
         return self._meta
@@ -569,7 +572,7 @@ class MurmurPulseService:
             raise MurmurPulseError(str(exc)) from exc
         endpoints = self._group_endpoints(server_configs)
 
-        with Ice.initialize(['--Ice.Default.EncodingVersion=1.0']) as communicator:
+        with Ice.initialize(build_ice_client_props()) as communicator:
             adapter = communicator.createObjectAdapterWithEndpoints('MurmurPulse', self._callback_endpoint)
             adapter.activate()
             runtimes = [_EndpointRuntime(communicator, adapter, M, endpoint_servers) for endpoint_servers in endpoints]

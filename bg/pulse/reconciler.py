@@ -6,9 +6,12 @@ from enum import Enum
 import logging
 
 from bg.ice import load_ice_module
+from bg.ice_meta import build_ice_client_props, connect_meta_with_fallback
 from bg.state.models import MumbleServer, MumbleUser
 
 logger = logging.getLogger(__name__)
+
+_RESERVED_REGISTRATION_NAMES = frozenset({"superuser"})
 
 
 class MurmurReconcileError(RuntimeError):
@@ -94,6 +97,7 @@ class _MurmurServerAdapter:
         self._communicator = None
         self._M = None
         self._server_proxy = None
+        self._meta_protocol = None
 
     def __enter__(self):
         self._open()
@@ -172,20 +176,22 @@ class _MurmurServerAdapter:
             raise MurmurReconcileError("ZeroC ICE is not installed in this environment") from exc
 
         M = load_ice_module()
-        communicator = Ice.initialize(["--Ice.ImplicitContext=Shared", "--Ice.Default.EncodingVersion=1.0"])
-        try:
-            if self._server.ice_secret:
-                communicator.getImplicitContext().put("secret", self._server.ice_secret)
-
-            proxy = communicator.stringToProxy(
-                f"Meta:tcp -h {self._server.ice_host} -p {self._server.ice_port}"
+        communicator = Ice.initialize(
+            build_ice_client_props(
+                tls_cert=self._server.ice_tls_cert or "",
+                tls_key=self._server.ice_tls_key or "",
+                tls_ca=self._server.ice_tls_ca or "",
             )
-            meta = M.MetaPrx.checkedCast(proxy)
-            if not meta:
-                raise MurmurReconcileError(
-                    f"Failed to connect to ICE Meta on {self._server.ice_host}:{self._server.ice_port}"
-                )
-
+        )
+        try:
+            meta, protocol, _attempts = connect_meta_with_fallback(
+                communicator,
+                M,
+                host=self._server.ice_host,
+                port=self._server.ice_port,
+                secret=self._server.ice_secret or "",
+            )
+            self._meta_protocol = protocol
             booted_servers = meta.getBootedServers()
             if not booted_servers:
                 raise MurmurReconcileError(
@@ -227,6 +233,10 @@ def _normalize_username(value: object | None) -> str:
         return ""
     text = str(value).strip()
     return text.casefold()
+
+
+def _is_reserved_registration_name(value: object | None) -> bool:
+    return _normalize_username(value) in _RESERVED_REGISTRATION_NAMES
 
 
 def _build_registration_info(M, mumble_user: MumbleUser):
@@ -307,6 +317,8 @@ class MurmurRegistrationReconciler:
 
             delete_actions: list[MurmurDesiredAction] = []
             for live_name in live_names:
+                if _is_reserved_registration_name(live_name):
+                    continue
                 if live_name not in desired_by_name:
                     delete_actions.append(
                         MurmurDesiredAction(

@@ -10,8 +10,11 @@ import os
 import socket
 
 from bg.db import db_config_from_env
+from bg.envtools import bootstrap_bg_environment
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+bootstrap_bg_environment()
 
 
 SECRET_KEY = 'mumble-bg-dev'

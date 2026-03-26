@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import os
 import json
 from pathlib import Path
 import secrets
@@ -15,13 +16,15 @@ from django.core.management.base import BaseCommand, CommandError
 from bg.state.models import MumbleServer
 
 
-def _pick_free_tcp_port(host: str = "127.0.0.1") -> int:
-    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+def _pick_free_tcp_port(host: str = "") -> int:
+    bind_host = str(host or "").strip()
+    probe_host = _default_probe_host(bind_host)
+    family = socket.AF_INET6 if ":" in probe_host else socket.AF_INET
     with socket.socket(family, socket.SOCK_STREAM) as sock:
         if family == socket.AF_INET6:
-            sock.bind((host, 0, 0, 0))
+            sock.bind((bind_host or "::", 0, 0, 0))
         else:
-            sock.bind((host, 0))
+            sock.bind((bind_host, 0))
         sock.listen(1)
         return int(sock.getsockname()[1])
 
@@ -67,6 +70,7 @@ class LocalMurmurPaths:
     sqlite_path: str
     cert_path: str
     key_path: str
+    ca_path: str
     log_path: str
     pid_path: str
 
@@ -77,31 +81,39 @@ class LocalMurmurHarness:
         *,
         root_dir: Path,
         server_name: str,
-        bind_host: str,
+        client_bind_host: str,
         probe_host: str,
         ice_host: str,
+        ice_bind_host: str,
         address_host: str,
         client_port: int,
         ice_port: int,
         ice_secret: str,
         server_id: int,
+        instance_number: int,
     ):
         self.root_dir = root_dir
         self.server_name = server_name
-        self.bind_host = bind_host
+        self.client_bind_host = str(client_bind_host or "").strip()
         self.probe_host = probe_host
-        self.ice_host = ice_host
+        self.ice_host = str(ice_host or "").strip() or "127.0.0.1"
         self.address_host = address_host
         self.client_port = client_port
         self.ice_port = ice_port
         self.ice_secret = ice_secret
         self.server_id = server_id
+        self.instance_number = int(instance_number)
+        self.use_ssl = bool(self.instance_number % 2 == 1)
+        self.ice_bind_host = str(ice_bind_host or "").strip() or (
+            "0.0.0.0" if self.use_ssl else "127.0.0.1"
+        )
         self.paths = LocalMurmurPaths(
             root_dir=str(root_dir),
             ini_path=str(root_dir / "mumble-server.ini"),
             sqlite_path=str(root_dir / "murmur.sqlite"),
             cert_path=str(root_dir / "cert.pem"),
             key_path=str(root_dir / "key.pem"),
+            ca_path=str(root_dir / "cert.pem"),
             log_path=str(root_dir / "mumble-server.log"),
             pid_path=str(root_dir / "mumble-server.pid"),
         )
@@ -142,22 +154,38 @@ class LocalMurmurHarness:
         )
 
     def _write_ini(self) -> None:
-        ini = "\n".join(
-            [
-                f"database={self.paths.sqlite_path}",
-                f"host={self.bind_host}",
-                f"port={self.client_port}",
-                f"sslCert={self.paths.cert_path}",
-                f"sslKey={self.paths.key_path}",
-                "users=32",
-                "bonjour=False",
-                "sendversion=True",
-                f"registerName={self.server_name}",
-                f'ice="tcp -h {self.ice_host} -p {self.ice_port}"',
-                f"icesecretwrite={self.ice_secret}",
-                "",
-            ]
+        ice_endpoint = (
+            f'ice="ssl -h {self.ice_bind_host} -p {self.ice_port}"'
+            if self.use_ssl
+            else f'ice="tcp -h {self.ice_bind_host} -p {self.ice_port}"'
         )
+        ini_lines = [
+            f"database={self.paths.sqlite_path}",
+            f"host={self.client_bind_host}",
+            f"port={self.client_port}",
+            f"sslCert={self.paths.cert_path}",
+            f"sslKey={self.paths.key_path}",
+            "users=32",
+            "bonjour=False",
+            "sendversion=True",
+            f"registerName={self.server_name}",
+            ice_endpoint,
+            f"icesecretwrite={self.ice_secret}",
+        ]
+        if self.use_ssl:
+            ini_lines.extend(
+                [
+                    "",
+                    "[Ice]",
+                    "Ice.Plugin.IceSSL=IceSSL:createIceSSL",
+                    f"IceSSL.CertFile={self.paths.cert_path}",
+                    f"IceSSL.KeyFile={self.paths.key_path}",
+                    f"IceSSL.CAs={self.paths.ca_path}",
+                    "IceSSL.VerifyPeer=0",
+                ]
+            )
+        ini_lines.append("")
+        ini = "\n".join(ini_lines)
         Path(self.paths.ini_path).write_text(ini)
 
     def start(self, *, timeout: float = 5.0) -> int:
@@ -195,35 +223,40 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--name", default="Local BG Test")
         parser.add_argument("--root-dir", default="/tmp/mumble-bg-local-murmur")
-        parser.add_argument("--bind-host", default="127.0.0.1")
+        parser.add_argument("--bind-host", default="")
+        parser.add_argument("--client-bind-host", default="")
         parser.add_argument("--ice-host", default="")
+        parser.add_argument("--ice-bind-host", default="")
         parser.add_argument("--address-host", default="")
         parser.add_argument("--client-port", type=int)
         parser.add_argument("--ice-port", type=int)
         parser.add_argument("--ice-secret")
+        parser.add_argument("--instance-number", type=int, default=1)
         parser.add_argument("--virtual-server-id", type=int, default=1)
         parser.add_argument("--display-order", type=int, default=0)
         parser.add_argument("--json", action="store_true")
 
     def handle(self, *args, **options):
-        bind_host = str(options["bind_host"]).strip()
-        probe_host = _default_probe_host(bind_host)
+        client_bind_host = str(options["client_bind_host"] or options["bind_host"] or "").strip()
+        probe_host = _default_probe_host(client_bind_host)
         ice_host = str(options["ice_host"] or "").strip() or probe_host
-        address_host = str(options["address_host"] or "").strip() or bind_host
-        client_port = options["client_port"] or _pick_free_tcp_port(bind_host)
-        ice_port = options["ice_port"] or _pick_free_tcp_port(bind_host)
+        address_host = str(options["address_host"] or "").strip() or probe_host
+        client_port = options["client_port"] or _pick_free_tcp_port(client_bind_host)
+        ice_port = options["ice_port"] or _pick_free_tcp_port(ice_host)
         ice_secret = options["ice_secret"] or secrets.token_urlsafe(24)
         harness = LocalMurmurHarness(
             root_dir=Path(options["root_dir"]),
             server_name=options["name"],
-            bind_host=bind_host,
+            client_bind_host=client_bind_host,
             probe_host=probe_host,
             ice_host=ice_host,
+            ice_bind_host=options["ice_bind_host"],
             address_host=address_host,
             client_port=client_port,
             ice_port=ice_port,
             ice_secret=ice_secret,
             server_id=options["virtual_server_id"],
+            instance_number=options["instance_number"],
         )
         harness.ensure_layout()
         pid = harness.start()
@@ -238,6 +271,9 @@ class Command(BaseCommand):
                 "virtual_server_id": options["virtual_server_id"],
                 "display_order": options["display_order"],
                 "is_active": True,
+                "ice_tls_cert": harness.paths.cert_path,
+                "ice_tls_key": harness.paths.key_path,
+                "ice_tls_ca": harness.paths.ca_path,
             },
         )
 

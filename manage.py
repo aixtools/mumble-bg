@@ -6,7 +6,9 @@ import sys
 
 
 def main():
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bg.settings')
+    from bg.envtools import bootstrap_bg_environment
+
+    bootstrap_bg_environment()
 
     try:
         from django.core.management import execute_from_command_line

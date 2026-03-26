@@ -53,6 +53,8 @@ Dev workflow currently:
 - runs `python manage.py migrate --noinput` automatically
 - restarts configured service units
 
+When ICE endpoints are configured to use TLS, the cert/key placement and SKIP instructions live in `docs/securing-ice-protocol.md`; the workflow must ensure those files exist before services restart.
+
 The dev workflow now writes `BG_DBMS` and `BG_PSK` directly instead of legacy aliases.
 If BG uses an encrypted private key, the dev workflow also needs `BG_PKI_PASSPHRASE` so deployed services can decrypt the key at runtime.
 `BG_RESET_DB_ON_DEPLOY` is no longer part of the normal workflow secret model.
