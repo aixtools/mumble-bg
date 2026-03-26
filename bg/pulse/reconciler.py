@@ -11,6 +11,8 @@ from bg.state.models import MumbleServer, MumbleUser
 
 logger = logging.getLogger(__name__)
 
+_RESERVED_REGISTRATION_NAMES = frozenset({"superuser"})
+
 
 class MurmurReconcileError(RuntimeError):
     """Raised when the Murmur reconciliation engine cannot continue."""
@@ -182,17 +184,17 @@ class _MurmurServerAdapter:
             ca = (self._server.ice_tls_ca or "").strip() or cert
             props.extend(
                 [
-                    "Ice.Plugin.IceSSL=IceSSL:createIceSSL",
-                    f"IceSSL.CertFile={cert}",
-                    f"IceSSL.KeyFile={key}",
-                    f"IceSSL.CACertFile={ca}",
+                    "--Ice.Plugin.IceSSL=IceSSL:createIceSSL",
+                    f"--IceSSL.CertFile={cert}",
+                    f"--IceSSL.KeyFile={key}",
+                    f"--IceSSL.CAs={ca}",
                     # self-signed in test env; caller can tighten to VerifyPeer=1 later
-                    "IceSSL.VerifyPeer=0",
+                    "--IceSSL.VerifyPeer=0",
                 ]
             )
             key_pass = os.environ.get("BG_ICE_KEY_PASSPHRASE", "").strip()
             if key_pass:
-                props.append(f"IceSSL.Password={key_pass}")
+                props.append(f"--IceSSL.Password={key_pass}")
 
         communicator = Ice.initialize(props)
         try:
@@ -250,6 +252,10 @@ def _normalize_username(value: object | None) -> str:
         return ""
     text = str(value).strip()
     return text.casefold()
+
+
+def _is_reserved_registration_name(value: object | None) -> bool:
+    return _normalize_username(value) in _RESERVED_REGISTRATION_NAMES
 
 
 def _build_registration_info(M, mumble_user: MumbleUser):
@@ -330,6 +336,8 @@ class MurmurRegistrationReconciler:
 
             delete_actions: list[MurmurDesiredAction] = []
             for live_name in live_names:
+                if _is_reserved_registration_name(live_name):
+                    continue
                 if live_name not in desired_by_name:
                     delete_actions.append(
                         MurmurDesiredAction(

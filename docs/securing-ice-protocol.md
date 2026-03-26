@@ -5,7 +5,7 @@ This project enforces TLS for background (BG) communications with Murmur ICE end
 ## Keypair placement
 
 1. Generate or reuse a certificate/private key bundle under `/etc/mumble-bg/keys` (matching the deployment identity, e.g. `ice-client-cert.pem` + `ice-client-key.pem`).
-2. Ensure the CA certificate that signed the client cert is also available on each ICE host (`IceSSL.CACertFile` in `mumble-server.ini`).
+2. Ensure the CA certificate that signed the client cert is also available on each ICE host (`IceSSL.CAs` in the `[Ice]` section of `mumble-server.ini`).
 3. Store the private key with `chmod 600` and, if encrypted, record the passphrase in BG’s env (`BG_ICE_KEY_PASSPHRASE`) so the communicator can unlock it while remaining protected.
 
 ## Murmur/ICE requirements
@@ -16,22 +16,24 @@ This project enforces TLS for background (BG) communications with Murmur ICE end
 
 ## BG communicator configuration
 
-- Pass `IceSSL.CertFile`, `IceSSL.KeyFile`, and optionally `IceSSL.CACertFile` to the communicator before connecting.
+- Pass `IceSSL.CertFile`, `IceSSL.KeyFile`, and optionally `IceSSL.CAs` to the communicator before connecting.
 - Supply `IceSSL.KeyPassphrase` when a passphrase is used; keep it in `BG_ICE_KEY_PASSPHRASE` and push it through the deploy workflow.
 - Continue to set per-server secrets (`ice_secret`) via ICE inventory JSON to protect shared secrets on top of TLS.
 
 ## Registering the IceSSL plugin
 
-Even with the certificate/key files in place, Murmur still needs to load the IceSSL plugin before the communicator starts. Add the following flat properties to `mumble-server.ini` so that Ice registers the plugin automatically:
+Even with the certificate/key files in place, Murmur still needs to load the IceSSL plugin before the communicator starts. Murmur reads Ice properties from the `[Ice]` section of `mumble-server.ini`, so place the plugin and certificate settings there:
 
 ```
+[Ice]
 Ice.Plugin.IceSSL=IceSSL:createIceSSL
-IceSSL.CertFile=/etc/mumble-server/certs/server.pfx
-IceSSL.CACertFile=/etc/mumble-server/certs/ca.pem
+IceSSL.CertFile=/etc/mumble-server/certs/server.pem
+IceSSL.KeyFile=/etc/mumble-server/certs/server.key
+IceSSL.CAs=/etc/mumble-server/certs/ca.pem
 IceSSL.Password=<passphrase-if-required>
 ```
 
-`Ice.Plugin.IceSSL` is the only new entry; the other lines mirror the cert bundle you already provision for TLS. Once Murmur sees those keys it will log that IceSSL is initialized and will listen on `ssl://` endpoints.
+Once Murmur sees those keys in `[Ice]`, it will initialize IceSSL and listen on `ssl://` endpoints. If you leave them at top level, Ice ignores them and `ssl` endpoints fail to bind.
 
 ## Verifying IceSSL is present
 
@@ -67,8 +69,8 @@ If Ice still rejects your `ssl://` endpoints, keep these friendly reminders hand
      ldd /usr/bin/mumble-server | grep -i IceSSL   # should show libIceSSL*
      ```
      If `ldd` does not list `libIceSSL`, the server binary was built without IceSSL support and must be rebuilt/installed with IceSSL enabled.
-2. `Ice.Plugin.IceSSL=IceSSL:createIceSSL` must appear in `mumble-server.ini` before the communicator initializes. Without it the cert/key values remain unused and no TLS listener is started.
-3. Double-check that `IceSSL.CertFile`, `IceSSL.CACertFile`, and `IceSSL.Password` (when the key is encrypted) point at the files already mentioned in your BG environment (`BG_ICE_CERT_PATH`, `BG_ICE_CA_PATH`, `BG_ICE_KEY_PASSPHRASE`).
+2. `Ice.Plugin.IceSSL=IceSSL:createIceSSL` must appear in the `[Ice]` section of `mumble-server.ini` before the communicator initializes. Without it the cert/key values remain unused and no TLS listener is started.
+3. Double-check that `IceSSL.CertFile`, `IceSSL.KeyFile`, `IceSSL.CAs`, and `IceSSL.Password` (when the key is encrypted) point at the files already mentioned in your BG environment (`BG_ICE_CERT_PATH`, `BG_ICE_CA_PATH`, `BG_ICE_KEY_PASSPHRASE`).
 4. After restarting Murmur, scan the log for the IceSSL plugin banner and run `strings /usr/bin/mumble-server | grep -i IceSSL` or `ldd /usr/bin/mumble-server | grep -i ice` to confirm the plugin symbols are present.
 
 Take those four steps together and the TLS listener will behave predictably, even if different agents have different expectations about what the `.deb` ships.

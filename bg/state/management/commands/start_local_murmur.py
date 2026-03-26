@@ -168,16 +168,20 @@ class LocalMurmurHarness:
             f"registerName={self.server_name}",
             ice_endpoint,
             f"icesecretwrite={self.ice_secret}",
-            "",
         ]
         if self.use_ssl:
-            ini_lines[3:3] = [
-                f"IceSSL.CertFile={self.paths.cert_path}",
-                f"IceSSL.KeyFile={self.paths.key_path}",
-                f"IceSSL.CACertFile={self.paths.ca_path}",
-                "Ice.Plugin.IceSSL=IceSSL:createIceSSL",
-                "IceSSL.VerifyPeer=0",
-            ]
+            ini_lines.extend(
+                [
+                    "",
+                    "[Ice]",
+                    "Ice.Plugin.IceSSL=IceSSL:createIceSSL",
+                    f"IceSSL.CertFile={self.paths.cert_path}",
+                    f"IceSSL.KeyFile={self.paths.key_path}",
+                    f"IceSSL.CAs={self.paths.ca_path}",
+                    "IceSSL.VerifyPeer=0",
+                ]
+            )
+        ini_lines.append("")
         ini = "\n".join(ini_lines)
         Path(self.paths.ini_path).write_text(ini)
 

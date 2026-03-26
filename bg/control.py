@@ -1374,36 +1374,37 @@ def provision(request):
             code=HTTPStatus.INTERNAL_SERVER_ERROR,
         )
 
-    reconcile_results: list[dict[str, object]] = []
-    reconcile_status = 'skipped'
-    reconcile_message = 'Reconciliation not requested'
-    if reconcile:
-        from bg.pulse.reconciler import MurmurRegistrationReconciler, MurmurReconcileError
+    # BG is the master; always reconcile BG→ICE after provisioning so
+    # Murmur registrations match BG state.  The ``reconcile`` flag from
+    # the caller is accepted for backwards compat but ignored — reconcile
+    # always runs.
+    from bg.pulse.reconciler import MurmurRegistrationReconciler, MurmurReconcileError
 
-        reconcile_status = 'completed'
-        reconcile_message = 'Reconciliation complete'
-        try:
-            reconciler = MurmurRegistrationReconciler(server_id=server_id)
-            murmur_results = reconciler.reconcile(dry_run=dry_run)
-            reconcile_results = [item.to_dict() for item in murmur_results]
-        except MurmurReconcileError as exc:
-            # Degrade gracefully when ICE is not configured/reachable.
-            # BG control/provision remains available so FG can continue syncing ACL + pilot state.
-            reconcile_status = 'degraded'
-            reconcile_message = f'Reconciliation unavailable: {exc}'
-        except Exception as exc:
-            return _response(
-                request_id,
-                'failed',
-                message=f'Reconciliation failed: {exc}',
-                code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            )
+    reconcile_results: list[dict[str, object]] = []
+    reconcile_status = 'completed'
+    reconcile_message = 'Reconciliation complete'
+    try:
+        reconciler = MurmurRegistrationReconciler(server_id=server_id)
+        murmur_results = reconciler.reconcile(dry_run=dry_run)
+        reconcile_results = [item.to_dict() for item in murmur_results]
+    except MurmurReconcileError as exc:
+        # Degrade gracefully when ICE is not configured/reachable.
+        # BG control/provision remains available so FG can continue syncing ACL + pilot state.
+        reconcile_status = 'degraded'
+        reconcile_message = f'Reconciliation unavailable: {exc}'
+    except Exception as exc:
+        return _response(
+            request_id,
+            'failed',
+            message=f'Reconciliation failed: {exc}',
+            code=HTTPStatus.INTERNAL_SERVER_ERROR,
+        )
 
     return _response(
         request_id, 'completed',
         message='Provisioning complete',
         dry_run=dry_run,
-        reconcile=reconcile,
+        reconcile=True,
         reconcile_status=reconcile_status,
         reconcile_message=reconcile_message,
         server_id=server_id,
