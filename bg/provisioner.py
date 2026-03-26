@@ -65,20 +65,13 @@ def _resolved_username_for_account(
     resolved_display_name: str,
     existing: MumbleUser | None = None,
 ) -> str:
-    """Username contract: use display-name format, never placeholder tags."""
-    display_candidate = str(resolved_display_name or '').strip()
-    if display_candidate and '????' not in display_candidate:
-        return display_candidate
-
-    existing_username = str(getattr(existing, 'username', '') or '').strip()
-    if existing_username and '????' not in existing_username:
-        return existing_username
-
-    cached_display = str(getattr(account, 'display_name', '') or '').strip()
-    if cached_display and '????' not in cached_display:
-        return cached_display
-
-    return ''
+    """Username contract: use the FG account username exactly; skip if unresolved/blank."""
+    base = str(getattr(account, 'account_username', '') or '').strip()
+    if not base:
+        return ''
+    if '????' in base:
+        return ''
+    return base
 
 
 def _account_matches_corp_or_alliance_deny(account, rs: dict[str, set[int]]) -> bool:
