@@ -17,6 +17,7 @@ ENV_FILE="${1:-/etc/mumble-bg/bg.env}"
 if [ -n "${BG_PKI_PASSPHRASE:-}" ]; then
     PASSPHRASE="$BG_PKI_PASSPHRASE"
 elif [ -n "${BG_KEY_PASSPHRASE:-}" ]; then
+    echo "WARNING: BG_KEY_PASSPHRASE is deprecated; use BG_PKI_PASSPHRASE instead." >&2
     PASSPHRASE="$BG_KEY_PASSPHRASE"
 else
     echo -n "Enter BG_PKI_PASSPHRASE: "

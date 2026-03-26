@@ -37,12 +37,14 @@ def _get_passphrase() -> bytes:
         if cred_path.exists():
             return cred_path.read_bytes().rstrip(b'\n')
 
-    val = (
-        os.environ.get('BG_PKI_PASSPHRASE', '').strip()
-        or os.environ.get('BG_KEY_PASSPHRASE', '').strip()
-    )
+    val = os.environ.get('BG_PKI_PASSPHRASE', '').strip()
     if val:
         return val.encode('utf-8')
+
+    legacy = os.environ.get('BG_KEY_PASSPHRASE', '').strip()
+    if legacy:
+        logger.warning('BG_KEY_PASSPHRASE is deprecated; use BG_PKI_PASSPHRASE instead')
+        return legacy.encode('utf-8')
 
     return b''
 

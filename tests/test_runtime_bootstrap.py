@@ -13,7 +13,7 @@ def test_bootstrap_bg_environment_loads_bg_env_file_without_overriding(tmp_path)
     env_file.write_text(
         "\n".join(
             [
-                "BG_KEY_PASSPHRASE='secret-passphrase'",
+                "BG_PKI_PASSPHRASE='secret-passphrase'",
                 "MURMUR_CONTROL_URL='http://127.0.0.1:18080'",
             ]
         ),
@@ -31,7 +31,7 @@ def test_bootstrap_bg_environment_loads_bg_env_file_without_overriding(tmp_path)
         bootstrap_bg_environment()
 
         assert os.environ["DJANGO_SETTINGS_MODULE"] == "bg.settings"
-        assert os.environ["BG_KEY_PASSPHRASE"] == "secret-passphrase"
+        assert os.environ["BG_PKI_PASSPHRASE"] == "secret-passphrase"
         assert os.environ["MURMUR_CONTROL_URL"] == "http://override.example:9999"
 
 
@@ -99,7 +99,7 @@ def test_bootstrap_bg_environment_uses_default_user_env_file(tmp_path):
 
 def test_authd_main_loads_bg_env_file_before_service_import(tmp_path):
     env_file = tmp_path / "mumble-bg.env"
-    env_file.write_text("BG_KEY_PASSPHRASE='secret-passphrase'\n", encoding="utf-8")
+    env_file.write_text("BG_PKI_PASSPHRASE='secret-passphrase'\n", encoding="utf-8")
 
     fake_service = types.ModuleType("bg.authd.service")
     fake_service.main = Mock()
@@ -107,6 +107,17 @@ def test_authd_main_loads_bg_env_file_before_service_import(tmp_path):
     with patch.dict(os.environ, {"BG_ENV_FILE": str(env_file)}, clear=True):
         with patch.dict(sys.modules, {"bg.authd.service": fake_service}):
             authd_main()
-        assert os.environ["BG_KEY_PASSPHRASE"] == "secret-passphrase"
+        assert os.environ["BG_PKI_PASSPHRASE"] == "secret-passphrase"
 
     fake_service.main.assert_called_once_with()
+
+
+def test_bootstrap_bg_environment_migrates_legacy_bg_key_passphrase(tmp_path):
+    env_file = tmp_path / "mumble-bg.env"
+    env_file.write_text("BG_KEY_PASSPHRASE='legacy-pass'\n", encoding="utf-8")
+
+    with patch.dict(os.environ, {"BG_ENV_FILE": str(env_file)}, clear=True):
+        bootstrap_bg_environment()
+
+        # Legacy value is migrated into the preferred env var.
+        assert os.environ["BG_PKI_PASSPHRASE"] == "legacy-pass"

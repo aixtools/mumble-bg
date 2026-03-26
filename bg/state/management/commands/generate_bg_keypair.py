@@ -47,8 +47,11 @@ class Command(BaseCommand):
                 f'{private_path} already exists. Use --force to overwrite.'
             )
 
-        raw_passphrase = os.environ.get('BG_PKI_PASSPHRASE') or os.environ.get('BG_KEY_PASSPHRASE')
-        passphrase = (raw_passphrase or '').strip()
+        passphrase = (os.environ.get('BG_PKI_PASSPHRASE') or '').strip()
+        legacy = (os.environ.get('BG_KEY_PASSPHRASE') or '').strip()
+        if not passphrase and legacy:
+            self.stdout.write(self.style.WARNING('BG_KEY_PASSPHRASE is deprecated; use BG_PKI_PASSPHRASE instead.'))
+            passphrase = legacy
         use_passwordless = False
         if not passphrase:
             self.stdout.write(

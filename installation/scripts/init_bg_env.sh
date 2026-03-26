@@ -20,6 +20,7 @@ fi
 mkdir -p "$(dirname "$target")"
 
 declare -A current=()
+# BG_KEY_PASSPHRASE is a deprecated alias; we read it for migration but do not emit it.
 vars=(DJANGO_SETTINGS_MODULE BG_PKI_PASSPHRASE BG_KEY_PASSPHRASE BG_BIND BG_DBMS BG_PSK MURMUR_CONTROL_URL DATABASES ICE MURMUR_PROBE)
 
 if [[ -n "$backup_file" ]]; then

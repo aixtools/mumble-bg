@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import json
 import ipaddress
 import os
@@ -11,11 +12,12 @@ from urllib.parse import urlparse
 from pathlib import Path
 
 
+logger = logging.getLogger(__name__)
+
 ENV_KEYS = [
     "DJANGO_SETTINGS_MODULE",
     "BG_ENV_FILE",
     "BG_PKI_PASSPHRASE",
-    "BG_KEY_PASSPHRASE",
     "BG_BIND",
     "BG_DBMS",
     "BG_PSK",
@@ -205,14 +207,8 @@ def load_env_file_into_environment(
         )
         os.environ["BG_PKI_PASSPHRASE"] = current_value
         applied["BG_PKI_PASSPHRASE"] = current_value
-    if _is_missing_env_value("BG_KEY_PASSPHRASE") and (
-        env_values.get("BG_PKI_PASSPHRASE") or os.environ.get("BG_PKI_PASSPHRASE")
-    ):
-        current_value = str(
-            env_values.get("BG_PKI_PASSPHRASE") or os.environ.get("BG_PKI_PASSPHRASE") or ""
-        )
-        os.environ["BG_KEY_PASSPHRASE"] = current_value
-        applied["BG_KEY_PASSPHRASE"] = current_value
+        if current_value.strip():
+            logger.warning("BG_KEY_PASSPHRASE is deprecated; use BG_PKI_PASSPHRASE instead")
     return applied
 
 

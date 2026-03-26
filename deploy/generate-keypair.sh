@@ -27,6 +27,7 @@ chmod 0755 "$KEY_DIR"
 if [ -n "${BG_PKI_PASSPHRASE:-}" ]; then
     PASS_ENV_VAR="BG_PKI_PASSPHRASE"
 elif [ -n "${BG_KEY_PASSPHRASE:-}" ]; then
+    echo "WARNING: BG_KEY_PASSPHRASE is deprecated; use BG_PKI_PASSPHRASE instead." >&2
     PASS_ENV_VAR="BG_KEY_PASSPHRASE"
 else
     PASS_ENV_VAR=""
