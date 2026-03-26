@@ -1,23 +1,18 @@
-name: Deploy mumble-bg (Prod)
+name: Deploy mumble-bg (reusable)
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       deploy_target_name:
-        description: 'Secret name containing deploy target JSON (host/user/key/port)'
-        required: false
-        default: 'MUMBLE_PROD_US'
-      env_secret_name:
-        description: 'Secret name containing env config JSON (DATABASES/ICE/PSK)'
-        required: false
-        default: 'MUMBLE_PROD_US_ENV'
+        description: 'Secret name containing deploy target JSON'
+        required: true
+        type: string
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      DEPLOY_TARGET_NAME: ${{ github.event.inputs.deploy_target_name || 'MUMBLE_PROD_US' }}
-      ENV_SECRET_NAME: ${{ github.event.inputs.env_secret_name || 'MUMBLE_PROD_US_ENV' }}
+      DEPLOY_TARGET_NAME: ${{ inputs.deploy_target_name }}
 
     steps:
       - name: Checkout code
@@ -25,9 +20,7 @@ jobs:
 
       - name: Resolve deploy target
         env:
-          DEPLOY_TARGET_JSON: ${{ secrets[github.event.inputs.deploy_target_name || 'MUMBLE_PROD_US'] }}
-          DEPLOY_ENV_JSON: ${{ secrets[github.event.inputs.env_secret_name || 'MUMBLE_PROD_US_ENV'] }}
-          BG_PKI_PASSPHRASE_SECRET: ${{ secrets.BG_PKI_PASSPHRASE }}
+          DEPLOY_TARGET_JSON: ${{ secrets[inputs.deploy_target_name] }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -89,21 +82,6 @@ jobs:
 
           payload = _parse_target_payload(raw, target_name)
 
-          # Parse env config secret.
-          env_secret_name = os.environ.get("ENV_SECRET_NAME", "").strip()
-          env_raw = os.environ.get("DEPLOY_ENV_JSON", "").strip()
-          if not env_raw:
-              raise SystemExit(
-                  f"Missing env config secret payload for {env_secret_name}. "
-                  f"Create a secret named {env_secret_name} with JSON fields DATABASES/ICE/BG_PSK."
-              )
-          try:
-              env_payload = json.loads(env_raw)
-          except json.JSONDecodeError as exc:
-              raise SystemExit(f"Secret {env_secret_name} is not valid JSON: {exc}") from exc
-          if not isinstance(env_payload, dict):
-              raise SystemExit(f"Secret {env_secret_name} must be a JSON object")
-
           host = str(payload.get("host", "")).strip()
           user = str(payload.get("user", "")).strip()
           key = payload.get("key", "")
@@ -148,30 +126,6 @@ jobs:
               fh.write(f"DEPLOY_ENV_FILE={env_file}\n")
               fh.write(f"DEPLOY_VENV_DIR={venv_dir}\n")
               fh.write(f"DEPLOY_SERVICE_NAME={service_name}\n")
-
-          # Write env file content locally for scp to remote.
-          env_file_local = Path("/tmp/mumble-bg.env")
-          lines = []
-          for k in ["DATABASES", "ICE", "MURMUR_PROBE",
-                     "BG_PSK", "BG_BIND", "BG_PKI_PASSPHRASE"]:
-              v = env_payload.get(k)
-              if v is None or v == "":
-                  continue
-              v = str(v)
-              # Quote values that contain spaces or special chars.
-              if any(c in v for c in " '\"\t\n{}[]"):
-                  lines.append(f"{k}='{v}'")
-              else:
-                  lines.append(f"{k}={v}")
-          pki_passphrase = str(os.environ.get("BG_PKI_PASSPHRASE_SECRET", "")).strip()
-          if pki_passphrase:
-              lines = [line for line in lines if not line.startswith("BG_PKI_PASSPHRASE=")]
-              if any(c in pki_passphrase for c in " '\"\t\n{}[]"):
-                  lines.append(f"BG_PKI_PASSPHRASE='{pki_passphrase}'")
-              else:
-                  lines.append(f"BG_PKI_PASSPHRASE={pki_passphrase}")
-          env_file_local.write_text("\n".join(lines) + "\n", encoding="utf-8")
-          env_file_local.chmod(0o600)
           PY
 
       - name: Set up SSH known hosts
@@ -197,22 +151,30 @@ jobs:
           set -euo pipefail
           DEPLOY_ENV_DIR="$(dirname "${DEPLOY_ENV_FILE}")"
           ssh -p "${DEPLOY_TARGET_PORT}" -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
-            "mkdir -p '${DEPLOY_ENV_DIR}'"
-          scp -P "${DEPLOY_TARGET_PORT}" -i ~/.ssh/deploy_key \
-            /tmp/mumble-bg.env \
-            "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}:${DEPLOY_ENV_FILE}"
-          ssh -p "${DEPLOY_TARGET_PORT}" -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
-            "chmod 600 '${DEPLOY_ENV_FILE}'"
+            "DEPLOY_ENV_DIR='${DEPLOY_ENV_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' bash -s" <<'EOF'
+          mkdir -p "${DEPLOY_ENV_DIR}"
+          cat > "${DEPLOY_ENV_FILE}" <<'ENVFILE'
+          DATABASES='${{ secrets.DATABASES }}'
+          ICE='${{ secrets.ICE }}'
+          MURMUR_PROBE='${{ secrets.MURMUR_PROBE }}'
+          BG_ENGINE=${{ secrets.BG_ENGINE }}
+          BG_RESET_DB_ON_DEPLOY=${{ secrets.BG_RESET_DB_ON_DEPLOY || vars.BG_RESET_DB_ON_DEPLOY }}
+          BG_PSK='${{ secrets.BG_PSK }}'
+          BG_BIND=${{ secrets.BG_BIND }}
+          ENVFILE
+          chmod 600 "${DEPLOY_ENV_FILE}"
+          EOF
 
       - name: Bootstrap (first deploy)
         run: |
           set -euo pipefail
           ssh -p "${DEPLOY_TARGET_PORT}" -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
-            "DEPLOY_PROJECT_DIR='${DEPLOY_PROJECT_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' DEPLOY_VENV_DIR='${DEPLOY_VENV_DIR}' DEPLOY_SERVICE_NAME='${DEPLOY_SERVICE_NAME}' bash -s" <<'EOF'
+            "DEPLOY_PROJECT_DIR='${DEPLOY_PROJECT_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' DEPLOY_VENV_DIR='${DEPLOY_VENV_DIR}' DEPLOY_SERVICE_NAME='${DEPLOY_SERVICE_NAME}' DEPLOY_HOME_DIR='${DEPLOY_HOME_DIR}' bash -s" <<'EOF'
           set -euo pipefail
 
           # Skip bootstrap if the systemd service already exists.
-          if sudo systemctl list-unit-files "${DEPLOY_SERVICE_NAME}.service" 2>/dev/null | grep -q "${DEPLOY_SERVICE_NAME}"; then
+          if sudo systemctl list-unit-files "${DEPLOY_SERVICE_NAME}.service" >/dev/null 2>&1 && \
+             sudo systemctl list-unit-files "${DEPLOY_SERVICE_NAME}.service" | grep -q "${DEPLOY_SERVICE_NAME}"; then
             echo "[bootstrap] Service ${DEPLOY_SERVICE_NAME} already installed; skipping bootstrap."
             exit 0
           fi
@@ -227,7 +189,6 @@ jobs:
           set -a
           source "${DEPLOY_ENV_FILE}"
           set +a
-          # Default bootstrap engine is PostgreSQL; override only if needed with BG_ENGINE=mysql.
           BG_ENGINE_EFFECTIVE="${BG_ENGINE:-postgres}"
           case "$(printf '%s' "${BG_ENGINE_EFFECTIVE}" | tr '[:upper:]' '[:lower:]')" in
             ''|postgres|postgresql|psql)
@@ -244,36 +205,30 @@ jobs:
             python3 -m venv "${DEPLOY_VENV_DIR}"
           fi
 
-          # Install systemd services from templates.
-          CURRENT_USER="$(whoami)"
-          KEY_DIR="${DEPLOY_HOME_DIR:-/home/${CURRENT_USER}}/.keys/mumble-bg"
-          mkdir -p "${KEY_DIR}"
-
-          for svc_template in mumble-bg-auth mumble-bg-control; do
-            TEMPLATE="${DEPLOY_PROJECT_DIR}/deploy/systemd/${svc_template}.service"
-            if [ -f "${TEMPLATE}" ]; then
-              SERVICE_FILE="/etc/systemd/system/${svc_template}.service"
-              sed \
-                -e "s|__APP_USER__|${CURRENT_USER}|g" \
-                -e "s|__APP_DIR__|${DEPLOY_PROJECT_DIR}|g" \
-                -e "s|__ENV_FILE__|${DEPLOY_ENV_FILE}|g" \
-                -e "s|__VENV_DIR__|${DEPLOY_VENV_DIR}|g" \
-                -e "s|__KEY_DIR__|${KEY_DIR}|g" \
-                "${TEMPLATE}" | sudo tee "${SERVICE_FILE}" > /dev/null
-              sudo chmod 0644 "${SERVICE_FILE}"
-              echo "[bootstrap] Installed systemd service ${svc_template}."
-            else
-              echo "[bootstrap][WARN] Template not found: ${TEMPLATE}"
-            fi
-          done
-          sudo systemctl daemon-reload
-          sudo systemctl enable mumble-bg-auth mumble-bg-control
+          # Install systemd service from template.
+          TEMPLATE="${DEPLOY_PROJECT_DIR}/deploy/systemd/mumble-bg-auth.service"
+          if [ -f "${TEMPLATE}" ]; then
+            SERVICE_FILE="/etc/systemd/system/${DEPLOY_SERVICE_NAME}.service"
+            sed \
+              -e "s|__APP_USER__|$(whoami)|g" \
+              -e "s|__APP_DIR__|${DEPLOY_PROJECT_DIR}|g" \
+              -e "s|__ENV_FILE__|${DEPLOY_ENV_FILE}|g" \
+              -e "s|__VENV_DIR__|${DEPLOY_VENV_DIR}|g" \
+              "${TEMPLATE}" | sudo tee "${SERVICE_FILE}" > /dev/null
+            sudo chmod 0644 "${SERVICE_FILE}"
+            sudo systemctl daemon-reload
+            sudo systemctl enable "${DEPLOY_SERVICE_NAME}"
+            echo "[bootstrap] Installed systemd service ${DEPLOY_SERVICE_NAME}."
+          else
+            echo "[bootstrap][WARN] Template not found: ${TEMPLATE}"
+          fi
 
           # Configure sudoers for service management.
           SUDOERS_FILE="/etc/sudoers.d/mumble-bg"
           if [ ! -f "${SUDOERS_FILE}" ]; then
+            CURRENT_USER="$(whoami)"
             sudo tee "${SUDOERS_FILE}" > /dev/null <<SUDOERS
-          ${CURRENT_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart mumble-bg-auth, /bin/systemctl restart mumble-bg-control, /bin/systemctl status mumble-bg-auth, /bin/systemctl status mumble-bg-control, /bin/systemctl is-active mumble-bg-auth, /bin/systemctl is-active mumble-bg-control, /bin/systemctl daemon-reload, /bin/systemctl list-unit-files *, /bin/bash ${DEPLOY_PROJECT_DIR}/deploy/create-db.sh *
+          ${CURRENT_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart ${DEPLOY_SERVICE_NAME}, /bin/systemctl status ${DEPLOY_SERVICE_NAME}, /bin/systemctl is-active ${DEPLOY_SERVICE_NAME}, /bin/systemctl daemon-reload, /bin/systemctl list-unit-files *, /bin/bash ${DEPLOY_PROJECT_DIR}/deploy/create-db.sh *
           SUDOERS
             sudo chmod 440 "${SUDOERS_FILE}"
             echo "[bootstrap] Configured sudoers."
@@ -293,7 +248,6 @@ jobs:
             python3 -m venv "${DEPLOY_VENV_DIR}"
           fi
           "${DEPLOY_VENV_DIR}/bin/pip" install --quiet -r "${DEPLOY_PROJECT_DIR}/requirements.txt"
-          "${DEPLOY_VENV_DIR}/bin/pip" install --quiet --no-deps "${DEPLOY_PROJECT_DIR}"
           set -a
           source "${DEPLOY_ENV_FILE}"
           set +a
@@ -346,7 +300,6 @@ jobs:
           BG_DATABASE_HOST="$(json_field DATABASES bg host)"
           BG_DATABASE_USER="$(json_field DATABASES bg username)"
           BG_DATABASE_PASSWORD="$(json_field DATABASES bg password)"
-          # Default bootstrap engine is PostgreSQL; override only if needed with BG_ENGINE=mysql.
           BG_ENGINE_EFFECTIVE="${BG_ENGINE:-postgres}"
 
           case "$(printf '%s' "${BG_ENGINE_EFFECTIVE}" | tr '[:upper:]' '[:lower:]')" in
@@ -378,9 +331,6 @@ jobs:
               ;;
           esac
 
-          # Test-only local reset hook: honored only when explicitly placed in
-          # the target env file by an operator. The normal workflow no longer
-          # sources this from GitHub secrets or workflow vars.
           BG_RESET_DB_NORMALIZED="$(printf '%s' "${BG_RESET_DB_ON_DEPLOY:-}" | tr '[:upper:]' '[:lower:]')"
           if [ "${BG_RESET_DB_NORMALIZED}" = "1" ] || [ "${BG_RESET_DB_NORMALIZED}" = "true" ] || [ "${BG_RESET_DB_NORMALIZED}" = "yes" ]; then
             if [ "${BG_ENGINE_EFFECTIVE}" != "postgres" ]; then
@@ -411,24 +361,21 @@ jobs:
             fi
           fi
 
-          echo "Running Django migrations automatically..."
           "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" migrate --noinput
-          "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" sync_ice_inventory
 
           if [ "${CONTROL_PSK_RESET_REQUESTED}" -eq 1 ]; then
             "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" reset_murmur_control_key --yes
           fi
           EOF
 
-      - name: Restart services
+      - name: Restart service
         run: |
           set -euo pipefail
           ssh -p "${DEPLOY_TARGET_PORT}" -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
-            "sudo systemctl restart mumble-bg-auth mumble-bg-control"
+            "sudo systemctl restart '${DEPLOY_SERVICE_NAME}'"
 
       - name: Health check
         run: |
           set -euo pipefail
-          sleep 3
           ssh -p "${DEPLOY_TARGET_PORT}" -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
-            "sudo systemctl is-active mumble-bg-auth && sudo systemctl is-active mumble-bg-control"
+            "sudo systemctl is-active '${DEPLOY_SERVICE_NAME}'"
