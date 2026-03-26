@@ -67,6 +67,8 @@ class Command(BaseCommand):
             return val if val else default
 
         dj_settings = cur_or_default("DJANGO_SETTINGS_MODULE", "bg.settings")
+        # BG_KEY_PASSPHRASE is a deprecated alias. If present in an existing file,
+        # migrate its value into BG_PKI_PASSPHRASE.
         passphrase = cur_or_default("BG_PKI_PASSPHRASE", cur_or_default("BG_KEY_PASSPHRASE", "CHANGE_ME"))
         bg_bind = cur_or_default("BG_BIND", "")
         psk = cur_or_default("BG_PSK", "CHANGE_ME")

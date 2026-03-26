@@ -3,8 +3,10 @@
 import json
 import os
 import secrets
+import base64
 from http import HTTPStatus
 from typing import Any
+from uuid import UUID
 
 from django.http import HttpResponse, JsonResponse
 from django.utils.timezone import now
@@ -20,6 +22,7 @@ from bg.pilot.registrations import (
 )
 from bg.contracts import MurmurRegistrationContractPatch, MurmurRegistrationSnapshot
 from bg.pilot_snapshot import store_pilot_snapshot
+from bg import control_keyring
 from bg.state.models import (
     AccessRule,
     AccessRuleSyncAudit,
@@ -27,6 +30,7 @@ from bg.state.models import (
     ENTITY_TYPE_CORPORATION,
     ENTITY_TYPE_PILOT,
     ControlChannelKey,
+    ControlChannelKeyEntry,
     EveObject,
     MumbleServer,
     MumbleSession,
@@ -76,17 +80,55 @@ def _control_key_row() -> ControlChannelKey:
     return row
 
 
-def _configured_control_secret() -> tuple[str | None, str]:
+def _configured_control_secrets() -> tuple[list[tuple[str | None, str]], str]:
+    """Return accepted secrets for inbound FG->BG control requests.
+
+    Primary source is the rotating keyring (key_id, secret) entries stored encrypted at rest.
+    Fallbacks:
+    - legacy DB shared_secret
+    - env bootstrap secret BG_PSK
+    - open (no auth configured)
+    """
+    secrets_list: list[tuple[str | None, str]] = []
+    source = 'open'
+
+    # Prefer the keyring if crypto is available and decryption works, but keep
+    # BG_PSK available as a bootstrap/break-glass secret if it is configured.
+    try:
+        latest = control_keyring.ensure_fresh()
+        if latest is not None:
+            keypairs = control_keyring.decrypt_active_keypairs()
+            secrets_list.extend([(str(key_id), secret) for key_id, secret in keypairs])
+            source = 'keyring'
+    except Exception:  # noqa: BLE001
+        # If keyring is present but crypto is misconfigured (missing passphrase/private key),
+        # fall back to bootstrap mechanisms.
+        pass
+
     try:
         row = ControlChannelKey.objects.filter(name=_CONTROL_KEY_NAME).only('shared_secret').first()
     except Exception:  # noqa: BLE001
         row = None
     if row and row.shared_secret:
-        return row.shared_secret, 'db'
+        secrets_list.append((None, row.shared_secret))
+        if source == 'open':
+            source = 'db'
     env_secret = _env_bootstrap_psk()
     if env_secret:
-        return env_secret, 'env'
-    return None, 'open'
+        secrets_list.append((None, env_secret))
+        if source == 'open':
+            source = 'env'
+
+    # De-dupe while preserving order.
+    out: list[tuple[str | None, str]] = []
+    seen: set[str] = set()
+    for key_id, secret in secrets_list:
+        if secret in seen:
+            continue
+        out.append((key_id, secret))
+        seen.add(secret)
+
+    return out, source
 
 
 def _provided_control_secret(request) -> str | None:
@@ -105,16 +147,64 @@ def _provided_control_secret(request) -> str | None:
     return None
 
 
-def _require_control_auth(request) -> str:
-    expected, source = _configured_control_secret()
+def _provided_control_key_id(request) -> str | None:
+    value = (
+        request.headers.get('X-BG-KEY-ID')
+        or request.headers.get('X-FGBG-KEY-ID')
+        or request.headers.get('X-Control-Key-Id')
+    )
+    if not value:
+        return None
+    value = str(value).strip()
+    return value or None
+
+
+def _response_authed(
+    control_key_id: str | None,
+    request_id: str,
+    status: str,
+    *,
+    message: str | None = None,
+    code: int = 200,
+    **payload: Any,
+) -> JsonResponse:
+    response = _response(request_id, status, message=message, code=code, **payload)
+    if control_key_id:
+        response['X-BG-KEY-ID'] = control_key_id
+    return response
+
+
+def _require_control_auth(request) -> tuple[str, str | None]:
+    expected, source = _configured_control_secrets()
     if not expected:
-        return source
+        return source, None
     provided = _provided_control_secret(request)
     if not provided:
         raise _Unauthorized('Missing control authentication secret')
-    if not secrets.compare_digest(provided, expected):
+
+    requested_key_id = _provided_control_key_id(request)
+    if requested_key_id:
+        try:
+            UUID(requested_key_id)
+        except Exception as exc:  # noqa: BLE001
+            raise _Unauthorized('Invalid control key id') from exc
+        for key_id, secret in expected:
+            if key_id == requested_key_id and secrets.compare_digest(provided, secret):
+                return source, key_id
+        # If the caller sent a (possibly stale) key id, but the secret matches
+        # another active key, accept it and let the response header inform the
+        # caller which key id is currently valid. This supports recovery after
+        # partial DB restores / keyring divergence.
+        for key_id, secret in expected:
+            if secrets.compare_digest(provided, secret):
+                return source, key_id
         raise _Unauthorized('Invalid control authentication secret')
-    return source
+
+    for key_id, secret in expected:
+        if secrets.compare_digest(provided, secret):
+            return source, key_id
+
+    raise _Unauthorized('Invalid control authentication secret')
 
 
 def _require_requested_by(requested_by: str | None):
@@ -533,7 +623,7 @@ def _sync_context(request):
 @require_http_methods(['POST'])
 def registrations_sync(request):
     try:
-        auth_source = _require_control_auth(request)
+        auth_source, control_key_id = _require_control_auth(request)
         payload, request_id, requested_by, _ = _sync_context(request)
         _require_requested_by(requested_by)
         server = _SERVER_RESOLVER.resolve(payload)
@@ -549,7 +639,8 @@ def registrations_sync(request):
         return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
 
     if payload.get('dry_run'):
-        return _response(
+        return _response_authed(
+            control_key_id,
             request_id,
             'completed',
             message='Dry run requested; skipping ICE registration call',
@@ -562,7 +653,8 @@ def registrations_sync(request):
     try:
         murmur_userid = sync_murmur_registration(mumble_user, password=password)
     except MurmurSyncError as exc:
-        return _response(
+        return _response_authed(
+            control_key_id,
             request_id,
             'failed',
             message=f'Failed to sync registration: {exc}',
@@ -573,7 +665,8 @@ def registrations_sync(request):
         mumble_user.mumble_userid = murmur_userid
         mumble_user.save(update_fields=['mumble_userid', 'updated_at'])
 
-    return _response(
+    return _response_authed(
+        control_key_id,
         request_id,
         'completed',
         message='Registration synchronized',
@@ -587,10 +680,10 @@ def registrations_sync(request):
 @require_http_methods(['POST'])
 def registration_contract_sync(request):
     try:
-        auth_source = _require_control_auth(request)
+        auth_source, control_key_id = _require_control_auth(request)
         payload, request_id, requested_by, _is_super = _sync_context(request)
         _require_requested_by(requested_by)
-        _require_super(is_super)
+        _require_super(_is_super)
         server = _SERVER_RESOLVER.resolve(payload)
         mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
         patch = _REGISTRATION_CONTRACT_SERVICE.parse_patch(payload)
@@ -605,7 +698,8 @@ def registration_contract_sync(request):
         return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
 
     _REGISTRATION_CONTRACT_SERVICE.apply(mumble_user, patch)
-    return _response(
+    return _response_authed(
+        control_key_id,
         request_id,
         'completed',
         message='Registration contract metadata synchronized',
@@ -619,7 +713,7 @@ def registration_contract_sync(request):
 @require_http_methods(['POST'])
 def registrations_disable(request):
     try:
-        auth_source = _require_control_auth(request)
+        auth_source, control_key_id = _require_control_auth(request)
         payload, request_id, requested_by, _ = _sync_context(request)
         _require_requested_by(requested_by)
         server = _SERVER_RESOLVER.resolve(payload)
@@ -637,7 +731,8 @@ def registrations_disable(request):
     try:
         disabled = unregister_murmur_registration(mumble_user)
     except MurmurSyncError as exc:
-        return _response(
+        return _response_authed(
+            control_key_id,
             request_id,
             'failed',
             message=f'Failed to disable registration: {exc}',
@@ -648,7 +743,8 @@ def registrations_disable(request):
         mumble_user.mumble_userid = None
         mumble_user.save(update_fields=['mumble_userid', 'updated_at'])
 
-    return _response(
+    return _response_authed(
+        control_key_id,
         request_id,
         'completed',
         message='Registration disabled' if disabled else 'No active Murmur registration found',
@@ -662,7 +758,7 @@ def registrations_disable(request):
 @require_http_methods(['POST'])
 def admin_membership_sync(request):
     try:
-        auth_source = _require_control_auth(request)
+        auth_source, control_key_id = _require_control_auth(request)
         payload, request_id, requested_by, _ = _sync_context(request)
         _require_requested_by(requested_by)
         server = _SERVER_RESOLVER.resolve(payload)
@@ -693,14 +789,16 @@ def admin_membership_sync(request):
     try:
         synced_sessions = sync_live_admin_membership(mumble_user, session_ids=session_ids)
     except MurmurSyncError as exc:
-        return _response(
+        return _response_authed(
+            control_key_id,
             request_id,
             'failed',
             message=f'Failed to sync admin membership: {exc}',
             code=HTTPStatus.BAD_GATEWAY,
         )
 
-    return _response(
+    return _response_authed(
+        control_key_id,
         request_id,
         'completed',
         message='Admin membership synced',
@@ -715,7 +813,7 @@ def admin_membership_sync(request):
 @require_http_methods(['POST'])
 def password_reset(request):
     try:
-        auth_source = _require_control_auth(request)
+        auth_source, control_key_id = _require_control_auth(request)
         payload, request_id, requested_by, _ = _sync_context(request)
         _require_requested_by(requested_by)
 
@@ -754,7 +852,8 @@ def password_reset(request):
     if encrypted_password and desired_password is None:
         from bg.crypto import can_decrypt, decrypt_password
         if not can_decrypt():
-            return _response(
+            return _response_authed(
+                control_key_id,
                 request_id,
                 'failed',
                 message='Encrypted password provided but BG crypto is not configured',
@@ -764,7 +863,8 @@ def password_reset(request):
             desired_password = decrypt_password(encrypted_password)
             _validate_password(desired_password, field_name='encrypted_password (decrypted)')
         except Exception as exc:
-            return _response(
+            return _response_authed(
+                control_key_id,
                 request_id,
                 'failed',
                 message=f'Failed to decrypt password: {exc}',
@@ -819,7 +919,8 @@ def password_reset(request):
         status = 'completed'
         message = 'Password set and registration synchronized' if not skip_ice else 'Password hash stored (Murmur sync skipped)'
 
-    return _response(
+    return _response_authed(
+        control_key_id,
         request_id,
         status,
         message=message,
@@ -841,10 +942,10 @@ def password_reset(request):
 @require_http_methods(['POST'])
 def control_key_bootstrap(request):
     try:
-        auth_source = _require_control_auth(request)
+        auth_source, control_key_id = _require_control_auth(request)
         payload, request_id, requested_by, _is_super = _sync_context(request)
         _require_requested_by(requested_by)
-        _require_super(is_super)
+        _require_super(_is_super)
         new_secret = _read_new_control_secret(payload)
     except _BadRequest as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
@@ -856,14 +957,16 @@ def control_key_bootstrap(request):
     try:
         control_key = _control_key_row()
     except Exception as exc:  # noqa: BLE001
-        return _response(
+        return _response_authed(
+            control_key_id,
             request_id,
             'failed',
             message=f'Control key table is unavailable: {exc}',
             code=HTTPStatus.INTERNAL_SERVER_ERROR,
         )
     if control_key.shared_secret:
-        return _response(
+        return _response_authed(
+            control_key_id,
             request_id,
             'rejected',
             message='Control key already exists; use /v1/control-key/rotate',
@@ -874,7 +977,8 @@ def control_key_bootstrap(request):
     control_key.shared_secret = new_secret
     control_key.save(update_fields=['shared_secret', 'updated_at'])
 
-    return _response(
+    return _response_authed(
+        control_key_id,
         request_id,
         'completed',
         message='Control key bootstrapped',
@@ -887,7 +991,7 @@ def control_key_bootstrap(request):
 @require_http_methods(['POST'])
 def control_key_rotate(request):
     try:
-        auth_source = _require_control_auth(request)
+        auth_source, control_key_id = _require_control_auth(request)
         payload, request_id, requested_by, is_super = _sync_context(request)
         _require_requested_by(requested_by)
         _require_super(is_super)
@@ -902,7 +1006,8 @@ def control_key_rotate(request):
     try:
         control_key = _control_key_row()
     except Exception as exc:  # noqa: BLE001
-        return _response(
+        return _response_authed(
+            control_key_id,
             request_id,
             'failed',
             message=f'Control key table is unavailable: {exc}',
@@ -912,7 +1017,8 @@ def control_key_rotate(request):
     control_key.shared_secret = new_secret
     control_key.save(update_fields=['shared_secret', 'updated_at'])
 
-    return _response(
+    return _response_authed(
+        control_key_id,
         request_id,
         'completed',
         message='Control key rotated' if had_key else 'Control key created',
@@ -923,7 +1029,7 @@ def control_key_rotate(request):
 
 @require_http_methods(['GET'])
 def control_key_status(request):
-    _, source = _configured_control_secret()
+    _, source = _configured_control_secrets()
     try:
         row = ControlChannelKey.objects.filter(name=_CONTROL_KEY_NAME).only('id', 'updated_at', 'created_at').first()
     except Exception:  # noqa: BLE001
@@ -941,11 +1047,111 @@ def control_key_status(request):
     )
 
 
+@csrf_exempt
+@require_http_methods(['POST'])
+def control_keys_export(request):
+    """Export a control session key encrypted to the caller's (FG) public key.
+
+    This is used by FG to (re-)seed its local keyring without sending plaintext
+    secrets over the wire.
+    """
+    try:
+        auth_source, control_key_id = _require_control_auth(request)
+        payload, request_id, requested_by, _is_super = _sync_context(request)
+        _require_requested_by(requested_by)
+        fg_public_key_pem = payload.get('fg_public_key_pem')
+        if not isinstance(fg_public_key_pem, str) or not fg_public_key_pem.strip():
+            raise _BadRequest('fg_public_key_pem is required')
+        requested_key_id = payload.get('key_id')
+        if requested_key_id is not None and requested_key_id != '':
+            try:
+                requested_key_id = str(UUID(str(requested_key_id)))
+            except Exception as exc:  # noqa: BLE001
+                raise _BadRequest('key_id must be a UUID') from exc
+        del auth_source
+    except _BadRequest as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
+    except _Unauthorized as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _Forbidden as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
+
+    if requested_key_id:
+        entry = ControlChannelKeyEntry.objects.filter(key_id=requested_key_id).only(
+            'key_id', 'secret_ciphertext_b64'
+        ).first()
+    else:
+        entry = ControlChannelKeyEntry.objects.order_by('-created_at', '-id').only(
+            'key_id', 'secret_ciphertext_b64'
+        ).first()
+    if entry is None:
+        return _response_authed(
+            control_key_id,
+            request_id,
+            'not_found',
+            message='No session keys available',
+            code=HTTPStatus.NOT_FOUND,
+        )
+
+    from bg.crypto import can_decrypt, decrypt_password
+    if not can_decrypt():
+        return _response_authed(
+            control_key_id,
+            request_id,
+            'failed',
+            message='BG crypto cannot decrypt control keys (private key unavailable)',
+            code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+    try:
+        secret = decrypt_password(entry.secret_ciphertext_b64)
+    except Exception as exc:  # noqa: BLE001
+        return _response_authed(
+            control_key_id,
+            request_id,
+            'failed',
+            message=f'Failed to decrypt stored key: {exc}',
+            code=HTTPStatus.INTERNAL_SERVER_ERROR,
+        )
+
+    try:
+        from cryptography.hazmat.primitives.serialization import load_pem_public_key
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.hazmat.primitives import hashes
+
+        fg_pub = load_pem_public_key(fg_public_key_pem.encode('utf-8'))
+        ciphertext = fg_pub.encrypt(
+            secret.encode('utf-8'),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None,
+            ),
+        )
+        encrypted_secret = base64.b64encode(ciphertext).decode('ascii')
+    except Exception as exc:  # noqa: BLE001
+        return _response_authed(
+            control_key_id,
+            request_id,
+            'failed',
+            message=f'Failed to encrypt key to FG public key: {exc}',
+            code=HTTPStatus.BAD_REQUEST,
+        )
+
+    return _response_authed(
+        control_key_id,
+        request_id,
+        'completed',
+        message='Control session key exported',
+        key_id=str(entry.key_id),
+        encrypted_secret=encrypted_secret,
+    )
+
+
 @require_http_methods(['GET'])
 def health(request):
     status = 'ok'
     details: dict[str, Any] = {'bg_db': 'ok'}
-    _, control_mode = _configured_control_secret()
+    _, control_mode = _configured_control_secrets()
     details['control_mode'] = control_mode
 
     try:
@@ -1109,7 +1315,7 @@ def access_rules_sync(request):
     Sync actions are audited only when the effective rule state changes.
     """
     try:
-        auth_source = _require_control_auth(request)
+        auth_source, control_key_id = _require_control_auth(request)
         payload, request_id, requested_by, is_super = _sync_context(request)
         _require_requested_by(requested_by)
         _require_super(is_super)
@@ -1162,7 +1368,8 @@ def access_rules_sync(request):
             state_before=before_rules,
             state_after=after_rules,
         )
-    return _response(
+    return _response_authed(
+        control_key_id,
         request_id,
         'completed',
         message='Access rules synchronized',
@@ -1178,7 +1385,7 @@ def access_rules_sync(request):
 def pilot_snapshot_sync(request):
     """Receive the full FG-owned pilot snapshot and replace BG's cached copy."""
     try:
-        auth_source = _require_control_auth(request)
+        auth_source, control_key_id = _require_control_auth(request)
         payload, request_id, requested_by, is_super = _sync_context(request)
         _require_requested_by(requested_by)
         _require_super(is_super)
@@ -1192,7 +1399,8 @@ def pilot_snapshot_sync(request):
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
 
     result = store_pilot_snapshot(snapshot, request_id=request_id, requested_by=requested_by)
-    return _response(
+    return _response_authed(
+        control_key_id,
         request_id,
         'completed',
         message='Pilot snapshot synchronized',
@@ -1231,7 +1439,7 @@ def access_rules(request):
 def eve_objects_sync(request):
     """Upsert immutable EVE object dictionary rows from FG."""
     try:
-        auth_source = _require_control_auth(request)
+        auth_source, control_key_id = _require_control_auth(request)
         payload, request_id, requested_by, is_super = _sync_context(request)
         _require_requested_by(requested_by)
         _require_super(is_super)
@@ -1298,7 +1506,8 @@ def eve_objects_sync(request):
         existing.save(update_fields=['synced_at', 'updated_at'])
         unchanged_count += 1
 
-    return _response(
+    return _response_authed(
+        control_key_id,
         request_id,
         'completed',
         message='EVE object dictionary synchronized',
@@ -1343,7 +1552,7 @@ def eve_objects(request):
 def provision(request):
     """Evaluate eligibility from BG's cached pilot snapshot and provision MumbleUser rows."""
     try:
-        auth_source = _require_control_auth(request)
+        auth_source, control_key_id = _require_control_auth(request)
         payload, request_id, requested_by, is_super = _sync_context(request)
         _require_requested_by(requested_by)
         dry_run = _coerce_bool(payload.get('dry_run', False), field='dry_run')
@@ -1368,7 +1577,8 @@ def provision(request):
     try:
         result = provision_registrations(server=server, dry_run=dry_run)
     except Exception as exc:
-        return _response(
+        return _response_authed(
+            control_key_id,
             request_id, 'failed',
             message=f'Provisioning failed: {exc}',
             code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -1393,18 +1603,20 @@ def provision(request):
         reconcile_status = 'degraded'
         reconcile_message = f'Reconciliation unavailable: {exc}'
     except Exception as exc:
-        return _response(
+        return _response_authed(
+            control_key_id,
             request_id,
             'failed',
             message=f'Reconciliation failed: {exc}',
             code=HTTPStatus.INTERNAL_SERVER_ERROR,
         )
 
-    return _response(
+    return _response_authed(
+        control_key_id,
         request_id, 'completed',
         message='Provisioning complete',
         dry_run=dry_run,
-        reconcile=True,
+        reconcile=bool(reconcile),
         reconcile_status=reconcile_status,
         reconcile_message=reconcile_message,
         server_id=server_id,

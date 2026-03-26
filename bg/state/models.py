@@ -1,4 +1,5 @@
 from django.db import models
+import uuid
 from django.db.models import Q
 from django.contrib.auth.models import User
 
@@ -455,6 +456,26 @@ class ControlChannelKey(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class ControlChannelKeyEntry(models.Model):
+    """Rotating control-channel secrets ("keys") retained for drift/recovery.
+
+    Stored encrypted (RSA-OAEP) so a DB leak does not reveal plaintext secrets.
+    """
+
+    key_id = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
+    secret_ciphertext_b64 = models.TextField(
+        help_text='Base64 RSA ciphertext of the control secret (encrypted with BG public key).'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'control_channel_key_entry'
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return str(self.key_id)
 
 
 BG_AUDIT_ACTION_ACL_SYNC = 'acl_sync'
