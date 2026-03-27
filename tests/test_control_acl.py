@@ -16,6 +16,7 @@ from bg.state.models import (
     AccessRuleSyncAudit,
     EveObject,
     MumbleServer,
+    MumbleUser,
     PilotAccountCache,
     PilotCharacterCache,
     PilotSnapshotSyncAudit,
@@ -610,7 +611,7 @@ class ProvisionEndpointTest(TestCase):
     def setUp(self):
         self.client = Client()
 
-    def test_provision_without_reconcile_only_updates_local(self):
+    def test_provision_without_reconcile_still_attempts_bg_to_ice_reconcile(self):
         with patch('bg.provisioner.provision_registrations', return_value=ProvisionResult()) as provision_rows:
             with patch('bg.pulse.reconciler.MurmurRegistrationReconciler') as reconciler:
                 resp = _post_provision(self.client, {'dry_run': True})
@@ -618,10 +619,11 @@ class ProvisionEndpointTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertFalse(data['reconcile'])
-        self.assertEqual(data['murmur_reconcile'], [])
+        self.assertEqual(data['reconcile_status'], 'completed')
         self.assertEqual(data['dry_run'], True)
         provision_rows.assert_called_once_with(server=None, dry_run=True)
-        reconciler.assert_not_called()
+        reconciler.assert_called_once_with(server_id=None)
+        reconciler.return_value.reconcile.assert_called_once_with(dry_run=True)
 
     def test_provision_with_reconcile_calls_reconciler(self):
         reconcile_result = Mock()
@@ -686,3 +688,77 @@ class ProvisionEndpointTest(TestCase):
         resp = _post_provision(self.client, {'reconcile': 'yes'})
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json()['status'], 'rejected')
+
+    def test_provision_sets_and_clears_mumble_admin_from_acl_rules(self):
+        MumbleServer.objects.create(
+            id=7,
+            name='Main',
+            address='voice.example.com:64738',
+            ice_host='127.0.0.1',
+            ice_port=6502,
+            is_active=True,
+        )
+
+        resp = _post_acl_sync(
+            self.client,
+            [
+                {'entity_id': 9901, 'entity_type': 'alliance', 'deny': False},
+                {'entity_id': 9001, 'entity_type': 'pilot', 'deny': False, 'acl_admin': True},
+            ],
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        resp = _post_eve_objects_sync(
+            self.client,
+            [
+                {'entity_id': 9901, 'type': 'alliance', 'category': 'alliance', 'name': 'Alliance One', 'ticker': 'ALLY'},
+                {'entity_id': 8801, 'type': 'corporation', 'category': 'corporation', 'name': 'Corp One', 'ticker': 'CORP'},
+            ],
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        resp = _post_pilot_snapshot_sync(
+            self.client,
+            [
+                {
+                    'pkid': 42,
+                    'account_username': 'pilot_login',
+                    'characters': [
+                        {
+                            'character_id': 9001,
+                            'character_name': 'Pilot One',
+                            'corporation_id': 8801,
+                            'corporation_name': 'Corp One',
+                            'alliance_id': 9901,
+                            'alliance_name': 'Alliance One',
+                            'is_main': True,
+                        },
+                    ],
+                }
+            ],
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        resp = _post_provision(self.client, {'dry_run': False})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['status'], 'completed')
+
+        mumble_user = MumbleUser.objects.get(user_id=42, server_id=7)
+        self.assertTrue(mumble_user.is_active)
+        self.assertTrue(mumble_user.is_mumble_admin)
+
+        resp = _post_acl_sync(
+            self.client,
+            [
+                {'entity_id': 9901, 'entity_type': 'alliance', 'deny': False},
+            ],
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        resp = _post_provision(self.client, {'dry_run': False})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['status'], 'completed')
+
+        mumble_user.refresh_from_db()
+        self.assertTrue(mumble_user.is_active)
+        self.assertFalse(mumble_user.is_mumble_admin)
