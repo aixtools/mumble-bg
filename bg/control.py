@@ -776,6 +776,7 @@ def admin_membership_sync(request):
     except _NotFound as exc:
         return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
 
+    old_groups = str(mumble_user.groups or '')
     update_fields: list[str] = []
     if mumble_user.is_mumble_admin != admin:
         mumble_user.is_mumble_admin = admin
@@ -787,7 +788,7 @@ def admin_membership_sync(request):
         mumble_user.save(update_fields=[*update_fields, 'updated_at'])
 
     try:
-        synced_sessions = sync_live_admin_membership(mumble_user, session_ids=session_ids)
+        synced_sessions = sync_live_admin_membership(mumble_user, session_ids=session_ids, old_groups=old_groups)
     except MurmurSyncError as exc:
         return _response_authed(
             control_key_id,

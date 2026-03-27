@@ -277,7 +277,7 @@ def disconnect_live_sessions(mumble_user, *, reason='Registration updated; recon
     return {'requested': len(session_ids), 'kicked': kicked, 'errors': errors}
 
 
-def sync_live_admin_membership(mumble_user, *, session_ids=None):
+def sync_live_admin_membership(mumble_user, *, session_ids=None, old_groups=None):
     from bg.state.models import MumbleSession
 
     if session_ids is None:
@@ -294,22 +294,41 @@ def sync_live_admin_membership(mumble_user, *, session_ids=None):
     if not session_ids:
         return 0
 
+    new_group_set = {g.strip() for g in (mumble_user.groups or '').split(',') if g.strip()}
+    if mumble_user.is_mumble_admin:
+        new_group_set.add('admin')
+    else:
+        new_group_set.discard('admin')
+
+    if old_groups is not None:
+        old_group_set = {g.strip() for g in old_groups.split(',') if g.strip()}
+        groups_to_add = new_group_set - old_group_set
+        groups_to_remove = old_group_set - new_group_set
+    else:
+        groups_to_add = new_group_set
+        groups_to_remove = {'admin'} - new_group_set
+
+    if not groups_to_add and not groups_to_remove:
+        return len(session_ids)
+
+    sorted_add = sorted(groups_to_add)
+    sorted_remove = sorted(groups_to_remove)
+
     try:
         communicator, _, server_proxy = _open_target_server(mumble_user.server)
         try:
             for session_id in session_ids:
-                if mumble_user.is_mumble_admin:
-                    server_proxy.addUserToGroup(0, int(session_id), 'admin')
-                else:
-                    server_proxy.removeUserFromGroup(0, int(session_id), 'admin')
+                for group in sorted_add:
+                    server_proxy.addUserToGroup(0, int(session_id), group)
+                for group in sorted_remove:
+                    server_proxy.removeUserFromGroup(0, int(session_id), group)
             return len(session_ids)
         finally:
             communicator.destroy()
     except MurmurSyncError:
         raise
     except Exception as exc:
-        action = 'grant' if mumble_user.is_mumble_admin else 'revoke'
         raise MurmurSyncError(
-            f'Failed to {action} live Murmur admin membership for {mumble_user.username} '
+            f'Failed to sync live Murmur group membership for {mumble_user.username} '
             f'on {mumble_user.server.name}: {exc}'
         ) from exc
