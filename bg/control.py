@@ -23,6 +23,7 @@ from bg.pilot.registrations import (
 from bg.contracts import MurmurRegistrationContractPatch, MurmurRegistrationSnapshot
 from bg.pilot_snapshot import store_pilot_snapshot
 from bg import control_keyring
+from bg.murmur_inventory import MurmurInventoryError, get_server_inventory_snapshot, warm_other_server_inventories_async
 from bg.state.models import (
     AccessRule,
     AccessRuleSyncAudit,
@@ -1192,6 +1193,44 @@ def servers(request):
             'request_id': now().strftime('%Y%m%dT%H%M%SZ'),
             'servers': rows,
         }
+    )
+
+
+@require_http_methods(['GET'])
+def server_inventory(request, server_id: int):
+    request_id = now().strftime('%Y%m%dT%H%M%SZ')
+    try:
+        auth_source, control_key_id = _require_control_auth(request)
+        del auth_source
+        server = MumbleServer.objects.filter(pk=server_id, is_active=True).first()
+        if server is None:
+            raise _NotFound('Server not found')
+        refresh = str(request.GET.get('refresh', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+        envelope = get_server_inventory_snapshot(server, force_refresh=refresh)
+        warm_started = warm_other_server_inventories_async(server.pk)
+    except _Unauthorized as exc:
+        return _response(request_id, 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _NotFound as exc:
+        return _response(request_id, 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
+    except MurmurInventoryError as exc:
+        return _response(request_id, 'failed', message=str(exc), code=HTTPStatus.BAD_GATEWAY)
+
+    snapshot = envelope.snapshot
+    return _response_authed(
+        control_key_id,
+        request_id,
+        'completed',
+        server_id=server.pk,
+        server_label=server.name,
+        source=envelope.source,
+        freshness_seconds=envelope.freshness_seconds,
+        is_real_time=envelope.is_real_time,
+        fetched_at=snapshot.fetched_at.isoformat() if snapshot.fetched_at else None,
+        fetch_status=snapshot.fetch_status,
+        fetch_error=snapshot.fetch_error,
+        protocol=snapshot.protocol,
+        cache_warm_started=warm_started,
+        inventory=snapshot.payload,
     )
 
 
