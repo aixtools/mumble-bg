@@ -47,6 +47,27 @@ class MumbleServer(models.Model):
         return self.name
 
 
+class MurmurServerInventorySnapshot(models.Model):
+    server = models.OneToOneField(
+        MumbleServer,
+        on_delete=models.CASCADE,
+        related_name='inventory_snapshot',
+    )
+    payload = models.JSONField(blank=True, default=dict)
+    fetch_status = models.CharField(max_length=32, blank=True, default='unknown')
+    fetch_error = models.TextField(blank=True, default='')
+    protocol = models.CharField(max_length=16, blank=True, default='')
+    fetched_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'murmur_server_inventory_snapshot'
+        ordering = ['server_id']
+
+    def __str__(self):
+        return f'{self.server_id}:{self.fetch_status}'
+
+
 class MumbleUser(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='murmur_registrations')
     server = models.ForeignKey(MumbleServer, on_delete=models.CASCADE, related_name='murmur_registrations')
