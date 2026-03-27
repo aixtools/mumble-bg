@@ -118,6 +118,36 @@ python -m django sync_ice_inventory --show-current
 python -m django provision_registrations
 ```
 
+### Server identity between BG and FG
+
+FG now links Murmur inventory views by BG-owned `server_key`, not by the raw
+`MumbleServer.id` primary key. BG derives `server_key` from the active server
+inventory contract, and FG stores inventory snapshots keyed by that stable value.
+
+Operator checks after changing `ICE`:
+
+1. Rebuild the BG inventory rows:
+
+   ```bash
+   python -m django sync_ice_inventory --show-current
+   ```
+
+2. Verify the active rows and their current stable keys:
+
+   ```bash
+   python -m django shell -c "from bg.state.models import MumbleServer; print([{'id': row.id, 'server_key': row.server_key, 'name': row.name, 'address': row.address, 'is_active': row.is_active} for row in MumbleServer.objects.order_by('display_order', 'name')])"
+   ```
+
+3. In FG, use the live server selector values from BG. Old bookmarked
+   `?server=<numeric-id>` query strings are stale and should be discarded.
+
+If BG logs `Server not found` for `/v1/servers/<server_key>/inventory`, repair in this order:
+
+1. Confirm the `ICE` env is correct.
+2. Re-run `sync_ice_inventory --show-current`.
+3. Confirm an active `MumbleServer` row exists with the expected `server_key`.
+4. Refresh FG inventory from BG so FG replaces any stale cached snapshot for that server key.
+
 ## 7. Optional systemd units
 
 Generate unit files from the active installation:

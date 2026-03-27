@@ -1176,17 +1176,20 @@ def health(request):
 
 @require_http_methods(['GET'])
 def servers(request):
-    rows = list(
-        MumbleServer.objects.values(
-            'id',
-            'name',
-            'address',
-            'ice_host',
-            'ice_port',
-            'virtual_server_id',
-            'is_active',
-        ).order_by('display_order', 'name')
-    )
+    rows = []
+    for server in MumbleServer.objects.order_by('display_order', 'name'):
+        rows.append(
+            {
+                'id': server.id,
+                'server_key': server.server_key,
+                'name': server.name,
+                'address': server.address,
+                'ice_host': server.ice_host,
+                'ice_port': server.ice_port,
+                'virtual_server_id': server.virtual_server_id,
+                'is_active': server.is_active,
+            }
+        )
     return JsonResponse(
         {
             'status': 'completed',
@@ -1197,12 +1200,22 @@ def servers(request):
 
 
 @require_http_methods(['GET'])
-def server_inventory(request, server_id: int):
+def server_inventory(request, server_key: str):
     request_id = now().strftime('%Y%m%dT%H%M%SZ')
     try:
         auth_source, control_key_id = _require_control_auth(request)
         del auth_source
-        server = MumbleServer.objects.filter(pk=server_id, is_active=True).first()
+        normalized_server_key = str(server_key or '').strip()
+        if not normalized_server_key:
+            raise _NotFound('Server not found')
+        server = next(
+            (
+                candidate
+                for candidate in MumbleServer.objects.filter(is_active=True).order_by('display_order', 'name')
+                if candidate.server_key == normalized_server_key
+            ),
+            None,
+        )
         if server is None:
             raise _NotFound('Server not found')
         refresh = str(request.GET.get('refresh', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
@@ -1221,6 +1234,7 @@ def server_inventory(request, server_id: int):
         request_id,
         'completed',
         server_id=server.pk,
+        server_key=server.server_key,
         server_label=server.name,
         source=envelope.source,
         freshness_seconds=envelope.freshness_seconds,
