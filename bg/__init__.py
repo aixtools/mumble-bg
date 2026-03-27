@@ -1,3 +1,9 @@
 """Background runtime package for mumble-bg."""
 
-__version__ = "0.1.5.dev0"
+from importlib.metadata import PackageNotFoundError, version
+
+
+try:
+    __version__ = version("mumble-bg")
+except PackageNotFoundError:
+    __version__ = "unknown"
