@@ -13,8 +13,8 @@ jobs:
 
       - name: Resolve deploy target
         env:
-          TARGETHOST: ${{ secrets.TARGETHOST_US }}
-          TARGETUSER: ${{ secrets.TARGETUSER_US }}
+          TARGETHOST: ${{ secrets.TARGETHOST_US_DEV }}
+          TARGETUSER: ${{ secrets.TARGETUSER_US_DEV }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -116,11 +116,11 @@ jobs:
             "DEPLOY_ENV_DIR='${DEPLOY_ENV_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' bash -s" <<'EOF'
           mkdir -p "${DEPLOY_ENV_DIR}"
           cat > "${DEPLOY_ENV_FILE}" <<'ENVFILE'
-          BG_DBMS='${{ secrets.BG_DBMS_US }}'
-          ICE='${{ secrets.ICE_US }}'
-          MURMUR_PROBE='${{ secrets.MURMUR_PROBE_US }}'
-          BG_PSK='${{ secrets.BG_PSK_US }}'
-          BG_PKI_PASSPHRASE='${{ secrets.BG_PKI_PASSPHRASE_US }}'
+          BG_DBMS='${{ secrets.BG_DBMS_US_DEV }}'
+          ICE='${{ secrets.ICE_US_DEV }}'
+          MURMUR_PROBE='${{ secrets.MURMUR_PROBE_US_DEV }}'
+          BG_PSK='${{ secrets.BG_PSK_US_DEV }}'
+          BG_PKI_PASSPHRASE='${{ secrets.BG_PKI_PASSPHRASE_US_DEV }}'
           ENVFILE
           chmod 600 "${DEPLOY_ENV_FILE}"
           EOF
