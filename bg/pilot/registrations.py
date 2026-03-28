@@ -45,6 +45,7 @@ def _open_target_server(server_config):
                 f'No booted Murmur servers found on {server_config.ice_host}:{server_config.ice_port}'
             )
 
+        ice_secret = server_config.ice_secret or ""
         target = None
         if server_config.virtual_server_id is not None:
             for srv in booted_servers:
@@ -63,6 +64,8 @@ def _open_target_server(server_config):
                 'Multiple Murmur virtual servers are booted on this ICE endpoint; configure virtual_server_id in bg inventory'
             )
 
+        if ice_secret and target is not None:
+            target = target.ice_context({"secret": ice_secret})
         return communicator, M, target
     except Exception:
         communicator.destroy()
