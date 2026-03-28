@@ -407,6 +407,17 @@ INSERT_AUDIT_QUERY = """
 BG_AUDIT_ACTION_PILOT_LOGIN = "pilot_login"
 
 
+def _schedule_deferred_provision(bg_row_id, username, display_name, M, srv):
+    """Schedule Murmur registration in a background thread to avoid ICE callback deadlock."""
+    import threading
+    t = threading.Thread(
+        target=_provision_murmur_registration,
+        args=(bg_row_id, username, display_name, M, srv),
+        daemon=True,
+    )
+    t.start()
+
+
 def _provision_murmur_registration(bg_row_id, username, display_name, M, srv):
     """Register the user in Murmur via ICE and store the mumble_userid in BG."""
     try:
@@ -666,11 +677,7 @@ def main():
                             return (-1, None, None)
                         bg_row_id, auth_user_id, display_name, groups, pilot_user_id, auth_method = result
                         if auth_user_id == bg_row_id:
-                            provisioned = _provision_murmur_registration(
-                                bg_row_id, name, display_name, self._M, self._srv,
-                            )
-                            if provisioned is not None:
-                                auth_user_id = provisioned
+                            _schedule_deferred_provision(bg_row_id, name, display_name, self._M, self._srv)
                         update_connection_info(bg_row_id, certhash)
                         append_auth_success_audit(
                             user_id=pilot_user_id,
