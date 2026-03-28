@@ -142,6 +142,11 @@ def _select_target_server(server: MumbleServer):
                 f'No booted Murmur servers found on {server.ice_host}:{server.ice_port}'
             )
 
+        # Rewrite proxy endpoints for remote servers behind NAT.
+        if server.ice_host not in ('127.0.0.1', 'localhost', '::1'):
+            from bg.ice_meta import rewrite_proxy_host
+            booted_servers = [rewrite_proxy_host(communicator, s, server.ice_host, server.ice_port) for s in booted_servers]
+
         target = None
         if server.virtual_server_id is not None:
             for booted_server in booted_servers:

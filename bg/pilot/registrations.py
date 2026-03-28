@@ -45,6 +45,11 @@ def _open_target_server(server_config):
                 f'No booted Murmur servers found on {server_config.ice_host}:{server_config.ice_port}'
             )
 
+        # Rewrite proxy endpoints for remote servers behind NAT.
+        if server_config.ice_host not in ('127.0.0.1', 'localhost', '::1'):
+            from bg.ice_meta import rewrite_proxy_host
+            booted_servers = [rewrite_proxy_host(communicator, s, server_config.ice_host, server_config.ice_port) for s in booted_servers]
+
         ice_secret = server_config.ice_secret or ""
         target = None
         if server_config.virtual_server_id is not None:

@@ -199,20 +199,20 @@ def parse_ice_env(raw: str | None = None) -> list[IceInventoryEntry]:
         if not display_name:
             display_name = str(address)
 
-            entries.append(
-                IceInventoryEntry(
-                    name=display_name,
-                    address=address,
-                    ice_host=ice_host,
-                    ice_port=ice_port,
-                    ice_secret=ice_secret,
-                    virtual_server_id=virtual_server_id,
-                    is_active=_parse_bool(row.get("is_active"), default=True),
-                    ice_tls_cert=ice_tls_cert,
-                    ice_tls_key=ice_tls_key,
-                    ice_tls_ca=ice_tls_ca,
-                )
+        entries.append(
+            IceInventoryEntry(
+                name=display_name,
+                address=address,
+                ice_host=ice_host,
+                ice_port=ice_port,
+                ice_secret=ice_secret,
+                virtual_server_id=virtual_server_id,
+                is_active=_parse_bool(row.get("is_active"), default=True),
+                ice_tls_cert=ice_tls_cert,
+                ice_tls_key=ice_tls_key,
+                ice_tls_ca=ice_tls_ca,
             )
+        )
 
     return entries
 
