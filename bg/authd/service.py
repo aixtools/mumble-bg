@@ -393,12 +393,41 @@ UPDATE_CONNECTION_QUERY = """
     WHERE id = %s
 """
 
+UPDATE_MUMBLE_USERID_QUERY = """
+    UPDATE mumble_user
+    SET mumble_userid = %s, updated_at = %s
+    WHERE id = %s AND mumble_userid IS NULL
+"""
+
 INSERT_AUDIT_QUERY = """
     INSERT INTO bg_audit (action, request_id, requested_by, source, user_id, server_name, metadata, occurred_at)
     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 BG_AUDIT_ACTION_PILOT_LOGIN = "pilot_login"
+
+
+def _provision_murmur_registration(bg_row_id, username, display_name, M, srv):
+    """Register the user in Murmur via ICE and store the mumble_userid in BG."""
+    try:
+        info = {M.UserInfo.UserName: username}
+        if display_name:
+            info[M.UserInfo.UserComment] = display_name
+        mumble_userid = srv.registerUser(info)
+        if mumble_userid is not None and mumble_userid >= 0:
+            now = datetime.now(timezone.utc)
+            conn = get_db_connection()
+            try:
+                with _cursor(conn) as cur:
+                    _execute(cur, conn, UPDATE_MUMBLE_USERID_QUERY, (mumble_userid, now, bg_row_id))
+                conn.commit()
+            finally:
+                conn.close()
+            logger.info('Provisioned Murmur registration for %s: mumble_userid=%d', username, mumble_userid)
+            return mumble_userid
+    except Exception:
+        logger.exception('Failed to provision Murmur registration for %s (bg_row_id=%s)', username, bg_row_id)
+    return None
 
 
 def update_connection_info(bg_row_id, certhash):
@@ -624,19 +653,24 @@ def main():
             try:
                 # Create a scoped authenticator for this server
                 class ScopedAuthenticator(M.ServerAuthenticator):
-                    def __init__(self, sid):
+                    def __init__(self, sid, ice_module, server_proxy):
                         self._server_id = sid
+                        self._M = ice_module
+                        self._srv = server_proxy
 
                     def authenticate(self, name, pw, certificates, certhash, certstrong, current=None):
                         result = authenticate_user(name, pw or '', self._server_id, certhash or '')
                         if result is _USER_NOT_FOUND:
-                            # Not in cube DB -- fall through to murmur local
-                            # auth (cert hash or PBKDF2 password).
                             return (-2, None, None)
                         if result is None:
-                            # Known user, wrong password -- hard reject.
                             return (-1, None, None)
                         bg_row_id, auth_user_id, display_name, groups, pilot_user_id, auth_method = result
+                        if auth_user_id == bg_row_id:
+                            provisioned = _provision_murmur_registration(
+                                bg_row_id, name, display_name, self._M, self._srv,
+                            )
+                            if provisioned is not None:
+                                auth_user_id = provisioned
                         update_connection_info(bg_row_id, certhash)
                         append_auth_success_audit(
                             user_id=pilot_user_id,
@@ -673,14 +707,13 @@ def main():
                     logger.warning('No booted Mumble servers found on %s:%s (server_id=%d)', ice_host, ice_port, server_id)
                     continue
 
-                auth_obj = ScopedAuthenticator(server_id)
-                auth_proxy = adapter.addWithUUID(auth_obj)
-
                 target_servers = select_target_servers(servers, virtual_server_id)
 
                 for srv in target_servers:
                     if ice_secret:
                         srv = srv.ice_context({"secret": ice_secret})
+                    auth_obj = ScopedAuthenticator(server_id, M, srv)
+                    auth_proxy = adapter.addWithUUID(auth_obj)
                     srv.setAuthenticator(
                         M.ServerAuthenticatorPrx.uncheckedCast(auth_proxy)
                     )
