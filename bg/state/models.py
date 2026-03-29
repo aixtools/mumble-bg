@@ -2,6 +2,27 @@ from django.db import models
 import uuid
 from django.db.models import Q
 from django.contrib.auth.models import User
+from django.utils.text import slugify
+
+
+def stable_server_key(
+    *,
+    address: str = '',
+    virtual_server_id: int | None = None,
+    ice_host: str = '',
+    ice_port: int | None = None,
+    name: str = '',
+) -> str:
+    base = str(address or '').strip().lower()
+    if not base:
+        ice_host_value = str(ice_host or '').strip().lower()
+        ice_port_value = str(ice_port or '').strip()
+        base = f'{ice_host_value}:{ice_port_value}'.strip(':')
+    if not base:
+        base = str(name or '').strip().lower()
+    base_slug = slugify(base.replace(':', '-').replace('.', '-')) or 'mumble-server'
+    vsid = int(virtual_server_id) if virtual_server_id is not None else 0
+    return f'{base_slug}-vs{vsid}'
 
 
 class MumbleServer(models.Model):
@@ -45,6 +66,16 @@ class MumbleServer(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def server_key(self) -> str:
+        return stable_server_key(
+            address=self.address,
+            virtual_server_id=self.virtual_server_id,
+            ice_host=self.ice_host,
+            ice_port=self.ice_port,
+            name=self.name,
+        )
 
 
 class MurmurServerInventorySnapshot(models.Model):

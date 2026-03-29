@@ -18,7 +18,7 @@ class ServerInventoryEndpointTest(TestCase):
 
     @patch('bg.control._require_control_auth', side_effect=_Unauthorized('Missing control authentication secret'))
     def test_requires_control_auth(self, _mock_auth):
-        response = self.client.get(f'/v1/servers/{self.server.pk}/inventory')
+        response = self.client.get(f'/v1/servers/{self.server.server_key}/inventory')
         self.assertEqual(response.status_code, 401)
 
     @patch('bg.control.warm_other_server_inventories_async', return_value=True)
@@ -43,12 +43,13 @@ class ServerInventoryEndpointTest(TestCase):
             },
         )()
 
-        response = self.client.get(f'/v1/servers/{self.server.pk}/inventory')
+        response = self.client.get(f'/v1/servers/{self.server.server_key}/inventory')
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload['status'], 'completed')
         self.assertEqual(payload['server_id'], self.server.pk)
+        self.assertEqual(payload['server_key'], self.server.server_key)
         self.assertEqual(payload['inventory']['root_groups'][0]['name'], 'ops')
         self.assertEqual(payload['source'], 'cache')
         self.assertTrue(payload['cache_warm_started'])
@@ -75,7 +76,15 @@ class ServerInventoryEndpointTest(TestCase):
             },
         )()
 
-        response = self.client.get(f'/v1/servers/{self.server.pk}/inventory?refresh=1')
+        response = self.client.get(f'/v1/servers/{self.server.server_key}/inventory?refresh=1')
 
         self.assertEqual(response.status_code, 200)
         mock_get_snapshot.assert_called_once_with(self.server, force_refresh=True)
+
+    def test_servers_payload_includes_stable_server_key(self):
+        response = self.client.get('/v1/servers')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload['servers'][0]['id'], self.server.pk)
+        self.assertEqual(payload['servers'][0]['server_key'], self.server.server_key)
