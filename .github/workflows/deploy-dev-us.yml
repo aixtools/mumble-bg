@@ -1,0 +1,305 @@
+name: Deploy mumble-bg (Dev US-East)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve deploy target
+        env:
+          TARGETHOST: ${{ secrets.TARGETHOST_US_DEV }}
+          TARGETUSER: ${{ secrets.TARGETUSER_US_DEV }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          def _parse_target_payload(raw: str, secret_name: str) -> dict:
+              try:
+                  payload = json.loads(raw)
+              except json.JSONDecodeError as exc:
+                  raise SystemExit(f"{secret_name} must be valid JSON") from exc
+
+              if not isinstance(payload, dict):
+                  raise SystemExit(f"Secret {secret_name} must be a JSON object")
+              return payload
+
+          host = str(os.environ.get("TARGETHOST", "")).strip()
+          raw = os.environ.get("TARGETUSER", "").strip()
+          if not host:
+              raise SystemExit("TARGETHOST is empty")
+          if not raw:
+              raise SystemExit("TARGETUSER is empty")
+
+          payload = _parse_target_payload(raw, "TARGETUSER")
+
+          user = str(payload.get("user", "")).strip()
+          key = payload.get("key", "")
+          home_dir = str(payload.get("home_dir", "")).strip()
+          project_dir = str(payload.get("project_dir", "")).strip()
+          env_file = str(payload.get("env_file", "")).strip()
+          venv_dir = str(payload.get("venv_dir", "")).strip()
+          service_units = payload.get("service_units", [])
+          service_name = str(payload.get("service_name", "")).strip()
+
+          if not user:
+              raise SystemExit("TARGETUSER missing required field: user")
+          if not isinstance(key, str) or not key.strip():
+              raise SystemExit("TARGETUSER missing required field: key")
+
+          if not home_dir:
+              home_dir = f"/home/{user}"
+          if not project_dir:
+              project_dir = f"{home_dir}/mumble-bg"
+          if not env_file:
+              env_file = f"{home_dir}/.env/mumble-bg"
+          if not venv_dir:
+              venv_dir = f"{home_dir}/.venv/mumble-bg"
+          if service_units is None:
+              service_units = []
+          if not isinstance(service_units, list):
+              raise SystemExit("TARGETUSER field service_units must be a JSON list")
+          service_units = [str(unit).strip() for unit in service_units if str(unit).strip()]
+          if not service_units and service_name:
+              service_units = [service_name]
+          if not service_units:
+              service_units = ["bg-control", "bg-authd"]
+
+          key_path = Path.home() / ".ssh" / "deploy_key"
+          key_path.write_text(key.replace("\\n", "\n").rstrip() + "\n", encoding="utf-8")
+          key_path.chmod(0o600)
+
+          github_env = Path(os.environ["GITHUB_ENV"])
+          with github_env.open("a", encoding="utf-8") as fh:
+              fh.write(f"DEPLOY_TARGET_HOST={host}\n")
+              fh.write(f"DEPLOY_TARGET_USER={user}\n")
+              fh.write(f"DEPLOY_HOME_DIR={home_dir}\n")
+              fh.write(f"DEPLOY_PROJECT_DIR={project_dir}\n")
+              fh.write(f"DEPLOY_ENV_FILE={env_file}\n")
+              fh.write(f"DEPLOY_VENV_DIR={venv_dir}\n")
+              fh.write(f"DEPLOY_SERVICE_UNITS_CSV={','.join(service_units)}\n")
+          PY
+
+      - name: Set up SSH known hosts
+        run: |
+          set -euo pipefail
+          ssh-keyscan -H "${DEPLOY_TARGET_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Deploy code via rsync
+        run: |
+          set -euo pipefail
+          rsync -avz --delete \
+            --exclude '.git/' \
+            --exclude '__pycache__/' \
+            --exclude '*.pyc' \
+            --exclude '.pytest_cache/' \
+            --exclude '.env' \
+            --exclude '.venv/' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            ./ "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}:${DEPLOY_PROJECT_DIR%/}/"
+
+      - name: Write environment file
+        run: |
+          set -euo pipefail
+          DEPLOY_ENV_DIR="$(dirname "${DEPLOY_ENV_FILE}")"
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+            "DEPLOY_ENV_DIR='${DEPLOY_ENV_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' bash -s" <<'EOF'
+          mkdir -p "${DEPLOY_ENV_DIR}"
+          cat > "${DEPLOY_ENV_FILE}" <<'ENVFILE'
+          BG_DBMS='${{ secrets.BG_DBMS_US_DEV }}'
+          ICE='${{ secrets.ICE_US_DEV }}'
+          MURMUR_PROBE='${{ secrets.MURMUR_PROBE_US_DEV }}'
+          BG_PSK='${{ secrets.BG_PSK_US_DEV }}'
+          BG_PKI_PASSPHRASE='${{ secrets.BG_PKI_PASSPHRASE_US_DEV }}'
+          ENVFILE
+          chmod 600 "${DEPLOY_ENV_FILE}"
+          EOF
+
+      - name: Install runtime dependencies
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+            "DEPLOY_VENV_DIR='${DEPLOY_VENV_DIR}' DEPLOY_PROJECT_DIR='${DEPLOY_PROJECT_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' bash -s" <<'EOF'
+          set -euo pipefail
+          mkdir -p "$(dirname "${DEPLOY_VENV_DIR}")"
+          if [ ! -d "${DEPLOY_VENV_DIR}" ]; then
+            python3 -m venv "${DEPLOY_VENV_DIR}"
+          fi
+          "${DEPLOY_VENV_DIR}/bin/pip" install --quiet -r "${DEPLOY_PROJECT_DIR}/requirements.txt"
+          "${DEPLOY_VENV_DIR}/bin/pip" install --quiet --no-deps "${DEPLOY_PROJECT_DIR}"
+          set -a
+          source "${DEPLOY_ENV_FILE}"
+          set +a
+          export BG_DBMS
+
+          # Optional suffix trigger: if the configured FG/BG PSK ends with ":reset",
+          # strip the suffix for runtime and reset DB control-key state.
+          BG_PSK_RESET_REQUESTED=0
+          if [ -n "${BG_PSK:-}" ] && [ "${BG_PSK%:reset}" != "${BG_PSK}" ]; then
+            BG_PSK_RESET_REQUESTED=1
+            BG_PSK="${BG_PSK%:reset}"
+            export BG_PSK
+            esc_psk="$(printf '%s' "${BG_PSK}" | sed "s/[\\/&]/\\\\&/g")"
+            sed -i "s|^BG_PSK=.*$|BG_PSK='${esc_psk}'|" "${DEPLOY_ENV_FILE}"
+          fi
+
+          json_field() {
+            local env_var="$1"
+            local object_key="$2"
+            local field="$3"
+            python3 - "$env_var" "$object_key" "$field" <<'PY'
+          import json
+          import os
+          import sys
+
+          env_var = sys.argv[1]
+          object_key = sys.argv[2]
+          field = sys.argv[3]
+          raw = os.environ.get(env_var, '').strip()
+          if not raw:
+              raise SystemExit(f"{env_var} is not set")
+
+          payload = json.loads(raw)
+          if not isinstance(payload, dict):
+              raise SystemExit(f"{env_var} must be a JSON object")
+
+          if all(key in payload for key in ("host", "username", "database", "password")):
+              db_payload = payload
+          else:
+              db_payload = payload.get(object_key)
+              if db_payload is None:
+                  raise SystemExit(f"{env_var} is missing required object: {object_key}")
+              if not isinstance(db_payload, dict):
+                  raise SystemExit(f"{env_var}.{object_key} must be a JSON object")
+
+          value = db_payload.get(field, '')
+          if value is None:
+              value = ''
+          print(value)
+          PY
+          }
+
+          BG_DATABASE_NAME="$(json_field BG_DBMS bg database)"
+          BG_DATABASE_HOST="$(json_field BG_DBMS bg host)"
+          BG_DATABASE_USER="$(json_field BG_DBMS bg username)"
+          BG_DATABASE_PASSWORD="$(json_field BG_DBMS bg password)"
+          # Default bootstrap engine is PostgreSQL; override only if needed with BG_ENGINE=mysql.
+          BG_ENGINE_EFFECTIVE="${BG_ENGINE:-postgres}"
+
+          case "$(printf '%s' "${BG_ENGINE_EFFECTIVE}" | tr '[:upper:]' '[:lower:]')" in
+            ''|postgres|postgresql|psql)
+              BG_ENGINE_EFFECTIVE="postgres"
+              ;;
+            mysql|maria|mariadb)
+              BG_ENGINE_EFFECTIVE="mysql"
+              ;;
+          esac
+
+          case "${BG_DATABASE_HOST}" in
+            127.0.0.1|localhost)
+              if [ "$(id -u)" -eq 0 ]; then
+                bash "${DEPLOY_PROJECT_DIR}/deploy/create-db.sh" \
+                  --engine "${BG_ENGINE_EFFECTIVE}" \
+                  --user "${BG_DATABASE_USER}" \
+                  --db "${BG_DATABASE_NAME}" \
+                  --host "${BG_DATABASE_HOST}" \
+                  --pw "${BG_DATABASE_PASSWORD}"
+              else
+                sudo -n bash "${DEPLOY_PROJECT_DIR}/deploy/create-db.sh" \
+                  --engine "${BG_ENGINE_EFFECTIVE}" \
+                  --user "${BG_DATABASE_USER}" \
+                  --db "${BG_DATABASE_NAME}" \
+                  --host "${BG_DATABASE_HOST}" \
+                  --pw "${BG_DATABASE_PASSWORD}"
+              fi
+              ;;
+          esac
+
+          # Test-only local reset hook: honored only when explicitly placed in
+          # the target env file by an operator. The normal workflow no longer
+          # sources this from GitHub secrets or workflow vars.
+          BG_RESET_DB_NORMALIZED="$(printf '%s' "${BG_RESET_DB_ON_DEPLOY:-}" | tr '[:upper:]' '[:lower:]')"
+          if [ "${BG_RESET_DB_NORMALIZED}" = "1" ] || [ "${BG_RESET_DB_NORMALIZED}" = "true" ] || [ "${BG_RESET_DB_NORMALIZED}" = "yes" ]; then
+            if [ "${BG_ENGINE_EFFECTIVE}" != "postgres" ]; then
+              echo "[WARN] BG_RESET_DB_ON_DEPLOY is set, but reset flow is only implemented for postgres; skipping."
+            elif [ "${BG_DATABASE_HOST}" != "127.0.0.1" ] && [ "${BG_DATABASE_HOST}" != "localhost" ]; then
+              echo "[WARN] BG_RESET_DB_ON_DEPLOY is set, but database host is non-local (${BG_DATABASE_HOST}); skipping."
+            else
+              echo "BG_RESET_DB_ON_DEPLOY enabled: resetting ${BG_DATABASE_NAME} before migrate."
+              DB_RESET_DONE=0
+              if PGPASSWORD="${BG_DATABASE_PASSWORD}" psql -h "${BG_DATABASE_HOST}" -U "${BG_DATABASE_USER}" -d postgres -Atqc 'SELECT 1' >/dev/null 2>&1; then
+                if PGPASSWORD="${BG_DATABASE_PASSWORD}" dropdb --if-exists -h "${BG_DATABASE_HOST}" -U "${BG_DATABASE_USER}" "${BG_DATABASE_NAME}" \
+                  && PGPASSWORD="${BG_DATABASE_PASSWORD}" createdb -h "${BG_DATABASE_HOST}" -U "${BG_DATABASE_USER}" -O "${BG_DATABASE_USER}" "${BG_DATABASE_NAME}"; then
+                  DB_RESET_DONE=1
+                else
+                  echo "[WARN] App DB role reset failed; falling back to postgres superuser reset."
+                fi
+              fi
+
+              if [ "${DB_RESET_DONE}" -eq 0 ]; then
+                if [ "$(id -u)" -eq 0 ]; then
+                  su - postgres -c "dropdb --if-exists '${BG_DATABASE_NAME}'"
+                  su - postgres -c "createdb -O '${BG_DATABASE_USER}' '${BG_DATABASE_NAME}'"
+                else
+                  sudo -n su - postgres -c "dropdb --if-exists '${BG_DATABASE_NAME}'"
+                  sudo -n su - postgres -c "createdb -O '${BG_DATABASE_USER}' '${BG_DATABASE_NAME}'"
+                fi
+              fi
+            fi
+          fi
+
+          echo "Running Django migrations automatically..."
+          "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" migrate --noinput
+
+          if [ "${BG_PSK_RESET_REQUESTED}" -eq 1 ]; then
+            "${DEPLOY_VENV_DIR}/bin/python" "${DEPLOY_PROJECT_DIR}/manage.py" reset_murmur_control_key --yes
+          fi
+          EOF
+
+      - name: Restart services
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_SERVICE_UNITS_CSV:-}" ]; then
+            echo "No service_units configured; skipping restarts."
+            exit 0
+          fi
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+            "DEPLOY_SERVICE_UNITS_CSV='${DEPLOY_SERVICE_UNITS_CSV}' bash -s" <<'EOF'
+          set -euo pipefail
+          IFS=',' read -r -a service_units <<< "${DEPLOY_SERVICE_UNITS_CSV}"
+          for service_unit in "${service_units[@]}"; do
+            if sudo systemctl list-unit-files "${service_unit}" >/dev/null 2>&1; then
+              sudo systemctl restart "${service_unit}"
+            else
+              echo "Unit not present: ${service_unit}"
+            fi
+          done
+          EOF
+
+      - name: Health check
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_SERVICE_UNITS_CSV:-}" ]; then
+            echo "No service_units configured; skipping health check."
+            exit 0
+          fi
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+            "DEPLOY_SERVICE_UNITS_CSV='${DEPLOY_SERVICE_UNITS_CSV}' bash -s" <<'EOF'
+          set -euo pipefail
+          IFS=',' read -r -a service_units <<< "${DEPLOY_SERVICE_UNITS_CSV}"
+          for service_unit in "${service_units[@]}"; do
+            if sudo systemctl list-unit-files "${service_unit}" >/dev/null 2>&1; then
+              sudo systemctl is-active "${service_unit}"
+            fi
+          done
+          EOF

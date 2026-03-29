@@ -15,6 +15,8 @@ import time
 import logging
 import json
 import sqlite3
+import threading
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -393,12 +395,131 @@ UPDATE_CONNECTION_QUERY = """
     WHERE id = %s
 """
 
+UPDATE_MUMBLE_USERID_QUERY = """
+    UPDATE mumble_user
+    SET mumble_userid = %s, updated_at = %s
+    WHERE id = %s
+"""
+
+CLEAR_MUMBLE_USERID_QUERY = """
+    UPDATE mumble_user
+    SET mumble_userid = NULL, updated_at = %s
+    WHERE id = %s
+"""
+
+CLEAR_SERVER_MUMBLE_USERIDS_QUERY = """
+    UPDATE mumble_user
+    SET mumble_userid = NULL, updated_at = %s
+    WHERE server_id = %s AND mumble_userid IS NOT NULL
+"""
+
 INSERT_AUDIT_QUERY = """
     INSERT INTO bg_audit (action, request_id, requested_by, source, user_id, server_name, metadata, occurred_at)
     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 BG_AUDIT_ACTION_PILOT_LOGIN = "pilot_login"
+
+
+def _schedule_deferred_provision(bg_row_id, username, display_name, M, srv):
+    """Schedule Murmur registration in a background thread to avoid ICE callback deadlock."""
+    t = threading.Thread(
+        target=_provision_murmur_registration,
+        args=(bg_row_id, username, display_name, M, srv),
+        daemon=True,
+    )
+    t.start()
+
+
+def _provision_murmur_registration(bg_row_id, username, display_name, M, srv):
+    """Register the user in Murmur via ICE and store the mumble_userid in BG."""
+    try:
+        info = {
+            M.UserInfo.UserName: username,
+            M.UserInfo.UserPassword: uuid.uuid4().hex,
+        }
+        if display_name:
+            info[M.UserInfo.UserComment] = display_name
+        mumble_userid = srv.registerUser(info)
+        if mumble_userid is not None and mumble_userid >= 0:
+            now = datetime.now(timezone.utc)
+            conn = get_db_connection()
+            try:
+                with _cursor(conn) as cur:
+                    _execute(cur, conn, UPDATE_MUMBLE_USERID_QUERY, (mumble_userid, now, bg_row_id))
+                conn.commit()
+            finally:
+                conn.close()
+            logger.info('Provisioned Murmur registration for %s: mumble_userid=%d', username, mumble_userid)
+            return mumble_userid
+    except Exception:
+        logger.exception('Failed to provision Murmur registration for %s (bg_row_id=%s)', username, bg_row_id)
+    return None
+
+
+# --- mumble_userid self-healing ---------------------------------------------------
+
+_validated_ids: dict[int, float] = {}
+_validated_lock = threading.Lock()
+_VALIDATION_TTL = 300  # seconds between re-checks per user
+
+
+def _clear_mumble_userid(bg_row_id):
+    """Reset mumble_userid to NULL so the next auth triggers re-provisioning."""
+    now = datetime.now(timezone.utc)
+    try:
+        conn = get_db_connection()
+        try:
+            with _cursor(conn) as cur:
+                _execute(cur, conn, CLEAR_MUMBLE_USERID_QUERY, (now, bg_row_id))
+            conn.commit()
+        finally:
+            conn.close()
+        logger.info('Cleared stale mumble_userid for bg_row_id=%s', bg_row_id)
+    except Exception:
+        logger.exception('Failed to clear mumble_userid for bg_row_id=%s', bg_row_id)
+
+
+def _clear_server_mumble_userids(server_id):
+    """Reset all mumble_userid values for a server after Murmur restart."""
+    now = datetime.now(timezone.utc)
+    try:
+        conn = get_db_connection()
+        try:
+            with _cursor(conn) as cur:
+                _execute(cur, conn, CLEAR_SERVER_MUMBLE_USERIDS_QUERY, (now, server_id))
+            conn.commit()
+        finally:
+            conn.close()
+        logger.info('Cleared all mumble_userids for server_id=%s after Murmur reconnect', server_id)
+    except Exception:
+        logger.exception('Failed to clear mumble_userids for server_id=%s', server_id)
+
+
+def _schedule_deferred_validation(bg_row_id, mumble_userid, username, display_name, M, srv):
+    """Verify a mumble_userid still exists in Murmur; clear and re-provision if stale."""
+    t = threading.Thread(
+        target=_validate_and_repair_registration,
+        args=(bg_row_id, mumble_userid, username, display_name, M, srv),
+        daemon=True,
+    )
+    t.start()
+
+
+def _validate_and_repair_registration(bg_row_id, mumble_userid, username, display_name, M, srv):
+    """Check if mumble_userid is still registered in Murmur. If not, clear and re-provision."""
+    try:
+        srv.getRegistration(int(mumble_userid))
+        with _validated_lock:
+            _validated_ids[mumble_userid] = time.time()
+        return  # registration exists
+    except Exception:
+        logger.warning(
+            'mumble_userid=%d for user %s (bg_row_id=%s) is stale; clearing and re-provisioning',
+            mumble_userid, username, bg_row_id,
+        )
+    _clear_mumble_userid(bg_row_id)
+    _provision_murmur_registration(bg_row_id, username, display_name, M, srv)
 
 
 def update_connection_info(bg_row_id, certhash):
@@ -564,6 +685,10 @@ def probe_authenticator_registration():
                     )
                     continue
 
+                # Set secret before select_target_servers since srv.id() requires it.
+                if ice_secret:
+                    servers = [s.ice_context({"secret": ice_secret}) for s in servers]
+
                 auth_obj = ProbeAuthenticator()
                 auth_proxy = adapter.addWithUUID(auth_obj)
                 target_servers = select_target_servers(servers, virtual_server_id)
@@ -580,6 +705,90 @@ def probe_authenticator_registration():
                 )
 
     return result
+
+
+def _make_scoped_authenticator(M):
+    """Build the ScopedAuthenticator class once, bound to the loaded ICE module."""
+
+    class ScopedAuthenticator(M.ServerAuthenticator):
+        def __init__(self, sid, ice_module, server_proxy):
+            self._server_id = sid
+            self._M = ice_module
+            self._srv = server_proxy
+
+        def authenticate(self, name, pw, certificates, certhash, certstrong, current=None):
+            result = authenticate_user(name, pw or '', self._server_id, certhash or '')
+            if result is _USER_NOT_FOUND:
+                return (-2, None, None)
+            if result is None:
+                return (-1, None, None)
+            bg_row_id, auth_user_id, display_name, groups, pilot_user_id, auth_method = result
+            if auth_user_id == bg_row_id:
+                _schedule_deferred_provision(bg_row_id, name, display_name, self._M, self._srv)
+            else:
+                now = time.time()
+                with _validated_lock:
+                    last_check = _validated_ids.get(auth_user_id, 0)
+                if now - last_check > _VALIDATION_TTL:
+                    _schedule_deferred_validation(
+                        bg_row_id, auth_user_id, name, display_name, self._M, self._srv,
+                    )
+            update_connection_info(bg_row_id, certhash)
+            append_auth_success_audit(
+                user_id=pilot_user_id,
+                server_id=self._server_id,
+                username=name,
+                auth_method=auth_method,
+                certhash=certhash,
+            )
+            return (auth_user_id, display_name, groups)
+
+        def getInfo(self, id, current=None):
+            return (False, {})
+
+        def nameToId(self, name, current=None):
+            return name_to_id(name, self._server_id)
+
+        def idToName(self, id, current=None):
+            return id_to_name(id, self._server_id)
+
+        def idToTexture(self, id, current=None):
+            return bytes()
+
+    return ScopedAuthenticator
+
+
+def _register_authenticator(communicator, adapter, M, ScopedAuthenticator, *,
+                            server_id, ice_host, ice_port, ice_secret, virtual_server_id):
+    """Connect to a Murmur server and register a scoped authenticator.
+
+    Returns the server proxy on success so the caller can health-check it later.
+    """
+    meta, _protocol, _attempts = connect_meta_with_fallback(
+        communicator, M, host=ice_host, port=ice_port, secret=ice_secret or '',
+    )
+    servers = meta.getBootedServers()
+    if not servers:
+        raise RuntimeError(f'No booted Murmur servers on {ice_host}:{ice_port}')
+
+    if ice_host not in ('127.0.0.1', 'localhost', '::1'):
+        from bg.ice_meta import rewrite_proxy_host
+        servers = [rewrite_proxy_host(communicator, s, ice_host, ice_port) for s in servers]
+
+    # Set secret before select_target_servers since srv.id() requires it.
+    if ice_secret:
+        servers = [s.ice_context({"secret": ice_secret}) for s in servers]
+
+    target_servers = select_target_servers(servers, virtual_server_id)
+    registered_proxies = []
+    for srv in target_servers:
+        auth_obj = ScopedAuthenticator(server_id, M, srv)
+        auth_proxy = adapter.addWithUUID(auth_obj)
+        srv.setAuthenticator(M.ServerAuthenticatorPrx.uncheckedCast(auth_proxy))
+        logger.info('Authenticator registered for mumble server %d on %s:%s (db server_id=%d)',
+                    srv.id(), ice_host, ice_port, server_id)
+        registered_proxies.append(srv)
+    return registered_proxies
 
 
 def main():
@@ -610,89 +819,63 @@ def main():
         logger.exception('Failed to sync ICE env inventory into mumble_server; continuing with existing DB rows')
 
     server_configs = wait_for_server_configs(retry_interval=30)
+    ScopedAuthenticator = _make_scoped_authenticator(M)
+
+    callback_endpoint = os.environ.get('BG_AUTHD_CALLBACK_ENDPOINT', 'tcp -h 0.0.0.0').strip()
+    health_check_interval = int(os.environ.get('BG_AUTHD_HEALTH_INTERVAL', '60'))
 
     with Ice.initialize(build_ice_client_props()) as communicator:
         adapter = communicator.createObjectAdapterWithEndpoints(
-            'MumbleBgAuth', 'tcp -h 0.0.0.0'
+            'MumbleBgAuth', callback_endpoint
         )
         adapter.activate()
 
-        registered = 0
-        for server_id, ice_host, ice_port, ice_secret, virtual_server_id in server_configs:
+        # Initial registration — maps server_id to (config, [server_proxies])
+        live_servers: dict[int, tuple[tuple, list]] = {}
+        for config in server_configs:
+            server_id, ice_host, ice_port, ice_secret, virtual_server_id = config
             try:
-                # Create a scoped authenticator for this server
-                class ScopedAuthenticator(M.ServerAuthenticator):
-                    def __init__(self, sid):
-                        self._server_id = sid
-
-                    def authenticate(self, name, pw, certificates, certhash, certstrong, current=None):
-                        result = authenticate_user(name, pw or '', self._server_id, certhash or '')
-                        if result is _USER_NOT_FOUND:
-                            # Not in cube DB -- fall through to murmur local
-                            # auth (cert hash or PBKDF2 password).
-                            return (-2, None, None)
-                        if result is None:
-                            # Known user, wrong password -- hard reject.
-                            return (-1, None, None)
-                        bg_row_id, auth_user_id, display_name, groups, pilot_user_id, auth_method = result
-                        update_connection_info(bg_row_id, certhash)
-                        append_auth_success_audit(
-                            user_id=pilot_user_id,
-                            server_id=self._server_id,
-                            username=name,
-                            auth_method=auth_method,
-                            certhash=certhash,
-                        )
-                        return (auth_user_id, display_name, groups)
-
-                    def getInfo(self, id, current=None):
-                        return (False, {})
-
-                    def nameToId(self, name, current=None):
-                        return name_to_id(name, self._server_id)
-
-                    def idToName(self, id, current=None):
-                        return id_to_name(id, self._server_id)
-
-                    def idToTexture(self, id, current=None):
-                        return bytes()
-
-                # Connect to this server's ICE endpoint
-                meta, _protocol, _attempts = connect_meta_with_fallback(
-                    communicator,
-                    M,
-                    host=ice_host,
-                    port=ice_port,
-                    secret=ice_secret or '',
+                proxies = _register_authenticator(
+                    communicator, adapter, M, ScopedAuthenticator,
+                    server_id=server_id, ice_host=ice_host, ice_port=ice_port,
+                    ice_secret=ice_secret, virtual_server_id=virtual_server_id,
                 )
-
-                servers = meta.getBootedServers()
-                if not servers:
-                    logger.warning('No booted Mumble servers found on %s:%s (server_id=%d)', ice_host, ice_port, server_id)
-                    continue
-
-                auth_obj = ScopedAuthenticator(server_id)
-                auth_proxy = adapter.addWithUUID(auth_obj)
-
-                target_servers = select_target_servers(servers, virtual_server_id)
-
-                for srv in target_servers:
-                    srv.setAuthenticator(
-                        M.ServerAuthenticatorPrx.uncheckedCast(auth_proxy)
-                    )
-                    logger.info('Authenticator registered for mumble server %d on %s:%s (db server_id=%d)',
-                                srv.id(), ice_host, ice_port, server_id)
-                    registered += 1
-
+                live_servers[server_id] = (config, proxies)
             except Exception:
                 logger.exception('Error setting up authenticator for server_id=%d (%s:%s)', server_id, ice_host, ice_port)
 
-        if registered == 0:
+        if not live_servers:
             logger.error('No authenticators were registered. Exiting.')
             sys.exit(1)
 
-        logger.info('mumble-bg authd running (%d server(s)). Press Ctrl+C to stop.', registered)
-        communicator.waitForShutdown()
+        logger.info('mumble-bg authd running (%d server(s)). Health check every %ds.',
+                    len(live_servers), health_check_interval)
+
+        # Health-check loop: verify connections, re-register on failure.
+        while True:
+            time.sleep(health_check_interval)
+            for server_id, (config, proxies) in list(live_servers.items()):
+                _, ice_host, ice_port, ice_secret, virtual_server_id = config
+                for proxy in proxies:
+                    try:
+                        proxy.ice_invocationTimeout(5000).id()
+                    except Exception:
+                        logger.warning('Health check failed for server_id=%d (%s:%s), re-registering...',
+                                      server_id, ice_host, ice_port)
+                        try:
+                            new_proxies = _register_authenticator(
+                                communicator, adapter, M, ScopedAuthenticator,
+                                server_id=server_id, ice_host=ice_host, ice_port=ice_port,
+                                ice_secret=ice_secret, virtual_server_id=virtual_server_id,
+                            )
+                            live_servers[server_id] = (config, new_proxies)
+                            _clear_server_mumble_userids(server_id)
+                            with _validated_lock:
+                                _validated_ids.clear()
+                        except Exception:
+                            logger.exception('Re-registration failed for server_id=%d (%s:%s)',
+                                           server_id, ice_host, ice_port)
+                        break  # Don't check remaining proxies for this server
 
 
 if __name__ == '__main__':

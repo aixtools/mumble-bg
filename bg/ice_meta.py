@@ -27,10 +27,11 @@ def build_ice_client_props(*, tls_cert: str = "", tls_key: str = "", tls_ca: str
         "--Ice.Default.EncodingVersion=1.0",
         "--Ice.Plugin.IceSSL=IceSSL:createIceSSL",
         "--IceSSL.VerifyPeer=0",
+        "--Ice.ACM.Client.Heartbeat=3",
     ]
-    cert = str(tls_cert or "").strip()
-    key = str(tls_key or "").strip()
-    ca = str(tls_ca or "").strip()
+    cert = (tls_cert or os.environ.get("BG_ICE_CERT_PATH", "")).strip()
+    key = (tls_key or os.environ.get("BG_ICE_KEY_PATH", "")).strip()
+    ca = (tls_ca or os.environ.get("BG_ICE_CA_PATH", "")).strip()
     if cert:
         props.append(f"--IceSSL.CertFile={cert}")
     if key:
@@ -45,6 +46,21 @@ def build_ice_client_props(*, tls_cert: str = "", tls_key: str = "", tls_ca: str
     if key_pass:
         props.append(f"--IceSSL.Password={key_pass}")
     return props
+
+
+def rewrite_proxy_host(communicator, proxy, host: str, port: int):
+    """Rewrite a server proxy's endpoints to use a specific host/port.
+
+    Murmur embeds its local bind address in server proxies returned by
+    getBootedServers(). When the server is behind NAT, that address is
+    unreachable from the BG host.  This rewrites the proxy to route
+    through the known-good host from the BG inventory.
+    """
+    identity = proxy.ice_getIdentity()
+    endpoint = f"ssl -h {host} -p {int(port)}:tcp -h {host} -p {int(port)}"
+    new_proxy = communicator.stringToProxy(f"{communicator.identityToString(identity)}:{endpoint}")
+    new_proxy = new_proxy.ice_encodingVersion(proxy.ice_getEncodingVersion())
+    return type(proxy).uncheckedCast(new_proxy)
 
 
 def connect_meta_with_fallback(communicator, M, *, host: str, port: int, secret: str = ""):
