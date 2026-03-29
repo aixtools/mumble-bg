@@ -432,6 +432,8 @@ class _EndpointRuntime:
         self._meta_callback_proxy = callback_proxy
 
     def _match_booted_servers(self, booted_servers):
+        # Set secret before any RPC calls (e.g. srv.id()).
+        booted_servers = [self._with_secret(s) for s in booted_servers]
         targets = {}
         single_booted = booted_servers[0] if len(booted_servers) == 1 else None
         for bg_server in self._server_configs:
@@ -439,7 +441,7 @@ class _EndpointRuntime:
             if bg_server.virtual_server_id is not None:
                 for booted_server in booted_servers:
                     if booted_server.id() == bg_server.virtual_server_id:
-                        target = self._with_secret(booted_server)
+                        target = booted_server
                         break
                 if target is None:
                     logger.warning(
@@ -448,7 +450,7 @@ class _EndpointRuntime:
                         bg_server.pk,
                     )
             elif single_booted is not None:
-                target = self._with_secret(single_booted)
+                target = single_booted
             else:
                 logger.warning(
                     'Murmur Pulse requires virtual_server_id for bg server=%s because multiple booted servers share %s:%s',

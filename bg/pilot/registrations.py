@@ -51,6 +51,11 @@ def _open_target_server(server_config):
             booted_servers = [rewrite_proxy_host(communicator, s, server_config.ice_host, server_config.ice_port) for s in booted_servers]
 
         ice_secret = server_config.ice_secret or ""
+
+        # Set secret before any RPC calls (e.g. srv.id()).
+        if ice_secret:
+            booted_servers = [s.ice_context({"secret": ice_secret}) for s in booted_servers]
+
         target = None
         if server_config.virtual_server_id is not None:
             for srv in booted_servers:

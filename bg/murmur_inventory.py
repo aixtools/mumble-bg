@@ -147,6 +147,10 @@ def _select_target_server(server: MumbleServer):
             from bg.ice_meta import rewrite_proxy_host
             booted_servers = [rewrite_proxy_host(communicator, s, server.ice_host, server.ice_port) for s in booted_servers]
 
+        # Set secret before any RPC calls (e.g. srv.id()).
+        if server.ice_secret:
+            booted_servers = [s.ice_context({"secret": server.ice_secret}) for s in booted_servers]
+
         target = None
         if server.virtual_server_id is not None:
             for booted_server in booted_servers:
