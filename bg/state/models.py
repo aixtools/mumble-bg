@@ -156,6 +156,18 @@ class MumbleUser(models.Model):
         help_text='Last time Murmur reported voice activity for this account',
     )
     is_mumble_admin = models.BooleanField(default=False, help_text='Grant Mumble server admin permissions')
+    is_temporary = models.BooleanField(default=False, help_text='Provisioned from a temporary guest link')
+    temporary_link_token = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        help_text='FG temp-link token that created this guest registration',
+    )
+    temporary_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When a temporary guest registration should stop authenticating',
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

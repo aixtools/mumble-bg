@@ -82,6 +82,7 @@ AUTH_QUERY = """
         OR LOWER(mu.display_name) = LOWER(%s)
     )
       AND mu.is_active = true
+      AND (mu.temporary_expires_at IS NULL OR mu.temporary_expires_at > CURRENT_TIMESTAMP)
       AND mu.server_id = %s
 """
 
@@ -93,6 +94,7 @@ NAME_TO_ID_QUERY = """
         OR LOWER(mu.display_name) = LOWER(%s)
     )
       AND mu.is_active = true
+      AND (mu.temporary_expires_at IS NULL OR mu.temporary_expires_at > CURRENT_TIMESTAMP)
       AND mu.server_id = %s
 """
 
@@ -113,6 +115,7 @@ LEGACY_AUTH_QUERY = """
       ON pa.pkid = mu.user_id
     WHERE LOWER(pa.account_username) = LOWER(%s)
       AND mu.is_active = true
+      AND (mu.temporary_expires_at IS NULL OR mu.temporary_expires_at > CURRENT_TIMESTAMP)
       AND mu.server_id = %s
 """
 
@@ -123,6 +126,7 @@ LEGACY_NAME_TO_ID_QUERY = """
       ON pa.pkid = mu.user_id
     WHERE LOWER(pa.account_username) = LOWER(%s)
       AND mu.is_active = true
+      AND (mu.temporary_expires_at IS NULL OR mu.temporary_expires_at > CURRENT_TIMESTAMP)
       AND mu.server_id = %s
 """
 
@@ -135,6 +139,7 @@ ID_TO_NAME_QUERY = """
         OR (mu.mumble_userid IS NULL AND mu.id = %s)
       )
       AND mu.is_active = true
+      AND (mu.temporary_expires_at IS NULL OR mu.temporary_expires_at > CURRENT_TIMESTAMP)
 """
 
 SERVER_NAME_QUERY = """

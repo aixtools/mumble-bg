@@ -4,11 +4,16 @@ import json
 import os
 import secrets
 import base64
+import re
 from http import HTTPStatus
 from typing import Any
 from uuid import UUID
 
+from django.contrib.auth.models import User
+from django.db import transaction
 from django.http import HttpResponse, JsonResponse
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils.timezone import now
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -462,19 +467,75 @@ def _read_new_control_secret(payload: dict[str, Any]) -> str:
     raise _BadRequest('new_fgbg_psk is required')
 
 
+def _read_required_text(payload: dict[str, Any], *, field: str) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise _BadRequest(f'{field} is required')
+    return value.strip()
+
+
+def _read_groups_csv(payload: dict[str, Any]) -> str:
+    value = payload.get('groups')
+    if value is None:
+        return 'Guest'
+    if not isinstance(value, str):
+        raise _BadRequest('groups must be a string')
+    normalized = ','.join(part.strip() for part in value.split(',') if part.strip())
+    return normalized or 'Guest'
+
+
+def _read_future_datetime(payload: dict[str, Any], *, field: str):
+    raw = _read_required_text(payload, field=field)
+    parsed = parse_datetime(raw)
+    if parsed is None:
+        raise _BadRequest(f'{field} must be an ISO datetime')
+    if parsed.tzinfo is None:
+        parsed = timezone.make_aware(parsed, timezone.utc)
+    if parsed <= now():
+        raise _BadRequest(f'{field} must be in the future')
+    return parsed
+
+
+def _normalize_guest_username(display_name: str, token: str) -> str:
+    stem = re.sub(r'[^a-z0-9]+', '_', str(display_name or '').strip().lower()).strip('_')
+    stem = stem[:16] or 'guest'
+    return f'temp_{stem}_{str(token or "")[:8]}_{secrets.token_hex(3)}'
+
+
+def _create_guest_auth_user(display_name: str, token: str) -> User:
+    for _ in range(20):
+        username = _normalize_guest_username(display_name, token)
+        if User.objects.filter(username=username).exists():
+            continue
+        user = User(username=username, first_name=str(display_name or '')[:150])
+        user.set_unusable_password()
+        user.save()
+        return user
+    raise _BadRequest('Could not allocate a temporary guest username')
+
+
 class _ServerResolver:
     """Resolve server selectors from control payloads."""
 
     def resolve(self, payload: dict[str, Any]) -> MumbleServer:
         name = payload.get('server_name')
         server_id = payload.get('server_id')
+        server_key = payload.get('server_key')
 
-        if not name and not server_id:
-            raise _BadRequest('Either server_name or server_id is required')
-        if name and server_id:
-            raise _BadRequest('Use either server_name or server_id, not both')
+        provided = [value for value in (name, server_id, server_key) if value not in (None, '')]
+        if not provided:
+            raise _BadRequest('Either server_name, server_id, or server_key is required')
+        if len(provided) > 1:
+            raise _BadRequest('Use only one of server_name, server_id, or server_key')
 
-        if name:
+        if server_key is not None and str(server_key).strip():
+            normalized = str(server_key).strip()
+            servers = [
+                row
+                for row in MumbleServer.objects.filter(is_active=True).order_by('display_order', 'name')
+                if row.server_key == normalized
+            ]
+        elif name:
             if not isinstance(name, str) or not name.strip():
                 raise _BadRequest('server_name must be a non-empty string')
             servers = list(MumbleServer.objects.filter(name=name, is_active=True))
@@ -937,6 +998,126 @@ def password_reset(request):
         synced_servers=synced_servers,
         ice_failures=failures,
         ice_down_servers=down_servers,
+    )
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def temp_links_redeem(request):
+    created_user = None
+    created_registration = None
+    try:
+        auth_source, control_key_id = _require_control_auth(request)
+        payload, request_id, requested_by, _ = _sync_context(request)
+        _require_requested_by(requested_by)
+        del auth_source
+        server = _SERVER_RESOLVER.resolve(payload)
+        display_name = _read_required_text(payload, field='display_name')
+        groups_csv = _read_groups_csv(payload)
+        expires_at = _read_future_datetime(payload, field='expires_at')
+        link_token = _read_required_text(payload, field='link_token')
+    except _BadRequest as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
+    except _Unauthorized as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _Forbidden as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
+    except _NotFound as exc:
+        return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
+
+    password = _new_password()
+    password_record = build_murmur_password_record(password)
+
+    try:
+        with transaction.atomic():
+            created_user = _create_guest_auth_user(display_name, link_token)
+            created_registration = MumbleUser.objects.create(
+                user=created_user,
+                server=server,
+                username=created_user.username,
+                display_name=display_name,
+                pwhash=password_record['pwhash'],
+                hashfn=password_record['hashfn'],
+                pw_salt=password_record['pw_salt'],
+                kdf_iterations=password_record['kdf_iterations'],
+                groups=groups_csv,
+                is_temporary=True,
+                temporary_link_token=link_token,
+                temporary_expires_at=expires_at,
+                is_active=True,
+            )
+        murmur_userid = sync_murmur_registration(created_registration, password=password)
+    except MurmurSyncError as exc:
+        if created_registration is not None:
+            created_registration.delete()
+        if created_user is not None:
+            created_user.delete()
+        return _response_authed(
+            control_key_id,
+            request_id,
+            'failed',
+            message=f'Failed to provision temporary registration: {exc}',
+            code=HTTPStatus.BAD_GATEWAY,
+        )
+
+    created_registration.mumble_userid = murmur_userid
+    created_registration.save(update_fields=['mumble_userid', 'updated_at'])
+    return _response_authed(
+        control_key_id,
+        request_id,
+        'completed',
+        message='Temporary guest registration created',
+        server_name=server.name,
+        address=server.address,
+        username=created_registration.username,
+        display_name=created_registration.display_name,
+        password=password,
+        expires_at=expires_at.isoformat(),
+        murmur_userid=created_registration.mumble_userid,
+    )
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def temp_links_revoke(request):
+    try:
+        auth_source, control_key_id = _require_control_auth(request)
+        payload, request_id, requested_by, _ = _sync_context(request)
+        _require_requested_by(requested_by)
+        del auth_source
+        link_token = _read_required_text(payload, field='link_token')
+    except _BadRequest as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
+    except _Unauthorized as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _Forbidden as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
+
+    rows = list(
+        MumbleUser.objects.filter(
+            is_temporary=True,
+            temporary_link_token=link_token,
+        ).select_related('server')
+    )
+    disabled = 0
+    failures: list[dict[str, str]] = []
+    for row in rows:
+        try:
+            unregister_murmur_registration(row)
+        except MurmurSyncError as exc:
+            failures.append({'username': row.username, 'error': str(exc)})
+        row.is_active = False
+        row.save(update_fields=['is_active', 'updated_at'])
+        disabled += 1
+
+    status = 'partial' if failures else 'completed'
+    return _response_authed(
+        control_key_id,
+        request_id,
+        status,
+        message='Temporary link registrations revoked',
+        revoked_count=disabled,
+        failures=failures,
     )
 
 
