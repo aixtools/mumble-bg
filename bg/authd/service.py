@@ -15,6 +15,8 @@ import time
 import logging
 import json
 import sqlite3
+import threading
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -396,7 +398,19 @@ UPDATE_CONNECTION_QUERY = """
 UPDATE_MUMBLE_USERID_QUERY = """
     UPDATE mumble_user
     SET mumble_userid = %s, updated_at = %s
-    WHERE id = %s AND mumble_userid IS NULL
+    WHERE id = %s
+"""
+
+CLEAR_MUMBLE_USERID_QUERY = """
+    UPDATE mumble_user
+    SET mumble_userid = NULL, updated_at = %s
+    WHERE id = %s
+"""
+
+CLEAR_SERVER_MUMBLE_USERIDS_QUERY = """
+    UPDATE mumble_user
+    SET mumble_userid = NULL, updated_at = %s
+    WHERE server_id = %s AND mumble_userid IS NOT NULL
 """
 
 INSERT_AUDIT_QUERY = """
@@ -409,7 +423,6 @@ BG_AUDIT_ACTION_PILOT_LOGIN = "pilot_login"
 
 def _schedule_deferred_provision(bg_row_id, username, display_name, M, srv):
     """Schedule Murmur registration in a background thread to avoid ICE callback deadlock."""
-    import threading
     t = threading.Thread(
         target=_provision_murmur_registration,
         args=(bg_row_id, username, display_name, M, srv),
@@ -421,7 +434,10 @@ def _schedule_deferred_provision(bg_row_id, username, display_name, M, srv):
 def _provision_murmur_registration(bg_row_id, username, display_name, M, srv):
     """Register the user in Murmur via ICE and store the mumble_userid in BG."""
     try:
-        info = {M.UserInfo.UserName: username}
+        info = {
+            M.UserInfo.UserName: username,
+            M.UserInfo.UserPassword: uuid.uuid4().hex,
+        }
         if display_name:
             info[M.UserInfo.UserComment] = display_name
         mumble_userid = srv.registerUser(info)
@@ -439,6 +455,71 @@ def _provision_murmur_registration(bg_row_id, username, display_name, M, srv):
     except Exception:
         logger.exception('Failed to provision Murmur registration for %s (bg_row_id=%s)', username, bg_row_id)
     return None
+
+
+# --- mumble_userid self-healing ---------------------------------------------------
+
+_validated_ids: dict[int, float] = {}
+_validated_lock = threading.Lock()
+_VALIDATION_TTL = 300  # seconds between re-checks per user
+
+
+def _clear_mumble_userid(bg_row_id):
+    """Reset mumble_userid to NULL so the next auth triggers re-provisioning."""
+    now = datetime.now(timezone.utc)
+    try:
+        conn = get_db_connection()
+        try:
+            with _cursor(conn) as cur:
+                _execute(cur, conn, CLEAR_MUMBLE_USERID_QUERY, (now, bg_row_id))
+            conn.commit()
+        finally:
+            conn.close()
+        logger.info('Cleared stale mumble_userid for bg_row_id=%s', bg_row_id)
+    except Exception:
+        logger.exception('Failed to clear mumble_userid for bg_row_id=%s', bg_row_id)
+
+
+def _clear_server_mumble_userids(server_id):
+    """Reset all mumble_userid values for a server after Murmur restart."""
+    now = datetime.now(timezone.utc)
+    try:
+        conn = get_db_connection()
+        try:
+            with _cursor(conn) as cur:
+                _execute(cur, conn, CLEAR_SERVER_MUMBLE_USERIDS_QUERY, (now, server_id))
+            conn.commit()
+        finally:
+            conn.close()
+        logger.info('Cleared all mumble_userids for server_id=%s after Murmur reconnect', server_id)
+    except Exception:
+        logger.exception('Failed to clear mumble_userids for server_id=%s', server_id)
+
+
+def _schedule_deferred_validation(bg_row_id, mumble_userid, username, display_name, M, srv):
+    """Verify a mumble_userid still exists in Murmur; clear and re-provision if stale."""
+    t = threading.Thread(
+        target=_validate_and_repair_registration,
+        args=(bg_row_id, mumble_userid, username, display_name, M, srv),
+        daemon=True,
+    )
+    t.start()
+
+
+def _validate_and_repair_registration(bg_row_id, mumble_userid, username, display_name, M, srv):
+    """Check if mumble_userid is still registered in Murmur. If not, clear and re-provision."""
+    try:
+        srv.getRegistration(int(mumble_userid))
+        with _validated_lock:
+            _validated_ids[mumble_userid] = time.time()
+        return  # registration exists
+    except Exception:
+        logger.warning(
+            'mumble_userid=%d for user %s (bg_row_id=%s) is stale; clearing and re-provisioning',
+            mumble_userid, username, bg_row_id,
+        )
+    _clear_mumble_userid(bg_row_id)
+    _provision_murmur_registration(bg_row_id, username, display_name, M, srv)
 
 
 def update_connection_info(bg_row_id, certhash):
@@ -644,6 +725,14 @@ def _make_scoped_authenticator(M):
             bg_row_id, auth_user_id, display_name, groups, pilot_user_id, auth_method = result
             if auth_user_id == bg_row_id:
                 _schedule_deferred_provision(bg_row_id, name, display_name, self._M, self._srv)
+            else:
+                now = time.time()
+                with _validated_lock:
+                    last_check = _validated_ids.get(auth_user_id, 0)
+                if now - last_check > _VALIDATION_TTL:
+                    _schedule_deferred_validation(
+                        bg_row_id, auth_user_id, name, display_name, self._M, self._srv,
+                    )
             update_connection_info(bg_row_id, certhash)
             append_auth_success_audit(
                 user_id=pilot_user_id,
@@ -780,6 +869,9 @@ def main():
                                 ice_secret=ice_secret, virtual_server_id=virtual_server_id,
                             )
                             live_servers[server_id] = (config, new_proxies)
+                            _clear_server_mumble_userids(server_id)
+                            with _validated_lock:
+                                _validated_ids.clear()
                         except Exception:
                             logger.exception('Re-registration failed for server_id=%d (%s:%s)',
                                            server_id, ice_host, ice_port)
