@@ -249,8 +249,10 @@ def _is_reserved_registration_name(value: object | None) -> bool:
 
 
 def _build_registration_info(M, mumble_user: MumbleUser):
+    import uuid
     info = {
         M.UserInfo.UserName: mumble_user.username,
+        M.UserInfo.UserPassword: uuid.uuid4().hex,
     }
     if mumble_user.certhash:
         info[M.UserInfo.UserHash] = mumble_user.certhash
