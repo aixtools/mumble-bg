@@ -604,12 +604,14 @@ def probe_authenticator_registration():
                     )
                     continue
 
+                # Set secret before select_target_servers since srv.id() requires it.
+                if ice_secret:
+                    servers = [s.ice_context({"secret": ice_secret}) for s in servers]
+
                 auth_obj = ProbeAuthenticator()
                 auth_proxy = adapter.addWithUUID(auth_obj)
                 target_servers = select_target_servers(servers, virtual_server_id)
                 for srv in target_servers:
-                    if ice_secret:
-                        srv = srv.ice_context({"secret": ice_secret})
                     srv.setAuthenticator(M.ServerAuthenticatorPrx.uncheckedCast(auth_proxy))
                     result['registered'] += 1
             except Exception as exc:  # noqa: BLE001

@@ -94,6 +94,9 @@ def _connect_server_proxy(server: MumbleServer):
         servers = meta.getBootedServers()
         if not servers:
             raise CommandError("No booted Murmur servers found")
+        # Set secret before any RPC calls (e.g. srv.id()).
+        if server.ice_secret:
+            servers = [s.ice_context({"secret": server.ice_secret}) for s in servers]
         target = None
         if server.virtual_server_id is not None:
             for srv in servers:
