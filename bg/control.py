@@ -10,7 +10,7 @@ from typing import Any
 from uuid import UUID
 
 from django.contrib.auth.models import User
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -507,9 +507,12 @@ def _create_guest_auth_user(display_name: str, token: str) -> User:
         username = _normalize_guest_username(display_name, token)
         if User.objects.filter(username=username).exists():
             continue
-        user = User(username=username, first_name=str(display_name or '')[:150])
-        user.set_unusable_password()
-        user.save()
+        try:
+            user = User(username=username, first_name=str(display_name or '')[:150])
+            user.set_unusable_password()
+            user.save()
+        except IntegrityError:
+            continue
         return user
     raise _BadRequest('Could not allocate a temporary guest username')
 
