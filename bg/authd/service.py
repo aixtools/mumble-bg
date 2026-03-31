@@ -698,7 +698,7 @@ def probe_authenticator_registration():
                 auth_proxy = adapter.addWithUUID(auth_obj)
                 target_servers = select_target_servers(servers, virtual_server_id)
                 for srv in target_servers:
-                    srv.setAuthenticator(M.ServerAuthenticatorPrx.uncheckedCast(auth_proxy))
+                    srv.setAuthenticator(M.ServerUpdatingAuthenticatorPrx.uncheckedCast(auth_proxy))
                     result['registered'] += 1
             except Exception as exc:  # noqa: BLE001
                 result['errors'].append(
@@ -715,7 +715,7 @@ def probe_authenticator_registration():
 def _make_scoped_authenticator(M):
     """Build the ScopedAuthenticator class once, bound to the loaded ICE module."""
 
-    class ScopedAuthenticator(M.ServerAuthenticator):
+    class ScopedAuthenticator(M.ServerUpdatingAuthenticator):
         def __init__(self, sid, ice_module, server_proxy):
             self._server_id = sid
             self._M = ice_module
@@ -760,6 +760,23 @@ def _make_scoped_authenticator(M):
         def idToTexture(self, id, current=None):
             return bytes()
 
+        # ServerUpdatingAuthenticator callbacks — fall through to Murmur's
+        # built-in registration so that external registerUser calls work.
+        def registerUser(self, info, current=None):
+            return -2
+
+        def unregisterUser(self, id, current=None):
+            return -1
+
+        def getRegisteredUsers(self, filter, current=None):
+            return {}
+
+        def setInfo(self, id, info, current=None):
+            return -1
+
+        def setTexture(self, id, tex, current=None):
+            return -1
+
     return ScopedAuthenticator
 
 
@@ -789,7 +806,7 @@ def _register_authenticator(communicator, adapter, M, ScopedAuthenticator, *,
     for srv in target_servers:
         auth_obj = ScopedAuthenticator(server_id, M, srv)
         auth_proxy = adapter.addWithUUID(auth_obj)
-        srv.setAuthenticator(M.ServerAuthenticatorPrx.uncheckedCast(auth_proxy))
+        srv.setAuthenticator(M.ServerUpdatingAuthenticatorPrx.uncheckedCast(auth_proxy))
         logger.info('Authenticator registered for mumble server %d on %s:%s (db server_id=%d)',
                     srv.id(), ice_host, ice_port, server_id)
         registered_proxies.append(srv)
