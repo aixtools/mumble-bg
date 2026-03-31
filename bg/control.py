@@ -1047,7 +1047,7 @@ def temp_links_redeem(request):
                 is_temporary=True,
                 temporary_link_token=link_token,
                 temporary_expires_at=expires_at,
-                is_active=True,
+                is_active=False,
             )
         murmur_userid = sync_murmur_registration(created_registration, password=password)
     except MurmurSyncError as exc:
@@ -1064,7 +1064,8 @@ def temp_links_redeem(request):
         )
 
     created_registration.mumble_userid = murmur_userid
-    created_registration.save(update_fields=['mumble_userid', 'updated_at'])
+    created_registration.is_active = True
+    created_registration.save(update_fields=['mumble_userid', 'is_active', 'updated_at'])
     return _response_authed(
         control_key_id,
         request_id,
