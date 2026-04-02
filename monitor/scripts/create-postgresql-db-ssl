@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./db-ssl-common.sh
+source "$SCRIPT_DIR/db-ssl-common.sh"
+
+usage() {
+    cat <<'EOF'
+Usage:
+  scripts/create-postgresql-db-ssl --out DIR --server-host HOST [options]
+
+Required:
+  --out DIR
+  --server-host HOST
+
+Common options:
+  --server-name NAME
+  --server-ip IP            Repeatable; adds IP SAN entries
+  --ca-name NAME
+  --client-name NAME        Default: monitor
+  --days N                  Default: 825
+  --db-name NAME            Default: dbname
+  --db-user NAME            Default: monitor
+  --monitor-user NAME       Default: monitor
+  --monitor-host HOST       Default: monitor.example.com
+  --monitor-dir DIR         Default: /etc/monitor
+  --monitor-source-cidr CIDR
+                            Default: monitor.client.ip/32
+  --force
+EOF
+}
+
+if ! db_ssl_parse_args "$@"; then
+    usage
+    exit 0
+fi
+
+db_ssl_generate_ca
+db_ssl_generate_server_cert
+db_ssl_generate_client_cert
+db_ssl_write_monitor_examples
+
+cat >"$EXAMPLES_DIR/postgresql.conf.snippet" <<EOF
+ssl = on
+ssl_cert_file = '${SERVER_DIR}/server-cert.pem'
+ssl_key_file = '${SERVER_DIR}/server-key.pem'
+ssl_ca_file = '${CA_DIR}/ca-cert.pem'
+EOF
+
+cat >"$EXAMPLES_DIR/pg_hba.conf.snippet" <<EOF
+# Server-auth only:
+hostssl ${DB_NAME} ${DB_USER} ${MONITOR_SOURCE_CIDR} scram-sha-256
+
+# Mutual TLS:
+# hostssl ${DB_NAME} ${DB_USER} ${MONITOR_SOURCE_CIDR} cert clientcert=verify-full
+EOF
+
+cat >"$EXAMPLES_DIR/test-psql.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+psql "host=${SERVER_HOST} dbname=${DB_NAME} user=${DB_USER} sslmode=verify-full sslrootcert=${CA_DIR}/ca-cert.pem sslcert=${CLIENT_DIR}/${CLIENT_NAME}-client-cert.pem sslkey=${CLIENT_DIR}/${CLIENT_NAME}-client-key.pem"
+EOF
+chmod +x "$EXAMPLES_DIR/test-psql.sh"
+
+db_ssl_print_summary
+cat <<EOF
+
+PostgreSQL-specific examples:
+  postgresql.conf: $EXAMPLES_DIR/postgresql.conf.snippet
+  pg_hba.conf:     $EXAMPLES_DIR/pg_hba.conf.snippet
+  test client:     $EXAMPLES_DIR/test-psql.sh
+EOF

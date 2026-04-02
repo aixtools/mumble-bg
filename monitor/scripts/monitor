@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PYTHON_BIN="${HOME}/.venv/monitor/bin/python"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYPROJECT_TOML="${ROOT_DIR}/pyproject.toml"
+
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+  echo "Missing interpreter: ${PYTHON_BIN}" >&2
+  echo "Create or restore the monitor virtualenv at ~/.venv/monitor." >&2
+  exit 1
+fi
+
+if [[ "${1:-}" == "--version" && "$#" -eq 1 ]]; then
+  if [[ ! -f "${PYPROJECT_TOML}" ]]; then
+    echo "Missing file: ${PYPROJECT_TOML}" >&2
+    exit 1
+  fi
+  exec "${PYTHON_BIN}" -c 'from pathlib import Path; import tomllib; print(tomllib.loads(Path("'"${PYPROJECT_TOML}"'").read_text(encoding="utf-8"))["project"]["version"])'
+fi
+
+exec "${PYTHON_BIN}" -m monitor "$@"

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./db-ssl-common.sh
+source "$SCRIPT_DIR/db-ssl-common.sh"
+
+usage() {
+    cat <<'EOF'
+Usage:
+  scripts/create-mysql-db-ssl --out DIR --server-host HOST [options]
+
+Required:
+  --out DIR
+  --server-host HOST
+
+Common options:
+  --server-name NAME
+  --server-ip IP            Repeatable; adds IP SAN entries
+  --ca-name NAME
+  --client-name NAME        Default: monitor
+  --days N                  Default: 825
+  --db-name NAME            Default: dbname
+  --db-user NAME            Default: monitor
+  --monitor-user NAME       Default: monitor
+  --monitor-host HOST       Default: monitor.example.com
+  --monitor-dir DIR         Default: /etc/monitor
+  --force
+EOF
+}
+
+if ! db_ssl_parse_args "$@"; then
+    usage
+    exit 0
+fi
+
+db_ssl_generate_ca
+db_ssl_generate_server_cert
+db_ssl_generate_client_cert
+db_ssl_write_monitor_examples
+
+cat >"$EXAMPLES_DIR/mysqld.cnf.snippet" <<EOF
+[mysqld]
+ssl-ca   = ${CA_DIR}/ca-cert.pem
+ssl-cert = ${SERVER_DIR}/server-cert.pem
+ssl-key  = ${SERVER_DIR}/server-key.pem
+require_secure_transport = ON
+EOF
+
+cat >"$EXAMPLES_DIR/mysql-user.sql" <<EOF
+-- Server-auth only:
+ALTER USER '${DB_USER}'@'%' REQUIRE SSL;
+
+-- Mutual TLS:
+-- ALTER USER '${DB_USER}'@'%' REQUIRE X509;
+EOF
+
+cat >"$EXAMPLES_DIR/test-mysql.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+mysql --host='${SERVER_HOST}' --user='${DB_USER}' --ssl-ca='${CA_DIR}/ca-cert.pem' --ssl-cert='${CLIENT_DIR}/${CLIENT_NAME}-client-cert.pem' --ssl-key='${CLIENT_DIR}/${CLIENT_NAME}-client-key.pem' '${DB_NAME}'
+EOF
+chmod +x "$EXAMPLES_DIR/test-mysql.sh"
+
+db_ssl_print_summary
+cat <<EOF
+
+MySQL/MariaDB-specific examples:
+  mysqld config: $EXAMPLES_DIR/mysqld.cnf.snippet
+  user policy:   $EXAMPLES_DIR/mysql-user.sql
+  test client:   $EXAMPLES_DIR/test-mysql.sh
+EOF

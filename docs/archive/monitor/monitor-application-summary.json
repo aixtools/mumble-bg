@@ -1,0 +1,176 @@
+{
+  "snapshot": {
+    "name": "monitor",
+    "version_pyproject": "0.3.0.dev0",
+    "application_type": "django_status_utility",
+    "summary": "Monitors AUTH/CUBE and Mumble health, serves a status UI, and exposes roster/wealth APIs."
+  },
+  "runtime": {
+    "entrypoints": [
+      "python -m monitor",
+      "scripts/monitor",
+      "monitor.services.status_server"
+    ],
+    "default_mode": "foreground",
+    "modes": {
+      "foreground_flag": "--fg",
+      "background_flag": "--bg"
+    },
+    "control_flags": [
+      "--verify",
+      "--status",
+      "--stop",
+      "--restart",
+      "--version",
+      "--debug",
+      "--verbose"
+    ]
+  },
+  "interfaces": {
+    "html_routes": [
+      "/monitor/status/"
+    ],
+    "json_routes": [
+      "/monitor/status/mains/",
+      "/monitor/status/mains-with-alts/",
+      "/monitor/status/main-alts/",
+      "/monitor/status/orphans/",
+      "/monitor/status/pilots/",
+      "/monitor/status/spies/",
+      "/monitor/status/pilot-wealth/",
+      "/monitor/status/ice-users/"
+    ]
+  },
+  "status_page": {
+    "title_pattern": "monitor <version>",
+    "heading_text": "monitor",
+    "drilldown_panel": true,
+    "details_rows": [
+      "Assets",
+      "Assets-ISK",
+      "Wallet",
+      "SP",
+      "Clones",
+      "Contacts"
+    ],
+    "contacts_agent_exclusion_auth": true,
+    "alliance_background_logo": {
+      "enabled_when_alliance_id_available": true,
+      "url_pattern": "https://images.evetech.net/alliances/{alliance_id}/logo?size=1024"
+    }
+  },
+  "architecture": {
+    "views": "monitor/views.py",
+    "checks": "monitor/checks.py",
+    "services": [
+      "monitor/services/env.py",
+      "monitor/services/ice_client.py",
+      "monitor/services/mumble_client.py",
+      "monitor/services/status_server.py",
+      "monitor/services/item_pricing.py",
+      "monitor/services/roster_cache.py"
+    ],
+    "repositories": "monitor/adapters/repositories.py",
+    "domain_models": "monitor/models/eve.py"
+  },
+  "data_sources": {
+    "eve_apps": [
+      "AUTH",
+      "CUBE"
+    ],
+    "mumble_paths": [
+      "ICE",
+      "pymumble_client",
+      "murmur_db_mysql",
+      "murmur_db_postgresql"
+    ]
+  },
+  "pricing": {
+    "preferred_method": "janice",
+    "fallback_method": "memberaudit_eveuniverse_market_price",
+    "cache": {
+      "default_backend": "json_file",
+      "default_ttl_seconds": 3600,
+      "flush_on_status_server_shutdown": true
+    },
+    "configuration_keys": [
+      "JANICE_API_KEY",
+      "JANICE_API_KEY",
+      "JANICE_MARKET",
+      "JANICE_PRICING",
+      "JANICE_VARIANT",
+      "JANICE_DAYS",
+      "ITEM_PRICE_CACHE_BACKEND",
+      "ITEM_PRICE_CACHE_FILE",
+      "ITEM_PRICE_CACHE_TTL_SECONDS"
+    ]
+  },
+  "alliance_lookup_inputs": [
+    "ALLIANCE_ID",
+    "ALLIANCE_TICKER",
+    "AUTH_DBPREFIX",
+    "CUBE_DBPREFIX"
+  ],
+  "network_identity_inputs": {
+    "ice": [
+      "ICE_HOST",
+      "ICE_PORT",
+      "ICE_SECRET"
+    ],
+    "mumble_client": [
+      "PYMUMBLE_SERVER",
+      "PYMUMBLE_PORT",
+      "PYMUMBLE_USER",
+      "PYMUMBLE_PASSWD"
+    ]
+  },
+  "domain_model": {
+    "org_objects": [
+      "EveAlliance",
+      "EveAllianceRef",
+      "EveCorporation",
+      "EveCorporationRef"
+    ],
+    "pilot_objects": [
+      "EvePilot"
+    ],
+    "skill_objects": [
+      "EveSkill",
+      "EvePilotSkill",
+      "EveSkillBasket",
+      "EvePilotSkillSummary",
+      "EvePilotSkillbook"
+    ],
+    "clone_objects": [
+      "EveImplant",
+      "EveCloneLocation",
+      "EveJumpClone",
+      "EvePilotCloneSummary",
+      "EveCloneBay",
+      "EvePilotClonebook"
+    ],
+    "asset_pricing_objects": [
+      "EveItemType",
+      "EveItemStack",
+      "EveAssetItem",
+      "EveItemBasket",
+      "EveItemPrice",
+      "EveItemValuation"
+    ]
+  },
+  "tests": {
+    "present": true,
+    "modules": [
+      "tests/test_item_pricing.py"
+    ],
+    "focus": [
+      "item object creation",
+      "preferred_then_fallback pricing behavior",
+      "unpriced type tracking",
+      "cache hit behavior",
+      "json cache flush and reload persistence"
+    ]
+  },
+  "verification_note": "If DB connection succeeds but AUTH/CUBE schema verification fails, --debug logs include a hint to check AUTH_DBPREFIX and CUBE_DBPREFIX."
+  
+}
