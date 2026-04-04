@@ -1016,6 +1016,7 @@ def temp_links_redeem(request):
         del auth_source
         server = _SERVER_RESOLVER.resolve(payload)
         display_name = _read_required_text(payload, field='display_name')
+        display_name = f'[TEMP] {display_name}'
         groups_csv = _read_groups_csv(payload)
         expires_at = _read_future_datetime(payload, field='expires_at')
         link_token = _read_required_text(payload, field='link_token')
