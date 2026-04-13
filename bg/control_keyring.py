@@ -21,6 +21,11 @@ KEEP_MAX = 80
 _boot_rotated = False
 
 
+def reset_rotation_state() -> None:
+    global _boot_rotated  # noqa: PLW0603
+    _boot_rotated = False
+
+
 def _encrypt_secret_for_storage(secret: str) -> str:
     # Use BG public key (RSA-OAEP). Private key/passphrase is only needed to decrypt later.
     if not crypto.is_available():
