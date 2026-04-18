@@ -127,23 +127,33 @@ class _MurmurServerAdapter:
         users = self._server_proxy.getRegisteredUsers("")
         return [str(name).strip() for _, name in (users or {}).items() if str(name or "").strip()]
 
-    def create_or_update_user(self, mumble_user: MumbleUser) -> int:
+    def create_or_update_user(self, mumble_user: MumbleUser) -> int | None:
         if not self._connected:
             self._open()
         assert self._server_proxy is not None and self._M is not None
 
         existing_userid = self._find_userid(mumble_user.username)
         info = _build_registration_info(self._M, mumble_user)
-        if existing_userid is None:
-            target_userid = int(self._server_proxy.registerUser(info))
-            if target_userid < 0:
-                raise MurmurReconcileError(
-                    f"Failed to create Murmur user {mumble_user.username} on {self._server.name}"
-                )
-            return target_userid
+        try:
+            if existing_userid is None:
+                target_userid = int(self._server_proxy.registerUser(info))
+                if target_userid < 0:
+                    raise MurmurReconcileError(
+                        f"Failed to create Murmur user {mumble_user.username} on {self._server.name}"
+                    )
+                return target_userid
 
-        self._server_proxy.updateRegistration(int(existing_userid), info)
-        return int(existing_userid)
+            self._server_proxy.updateRegistration(int(existing_userid), info)
+            return int(existing_userid)
+        except self._M.InvalidUserException:
+            # Murmur rejects register/update for names the active ICE
+            # authenticator claims. ICE auth is authoritative, so the
+            # sqlite push is unnecessary — treat as idempotent success.
+            logger.debug(
+                "ICE authenticator claims %s on %s; skipping Murmur registration push",
+                mumble_user.username, self._server.name,
+            )
+            return int(existing_userid) if existing_userid is not None else None
 
     def delete_user(self, username: str) -> bool:
         if not self._connected:
