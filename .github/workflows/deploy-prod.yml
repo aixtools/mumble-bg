@@ -153,7 +153,8 @@ jobs:
           env_file_local = Path("/tmp/mumble-bg.env")
           lines = []
           for k in ["DATABASES", "ICE", "MURMUR_PROBE",
-                     "BG_PSK", "BG_BIND", "BG_PKI_PASSPHRASE"]:
+                     "BG_PSK", "BG_BIND", "BG_PKI_PASSPHRASE",
+                     "BG_AUTHD_CALLBACK_ENDPOINT", "MURMUR_CONTROL_URL"]:
               v = env_payload.get(k)
               if v is None or v == "":
                   continue
