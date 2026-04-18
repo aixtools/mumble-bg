@@ -1,6 +1,9 @@
 from bg.ice import load_ice_module
 from bg.ice_meta import build_ice_client_props, connect_meta_with_fallback
 import hashlib
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class MurmurSyncError(RuntimeError):
@@ -130,21 +133,35 @@ def sync_murmur_registration(mumble_user, password=None, *, create_password=None
                 effective_password = create_password
             info = _build_registration_info(M, mumble_user, password=effective_password)
             reenabled = False
-            if target_userid is None:
-                target_userid = server_proxy.registerUser(info)
-                if target_userid < 0:
-                    raise MurmurSyncError(
-                        f'Failed to register Murmur user {mumble_user.username} on {mumble_user.server.name}'
-                    )
-            else:
-                try:
-                    current = server_proxy.getRegistration(int(target_userid))
-                except Exception:  # noqa: BLE001
-                    current = {}
-                current_comment = str(current.get(M.UserInfo.UserComment, '') or '')
-                if current_comment == _DISABLED_COMMENT_MARKER:
-                    reenabled = True
-                server_proxy.updateRegistration(target_userid, info)
+            try:
+                if target_userid is None:
+                    target_userid = server_proxy.registerUser(info)
+                    if target_userid < 0:
+                        raise MurmurSyncError(
+                            f'Failed to register Murmur user {mumble_user.username} on {mumble_user.server.name}'
+                        )
+                else:
+                    try:
+                        current = server_proxy.getRegistration(int(target_userid))
+                    except Exception:  # noqa: BLE001
+                        current = {}
+                    current_comment = str(current.get(M.UserInfo.UserComment, '') or '')
+                    if current_comment == _DISABLED_COMMENT_MARKER:
+                        reenabled = True
+                    server_proxy.updateRegistration(target_userid, info)
+            except M.InvalidUserException:
+                # Murmur rejects register/update for names the active ICE
+                # authenticator claims. ICE auth is authoritative, so the
+                # sqlite push is unnecessary — skip it and leave mumble_userid
+                # unchanged (None on the outside signals "no Murmur sync").
+                logger.debug(
+                    'ICE authenticator claims %s on %s; skipping Murmur registration push',
+                    mumble_user.username, mumble_user.server.name,
+                )
+                resolved = int(target_userid) if target_userid is not None else None
+                if return_details:
+                    return {'murmur_userid': resolved, 'created': False, 'reenabled': False}
+                return resolved
             if return_details:
                 return {
                     'murmur_userid': int(target_userid),
