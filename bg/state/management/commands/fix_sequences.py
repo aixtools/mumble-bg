@@ -46,27 +46,33 @@ class Command(BaseCommand):
         dry_run = bool(options['dry_run'])
 
         with connection.cursor() as cursor:
+            # Tables aren't always in `public` — a per-role default schema
+            # (e.g. PG `mumble_bg` role creating its own schema) will land
+            # objects outside it. Target every schema reachable via the
+            # current search_path.
             cursor.execute(
                 """
-                SELECT c.table_name
+                SELECT c.table_schema, c.table_name
                 FROM information_schema.columns AS c
                 JOIN information_schema.tables AS t
                   ON t.table_schema = c.table_schema
                  AND t.table_name = c.table_name
-                WHERE c.table_schema = 'public'
+                WHERE c.table_schema = ANY (current_schemas(false))
                   AND c.column_name = 'id'
                   AND t.table_type = 'BASE TABLE'
-                ORDER BY c.table_name
+                ORDER BY c.table_schema, c.table_name
                 """
             )
-            tables = [row[0] for row in cursor.fetchall()]
+            tables = cursor.fetchall()
 
             updated = 0
             skipped = 0
-            for table in tables:
+            for schema, table in tables:
+                qualified = f'"{schema}"."{table}"'
+                qualified_label = f'{schema}.{table}'
                 cursor.execute(
                     "SELECT pg_get_serial_sequence(%s, 'id')",
-                    [table],
+                    [qualified],
                 )
                 seq = cursor.fetchone()[0]
                 if not seq:
@@ -74,7 +80,7 @@ class Command(BaseCommand):
                     continue
 
                 cursor.execute(
-                    f'SELECT COALESCE(MAX(id), 0) FROM "{table}"'  # noqa: S608 — table from system catalog
+                    f'SELECT COALESCE(MAX(id), 0) FROM {qualified}'  # noqa: S608 — ident from system catalog
                 )
                 max_id = int(cursor.fetchone()[0] or 0)
                 target = max_id + 1
@@ -85,19 +91,19 @@ class Command(BaseCommand):
 
                 if effective > max_id:
                     self.stdout.write(
-                        f'OK    {table:40s} max(id)={max_id} sequence_next={effective}'
+                        f'OK    {qualified_label:50s} max(id)={max_id} sequence_next={effective}'
                     )
                     skipped += 1
                     continue
 
                 if dry_run:
                     self.stdout.write(
-                        f'DRY   {table:40s} max(id)={max_id} sequence_next={effective} -> {target}'
+                        f'DRY   {qualified_label:50s} max(id)={max_id} sequence_next={effective} -> {target}'
                     )
                 else:
                     cursor.execute('SELECT setval(%s, %s, false)', [seq, target])
                     self.stdout.write(
-                        f'FIXED {table:40s} max(id)={max_id} sequence_next={effective} -> {target}'
+                        f'FIXED {qualified_label:50s} max(id)={max_id} sequence_next={effective} -> {target}'
                     )
                 updated += 1
 
