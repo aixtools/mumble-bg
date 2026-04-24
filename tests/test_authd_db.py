@@ -40,10 +40,14 @@ class _Conn:
         return None
 
 
-def test_get_db_connection_wraps_errors():
+def test_get_db_connection_wraps_errors(monkeypatch):
     class _BadAdapter:
         def connect(self):
             raise RuntimeError("bad")
+
+    # get_db_connection short-circuits to sqlite3.connect() when BG_USE_SQLITE
+    # is set, bypassing the adapter — clear it so the adapter path runs.
+    monkeypatch.delenv("BG_USE_SQLITE", raising=False)
 
     original = authd.BG_DB_ADAPTER
     try:

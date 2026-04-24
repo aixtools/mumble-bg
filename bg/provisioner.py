@@ -168,8 +168,17 @@ def provision_registrations(
     *,
     server: MumbleServer | None = None,
     dry_run: bool = False,
+    pkid_filter: int | None = None,
 ) -> ProvisionResult:
-    """Sync MumbleUser rows to match eligibility from BG's cached pilot snapshot."""
+    """Sync MumbleUser rows to match eligibility from BG's cached pilot snapshot.
+
+    When ``pkid_filter`` is set, only the matching account is processed —
+    used by /v1/registrations/sync to provision a single eligible pilot on
+    demand when the periodic provisioner hasn't caught up yet. The full-
+    snapshot path is still the source of truth; this is just a low-latency
+    fallback that activates the user-visible flow without waiting for the
+    next reconcile cycle.
+    """
     result = ProvisionResult(errors=[])
 
     if server is None:
@@ -196,7 +205,20 @@ def provision_registrations(
     eligible_user_ids = set(eligible_by_pkid)
     blocked_user_ids = {int(entry['pkid']) for entry in blocked}
 
-    accounts_by_pkid = {int(account.pkid): account for account in snapshot.accounts}
+    if pkid_filter is not None:
+        # Restrict downstream loops to the requested pilot. Snapshot-wide
+        # display/eve resolution below is then naturally scoped because
+        # accounts_by_pkid is also pruned.
+        eligible_user_ids &= {int(pkid_filter)}
+        blocked_user_ids &= {int(pkid_filter)}
+        accounts_by_pkid = {
+            int(pkid_filter): account
+            for account in snapshot.accounts
+            if int(account.pkid) == int(pkid_filter)
+        }
+    else:
+        accounts_by_pkid = {int(account.pkid): account for account in snapshot.accounts}
+
     character_ids: set[int] = set()
     corporation_ids: set[int] = set()
     alliance_ids: set[int] = set()
@@ -238,9 +260,12 @@ def provision_registrations(
                 PilotAccountCache.objects.filter(pkid=pkid).update(display_name=resolved_display)
 
     server_ids = [int(item.id) for item in servers]
+    existing_qs = MumbleUser.objects.filter(server_id__in=server_ids).select_related('user', 'server')
+    if pkid_filter is not None:
+        existing_qs = existing_qs.filter(user_id=int(pkid_filter))
     existing = {
         (int(mu.server_id), int(mu.user_id)): mu
-        for mu in MumbleUser.objects.filter(server_id__in=server_ids).select_related('user', 'server')
+        for mu in existing_qs
     }
 
     auth_user_cache: dict[int, User] = {}

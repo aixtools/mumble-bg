@@ -11,6 +11,7 @@ class MurmurSyncError(RuntimeError):
 
 
 _DISABLED_COMMENT_MARKER = '[bg-disabled]'
+_TEMP_DISPLAY_NAME_PREFIX = '[temp] '
 
 
 def _load_slice():
@@ -103,11 +104,20 @@ def _find_existing_userid(server_proxy, username, preferred_userid=None, aliases
     if preferred_userid is not None and preferred_userid in registered:
         return preferred_userid
 
-    candidates = {
-        str(value or '').strip().lower()
-        for value in [username, *(aliases or [])]
-        if str(value or '').strip()
-    }
+    # `[TEMP] …` names belong to expired/concurrent guest registrations and must
+    # never be treated as identity-bearing — aliasing onto them lets a fresh
+    # temp redeem hijack a different user's Murmur registration via
+    # updateRegistration. The username candidate is still considered (in case
+    # the active row's own UserName starts with the prefix).
+    candidates = set()
+    primary = str(username or '').strip().lower()
+    if primary:
+        candidates.add(primary)
+    for alias in aliases or ():
+        normalized = str(alias or '').strip().lower()
+        if not normalized or normalized.startswith(_TEMP_DISPLAY_NAME_PREFIX):
+            continue
+        candidates.add(normalized)
     if not candidates:
         return None
 
@@ -117,16 +127,37 @@ def _find_existing_userid(server_proxy, username, preferred_userid=None, aliases
     return None
 
 
-def sync_murmur_registration(mumble_user, password=None, *, create_password=None, return_details=False):
+def sync_murmur_registration(
+    mumble_user,
+    password=None,
+    *,
+    create_password=None,
+    return_details=False,
+    for_temporary=False,
+):
     try:
         communicator, M, server_proxy = _open_target_server(mumble_user.server)
         try:
+            # Temp guest flows must never match an existing registration via
+            # display_name aliases — doing so causes updateRegistration to
+            # overwrite a real pilot's Murmur record. Pass aliases=None and
+            # rely on the generated `temp_…` username being unique.
+            alias_list = None if for_temporary else [mumble_user.display_name]
             target_userid = _find_existing_userid(
                 server_proxy,
                 mumble_user.username,
                 preferred_userid=mumble_user.mumble_userid,
-                aliases=[mumble_user.display_name],
+                aliases=alias_list,
             )
+            if for_temporary and target_userid is not None:
+                # Extremely unlikely: the generated temp_<stem>_<token>_<hex>
+                # username collided with an existing Murmur UserName. Refuse
+                # to overwrite — the caller will surface a clean error and
+                # the atomic block will roll back the sqlite row.
+                raise MurmurSyncError(
+                    f'Temporary username {mumble_user.username} collided with an '
+                    f'existing Murmur registration on {mumble_user.server.name}'
+                )
             created = target_userid is None
             effective_password = password
             if target_userid is None and effective_password is None:
