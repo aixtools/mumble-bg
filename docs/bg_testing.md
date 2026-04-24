@@ -4,9 +4,9 @@ This document groups the BG-side inspection and testing commands by dependency.
 
 The key distinction is:
 
-- standalone BG tests: no Cube/mockcube/FG required
+- standalone BG tests: no host emulator, Cube, or FG required
 - cached-FG-data tests: no live FG process required, but BG must already hold pilot snapshot / ACL data
-- end-to-end tests: require Cube or mockcube with FG installed and talking to BG
+- end-to-end tests: require the host emulator used for integration testing, with FG installed and talking to BG
 
 ## 1. Standalone BG Tests
 
@@ -91,7 +91,7 @@ Normally that data arrives from FG, but it may also be loaded manually through B
 
 If BG has never received FG data, these endpoints will either return empty results or reflect only locally-created BG state.
 
-## 3. End-to-End Tests That Require Cube or mockcube + FG
+## 3. End-to-End Tests That Require the Host Emulator + FG
 
 These tests exercise the real FG/BG boundary and require the host-side app.
 
@@ -138,7 +138,7 @@ These tests exercise the real FG/BG boundary and require the host-side app.
 - BG-vs-ICE comparison
 - per-pilot registration inspection
 
-### Live Cube/mockcube + FG required
+### Live host emulator + FG required
 
 - ACL admin UI behavior
 - `/profile/` panel behavior
@@ -158,4 +158,4 @@ Recommended progression:
 7. feed BG with FG data
 8. `provision_registrations --apply`
 9. `list_acl_to_ice`
-10. end-to-end UI checks from Cube/mockcube
+10. end-to-end UI checks from the host emulator used for integration testing
