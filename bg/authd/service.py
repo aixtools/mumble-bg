@@ -483,25 +483,68 @@ def _schedule_deferred_provision(bg_row_id, username, display_name, M, srv):
     t.start()
 
 
+def _find_existing_mumble_userid(srv, username, display_name):
+    """Return an existing Murmur registration id matching username/display_name, or None."""
+    try:
+        registered = srv.getRegisteredUsers('') or {}
+    except Exception:
+        logger.exception('Failed to list Murmur registrations while searching for %s', username)
+        return None
+    candidates = {
+        str(value or '').strip().lower()
+        for value in (username, display_name)
+        if str(value or '').strip()
+    }
+    if not candidates:
+        return None
+    for registered_userid, registered_name in registered.items():
+        if str(registered_name or '').strip().lower() in candidates:
+            return int(registered_userid)
+    return None
+
+
+def _store_mumble_userid(bg_row_id, mumble_userid):
+    now = datetime.now(timezone.utc)
+    conn = get_db_connection()
+    try:
+        with _cursor(conn) as cur:
+            _execute(cur, conn, UPDATE_MUMBLE_USERID_QUERY, (int(mumble_userid), now, bg_row_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _provision_murmur_registration(bg_row_id, username, display_name, M, srv):
     """Register the user in Murmur via ICE and store the mumble_userid in BG."""
     try:
+        existing = _find_existing_mumble_userid(srv, username, display_name)
+        if existing is not None:
+            _store_mumble_userid(bg_row_id, existing)
+            logger.info(
+                'Adopted existing Murmur registration for %s: mumble_userid=%d',
+                username, existing,
+            )
+            return existing
+
         info = {
             M.UserInfo.UserName: username,
             M.UserInfo.UserPassword: uuid.uuid4().hex,
         }
         if display_name:
             info[M.UserInfo.UserComment] = display_name
-        mumble_userid = srv.registerUser(info)
+        try:
+            mumble_userid = srv.registerUser(info)
+        except M.InvalidUserException:
+            # Murmur rejects registerUser for names claimed by the active ICE
+            # authenticator (i.e. us). Treat as idempotent: leave mumble_userid
+            # unset so the next auth retries; the auth path itself still works.
+            logger.debug(
+                'Murmur refused registerUser for %s (InvalidUserException); leaving mumble_userid unset',
+                username,
+            )
+            return None
         if mumble_userid is not None and mumble_userid >= 0:
-            now = datetime.now(timezone.utc)
-            conn = get_db_connection()
-            try:
-                with _cursor(conn) as cur:
-                    _execute(cur, conn, UPDATE_MUMBLE_USERID_QUERY, (mumble_userid, now, bg_row_id))
-                conn.commit()
-            finally:
-                conn.close()
+            _store_mumble_userid(bg_row_id, mumble_userid)
             logger.info('Provisioned Murmur registration for %s: mumble_userid=%d', username, mumble_userid)
             return mumble_userid
     except Exception:
@@ -831,7 +874,8 @@ def _register_authenticator(communicator, adapter, M, ScopedAuthenticator, *,
                             server_id, ice_host, ice_port, ice_secret, virtual_server_id):
     """Connect to a Murmur server and register a scoped authenticator.
 
-    Returns the server proxy on success so the caller can health-check it later.
+    Returns a list of (srv_proxy, auth_proxy) pairs so the caller can
+    re-arm setAuthenticator on every health tick without leaking servants.
     """
     meta, _protocol, _attempts = connect_meta_with_fallback(
         communicator, M, host=ice_host, port=ice_port, secret=ice_secret or '',
@@ -849,15 +893,119 @@ def _register_authenticator(communicator, adapter, M, ScopedAuthenticator, *,
         servers = [s.ice_context({"secret": ice_secret}) for s in servers]
 
     target_servers = select_target_servers(servers, virtual_server_id)
-    registered_proxies = []
+    registered_pairs = []
     for srv in target_servers:
         auth_obj = ScopedAuthenticator(server_id, M, srv)
-        auth_proxy = adapter.addWithUUID(auth_obj)
-        srv.setAuthenticator(M.ServerUpdatingAuthenticatorPrx.uncheckedCast(auth_proxy))
+        base_proxy = adapter.addWithUUID(auth_obj)
+        auth_proxy = M.ServerUpdatingAuthenticatorPrx.uncheckedCast(base_proxy)
+        srv.setAuthenticator(auth_proxy)
         logger.info('Authenticator registered for mumble server %d on %s:%s (db server_id=%d)',
                     srv.id(), ice_host, ice_port, server_id)
-        registered_proxies.append(srv)
-    return registered_proxies
+        registered_pairs.append((srv, auth_proxy))
+    return registered_pairs
+
+
+def _snapshot_uptimes(pairs):
+    """Snapshot srv.getUptime() per virtual server id, skipping any that fail."""
+    snapshot = {}
+    for srv, _auth_proxy in pairs:
+        try:
+            snapshot[int(srv.id())] = int(srv.getUptime())
+        except Exception:
+            # If we can't read uptime, leave the entry absent — the next tick's
+            # setAuthenticator will surface any real problem.
+            continue
+    return snapshot
+
+
+def _detect_restart(pairs, last_uptime, interval_seconds):
+    """Return True if any virtual server's uptime regressed vs last snapshot."""
+    margin = max(int(interval_seconds) - 5, 1)
+    for srv, _auth_proxy in pairs:
+        try:
+            vid = int(srv.id())
+            current = int(srv.getUptime())
+        except Exception:
+            continue
+        previous = last_uptime.get(vid)
+        if previous is None:
+            continue
+        # Uptime decreased, or advanced by far less than the tick interval,
+        # implies the virtual server restarted between ticks.
+        if current < previous or (current - previous) < margin:
+            return True
+    return False
+
+
+def _run_health_tick(communicator, adapter, M, ScopedAuthenticator, *,
+                     server_id, state, live_servers):
+    """Re-arm the authenticator on every tick; reconnect on failure."""
+    config = state['config']
+    _, ice_host, ice_port, ice_secret, virtual_server_id = config
+    pairs = state['pairs']
+    health_interval = int(os.environ.get('BG_AUTHD_HEALTH_INTERVAL', '60'))
+
+    restart_detected = _detect_restart(pairs, state.get('last_uptime', {}), health_interval)
+    if restart_detected:
+        logger.info(
+            'Murmur restart detected for server_id=%d (%s:%s); clearing caches',
+            server_id, ice_host, ice_port,
+        )
+        _clear_server_mumble_userids(server_id)
+        with _validated_lock:
+            _validated_ids.clear()
+
+    try:
+        for srv, auth_proxy in pairs:
+            srv.ice_invocationTimeout(5000).setAuthenticator(auth_proxy)
+        state['last_uptime'] = _snapshot_uptimes(pairs)
+        state['failures'] = 0
+        return
+    except Exception:
+        logger.warning(
+            'Health tick re-arm failed for server_id=%d (%s:%s); reconnecting',
+            server_id, ice_host, ice_port,
+        )
+
+    try:
+        new_pairs = _register_authenticator(
+            communicator, adapter, M, ScopedAuthenticator,
+            server_id=server_id, ice_host=ice_host, ice_port=ice_port,
+            ice_secret=ice_secret, virtual_server_id=virtual_server_id,
+        )
+    except IceMetaConnectionError as exc:
+        # Emit the detailed TLS/ICE diagnostics before falling through to the
+        # generic failure counter — otherwise an operator only sees a
+        # stacktrace from the `except Exception` arm below.
+        _log_ice_meta_connection_failure(exc, server_id=server_id, ice_host=ice_host, ice_port=ice_port)
+        state['failures'] = state.get('failures', 0) + 1
+        return
+    except Exception:
+        state['failures'] = state.get('failures', 0) + 1
+        level = logging.ERROR if state['failures'] >= 5 else logging.WARNING
+        logger.log(
+            level,
+            'Re-registration failed for server_id=%d (%s:%s); consecutive failures=%d',
+            server_id, ice_host, ice_port, state['failures'],
+            exc_info=True,
+        )
+        return
+
+    for old_srv, old_proxy in pairs:
+        try:
+            adapter.remove(old_proxy.ice_getIdentity())
+        except Exception:
+            pass
+
+    live_servers[server_id] = {
+        'config': config,
+        'pairs': new_pairs,
+        'last_uptime': _snapshot_uptimes(new_pairs),
+        'failures': 0,
+    }
+    _clear_server_mumble_userids(server_id)
+    with _validated_lock:
+        _validated_ids.clear()
 
 
 def main():
@@ -900,17 +1048,27 @@ def main():
         )
         adapter.activate()
 
-        # Initial registration — maps server_id to (config, [server_proxies])
-        live_servers: dict[int, tuple[tuple, list]] = {}
+        # live_servers[server_id] = {
+        #   'config': config,
+        #   'pairs': [(srv, auth_proxy), ...],
+        #   'last_uptime': {virtual_id: seconds},
+        #   'failures': consecutive re-register failures,
+        # }
+        live_servers: dict[int, dict] = {}
         for config in server_configs:
             server_id, ice_host, ice_port, ice_secret, virtual_server_id = config
             try:
-                proxies = _register_authenticator(
+                pairs = _register_authenticator(
                     communicator, adapter, M, ScopedAuthenticator,
                     server_id=server_id, ice_host=ice_host, ice_port=ice_port,
                     ice_secret=ice_secret, virtual_server_id=virtual_server_id,
                 )
-                live_servers[server_id] = (config, proxies)
+                live_servers[server_id] = {
+                    'config': config,
+                    'pairs': pairs,
+                    'last_uptime': _snapshot_uptimes(pairs),
+                    'failures': 0,
+                }
             except IceMetaConnectionError as exc:
                 _log_ice_meta_connection_failure(exc, server_id=server_id, ice_host=ice_host, ice_port=ice_port)
             except Exception:
@@ -923,33 +1081,13 @@ def main():
         logger.info('mumble-bg authd running (%d server(s)). Health check every %ds.',
                     len(live_servers), health_check_interval)
 
-        # Health-check loop: verify connections, re-register on failure.
         while True:
             time.sleep(health_check_interval)
-            for server_id, (config, proxies) in list(live_servers.items()):
-                _, ice_host, ice_port, ice_secret, virtual_server_id = config
-                for proxy in proxies:
-                    try:
-                        proxy.ice_invocationTimeout(5000).id()
-                    except Exception:
-                        logger.warning('Health check failed for server_id=%d (%s:%s), re-registering...',
-                                      server_id, ice_host, ice_port)
-                        try:
-                            new_proxies = _register_authenticator(
-                                communicator, adapter, M, ScopedAuthenticator,
-                                server_id=server_id, ice_host=ice_host, ice_port=ice_port,
-                                ice_secret=ice_secret, virtual_server_id=virtual_server_id,
-                            )
-                            live_servers[server_id] = (config, new_proxies)
-                            _clear_server_mumble_userids(server_id)
-                            with _validated_lock:
-                                _validated_ids.clear()
-                        except IceMetaConnectionError as exc:
-                            _log_ice_meta_connection_failure(exc, server_id=server_id, ice_host=ice_host, ice_port=ice_port)
-                        except Exception:
-                            logger.exception('Re-registration failed for server_id=%d (%s:%s)',
-                                           server_id, ice_host, ice_port)
-                        break  # Don't check remaining proxies for this server
+            for server_id, state in list(live_servers.items()):
+                _run_health_tick(
+                    communicator, adapter, M, ScopedAuthenticator,
+                    server_id=server_id, state=state, live_servers=live_servers,
+                )
 
 
 if __name__ == '__main__':
