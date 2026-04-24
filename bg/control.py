@@ -11,6 +11,7 @@ from uuid import UUID
 
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
+from django.db.transaction import TransactionManagementError
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -508,9 +509,15 @@ def _create_guest_auth_user(display_name: str, token: str) -> User:
         if User.objects.filter(username=username).exists():
             continue
         try:
-            user = User(username=username, first_name=str(display_name or '')[:150])
-            user.set_unusable_password()
-            user.save()
+            # Nested atomic() opens a savepoint so a failed save (e.g.,
+            # auth_user_id_seq drift causing a PK collision) rolls back only
+            # this attempt, not the enclosing transaction. Without this, the
+            # outer atomic block in the caller would be poisoned and every
+            # subsequent ORM call would raise TransactionManagementError.
+            with transaction.atomic():
+                user = User(username=username, first_name=str(display_name or '')[:150])
+                user.set_unusable_password()
+                user.save()
         except IntegrityError:
             continue
         return user
@@ -692,7 +699,6 @@ def registrations_sync(request):
         payload, request_id, requested_by, _ = _sync_context(request)
         _require_requested_by(requested_by)
         server = _SERVER_RESOLVER.resolve(payload)
-        mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
         del auth_source  # validated, reserved for future audit logging
     except _BadRequest as exc:
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
@@ -702,6 +708,42 @@ def registrations_sync(request):
         return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
     except _NotFound as exc:
         return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
+
+    try:
+        mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
+    except _NotFound:
+        # Auto-provision-on-miss: covers the case where the FG-driven
+        # activate flow runs faster than BG's periodic provisioner. If the
+        # pilot is already eligible per the cached snapshot, this creates
+        # the row inline and the resolver succeeds on the second try. If
+        # the pilot isn't eligible (or no snapshot is loaded), the second
+        # resolve still raises and we surface the original 404.
+        try:
+            pkid_value = _coerce_int(payload.get('pkid'), field='pkid')
+        except _BadRequest as exc:
+            return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
+        try:
+            from bg.provisioner import provision_registrations as _provision
+
+            _provision(server=server, pkid_filter=pkid_value)
+        except Exception as exc:  # noqa: BLE001
+            return _response_authed(
+                control_key_id,
+                request_id,
+                'failed',
+                message=f'Auto-provision for pkid={pkid_value} failed: {exc}',
+                code=HTTPStatus.BAD_GATEWAY,
+            )
+        try:
+            mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
+        except _NotFound as exc:
+            return _response_authed(
+                control_key_id,
+                request_id,
+                'not_found',
+                message=str(exc),
+                code=HTTPStatus.NOT_FOUND,
+            )
 
     if payload.get('dry_run'):
         return _response_authed(
@@ -1050,7 +1092,14 @@ def temp_links_redeem(request):
                 temporary_expires_at=expires_at,
                 is_active=False,
             )
-        murmur_userid = sync_murmur_registration(created_registration, password=password)
+        murmur_userid = sync_murmur_registration(
+            created_registration,
+            password=password,
+            for_temporary=True,
+        )
+        created_registration.mumble_userid = murmur_userid
+        created_registration.is_active = True
+        created_registration.save(update_fields=['mumble_userid', 'is_active', 'updated_at'])
     except MurmurSyncError as exc:
         if created_registration is not None:
             created_registration.delete()
@@ -1063,10 +1112,26 @@ def temp_links_redeem(request):
             message=f'Failed to provision temporary registration: {exc}',
             code=HTTPStatus.BAD_GATEWAY,
         )
-
-    created_registration.mumble_userid = murmur_userid
-    created_registration.is_active = True
-    created_registration.save(update_fields=['mumble_userid', 'is_active', 'updated_at'])
+    except (IntegrityError, TransactionManagementError) as exc:
+        # Keeps a stray sequence drift or partial-unique-index collision
+        # from surfacing as a raw 500 to the guest browser.
+        if created_registration is not None:
+            try:
+                created_registration.delete()
+            except Exception:  # noqa: BLE001
+                pass
+        if created_user is not None:
+            try:
+                created_user.delete()
+            except Exception:  # noqa: BLE001
+                pass
+        return _response_authed(
+            control_key_id,
+            request_id,
+            'failed',
+            message=f'Temporary registration could not be committed: {exc}',
+            code=HTTPStatus.CONFLICT,
+        )
     return _response_authed(
         control_key_id,
         request_id,
