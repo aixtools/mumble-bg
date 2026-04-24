@@ -34,11 +34,58 @@ from bg.db import (
 )
 from bg.ice_inventory import sync_ice_inventory_from_env
 from bg.ice import load_ice_module
-from bg.ice_meta import build_ice_client_props, connect_meta_with_fallback
+from bg.ice_meta import (
+    IceMetaConnectionError,
+    build_ice_client_props,
+    connect_meta_with_fallback,
+    ice_client_tls_status,
+    ice_connection_hint,
+)
 from bg.passwords import verify_murmur_password
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def _log_ice_client_tls_startup() -> None:
+    status = ice_client_tls_status()
+    logger.info(
+        'BG ICE client TLS status: ice_cert_present=%s ice_key_present=%s '
+        'ice_ca_present=%s ice_key_passphrase_present=%s ice_cert_exists=%s '
+        'ice_key_exists=%s ice_ca_exists=%s',
+        status.get('ice_cert_present'),
+        status.get('ice_key_present'),
+        status.get('ice_ca_present'),
+        status.get('ice_key_passphrase_present'),
+        status.get('ice_cert_exists'),
+        status.get('ice_key_exists'),
+        status.get('ice_ca_exists'),
+    )
+
+
+def _log_ice_meta_connection_failure(exc: IceMetaConnectionError, *, server_id: int, ice_host: str, ice_port: int) -> None:
+    ssl_attempt = exc.attempt_for("ssl")
+    tcp_attempt = exc.attempt_for("tcp")
+    status = ice_client_tls_status()
+    logger.error(
+        'ICE connection failed for server_id=%d (%s:%s) ssl_result=%s tcp_result=%s '
+        'ice_cert_present=%s ice_key_present=%s ice_ca_present=%s '
+        'ice_key_passphrase_present=%s ice_cert_exists=%s ice_key_exists=%s '
+        'ice_ca_exists=%s hint=%s',
+        server_id,
+        ice_host,
+        ice_port,
+        ssl_attempt.category if ssl_attempt else 'not_attempted',
+        tcp_attempt.category if tcp_attempt else 'not_attempted',
+        status.get('ice_cert_present'),
+        status.get('ice_key_present'),
+        status.get('ice_ca_present'),
+        status.get('ice_key_passphrase_present'),
+        status.get('ice_cert_exists'),
+        status.get('ice_key_exists'),
+        status.get('ice_ca_exists'),
+        ice_connection_hint(attempts=exc.attempts),
+    )
 
 
 BG_DB_ADAPTER = MmblBgDBA(
@@ -845,6 +892,7 @@ def main():
 
     callback_endpoint = os.environ.get('BG_AUTHD_CALLBACK_ENDPOINT', 'tcp -h 0.0.0.0').strip()
     health_check_interval = int(os.environ.get('BG_AUTHD_HEALTH_INTERVAL', '60'))
+    _log_ice_client_tls_startup()
 
     with Ice.initialize(build_ice_client_props()) as communicator:
         adapter = communicator.createObjectAdapterWithEndpoints(
@@ -863,6 +911,8 @@ def main():
                     ice_secret=ice_secret, virtual_server_id=virtual_server_id,
                 )
                 live_servers[server_id] = (config, proxies)
+            except IceMetaConnectionError as exc:
+                _log_ice_meta_connection_failure(exc, server_id=server_id, ice_host=ice_host, ice_port=ice_port)
             except Exception:
                 logger.exception('Error setting up authenticator for server_id=%d (%s:%s)', server_id, ice_host, ice_port)
 
@@ -894,6 +944,8 @@ def main():
                             _clear_server_mumble_userids(server_id)
                             with _validated_lock:
                                 _validated_ids.clear()
+                        except IceMetaConnectionError as exc:
+                            _log_ice_meta_connection_failure(exc, server_id=server_id, ice_host=ice_host, ice_port=ice_port)
                         except Exception:
                             logger.exception('Re-registration failed for server_id=%d (%s:%s)',
                                            server_id, ice_host, ice_port)

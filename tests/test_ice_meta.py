@@ -1,6 +1,15 @@
+import tempfile
 from django.test import SimpleTestCase
 
-from bg.ice_meta import IceMetaConnectionError, build_ice_client_props, connect_meta_with_fallback
+from bg.ice_meta import (
+    IceMetaAttempt,
+    IceMetaConnectionError,
+    build_ice_client_props,
+    classify_ice_connection_error,
+    connect_meta_with_fallback,
+    ice_client_tls_status,
+    ice_connection_hint,
+)
 
 
 class _FakeProxy:
@@ -79,3 +88,51 @@ class IceMetaFallbackTest(SimpleTestCase):
         message = str(exc_info.exception)
         self.assertIn("ssl: ssl failed", message)
         self.assertIn("tcp: tcp failed", message)
+        self.assertEqual(exc_info.exception.attempt_for("ssl").category, "ssl_handshake_failed")
+        self.assertEqual(exc_info.exception.attempt_for("tcp").category, "unknown")
+
+    def test_classify_ice_connection_error_detects_client_certificate_required(self):
+        category = classify_ice_connection_error(
+            "SSL protocol error during read: tlsv13 alert certificate required: SSL alert number 116"
+        )
+        self.assertEqual(category, "client_certificate_required")
+
+    def test_classify_ice_connection_error_detects_connection_refused(self):
+        category = classify_ice_connection_error("::Ice::ConnectFailedException: Connection refused")
+        self.assertEqual(category, "connect_refused")
+
+    def test_ice_connection_hint_prefers_client_certificate_guidance(self):
+        exc = IceMetaConnectionError(
+            host="127.0.0.1",
+            port=6502,
+            attempts=(
+                IceMetaAttempt(
+                    protocol="ssl",
+                    category="client_certificate_required",
+                    error="tls alert certificate required",
+                ),
+                IceMetaAttempt(
+                    protocol="tcp",
+                    category="connect_timeout",
+                    error="timeout",
+                ),
+            ),
+        )
+        attempts = exc.attempts
+        self.assertIn("client certificate", ice_connection_hint(attempts=attempts))
+
+    def test_ice_client_tls_status_reports_file_presence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cert = f"{tmpdir}/cert.pem"
+            key = f"{tmpdir}/key.pem"
+            ca = f"{tmpdir}/ca.pem"
+            for path in (cert, key, ca):
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("x")
+            status = ice_client_tls_status(tls_cert=cert, tls_key=key, tls_ca=ca)
+        self.assertTrue(status["ice_cert_present"])
+        self.assertTrue(status["ice_key_present"])
+        self.assertTrue(status["ice_ca_present"])
+        self.assertTrue(status["ice_cert_exists"])
+        self.assertTrue(status["ice_key_exists"])
+        self.assertTrue(status["ice_ca_exists"])
