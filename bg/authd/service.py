@@ -335,6 +335,20 @@ def select_target_servers(booted_servers, virtual_server_id):
 # DB.  Distinct from None, which means the user exists but the password failed.
 _USER_NOT_FOUND = object()
 
+# Service accounts (FCRelay standing-bridge relay bots) connect under names with
+# this prefix. They must NOT be auto-provisioned/registered in Murmur: they keep
+# mumble_userid NULL by design, so without this guard every connect schedules a
+# deferred ICE registerUser, which floods Murmur's single-thread ICE dispatch
+# during a many-bot connect storm. Identity + groups come from the authenticator
+# each connect, so no persistent Murmur registration is needed. NOTE: keyed on the
+# username prefix specifically (not "non-pilot"), so temp guest links and the
+# translator bot — which DO need provisioning — are unaffected.
+_SERVICE_BOT_USERNAME_PREFIX = os.environ.get('BG_SERVICE_BOT_PREFIX', 'FCRelay-')
+
+
+def _is_service_bot_name(name):
+    return bool(_SERVICE_BOT_USERNAME_PREFIX) and bool(name) and name.startswith(_SERVICE_BOT_USERNAME_PREFIX)
+
 
 def authenticate(username, password, server_id, certhash=''):
     """
@@ -391,7 +405,7 @@ def authenticate(username, password, server_id, certhash=''):
         auth_method = 'password'
     else:
         auth_method = 'cert'
-    if mumble_userid is None:
+    if mumble_userid is None and not _is_service_bot_name(username):
         logger.warning(
             'User %s on server_id=%s is missing mumble_userid; returning local row id temporarily',
             username,
@@ -818,7 +832,7 @@ def _make_scoped_authenticator(M):
             if result is None:
                 return (-1, None, None)
             bg_row_id, auth_user_id, display_name, groups, pilot_user_id, auth_method = result
-            if auth_user_id == bg_row_id:
+            if auth_user_id == bg_row_id and not _is_service_bot_name(name):
                 _schedule_deferred_provision(bg_row_id, name, display_name, self._M, self._srv)
             else:
                 now = time.time()
