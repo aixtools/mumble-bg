@@ -549,6 +549,7 @@ BG_AUDIT_ACTION_PILOT_ENABLE = 'pilot_enable'
 BG_AUDIT_ACTION_PILOT_PWRESET = 'pilot_pwreset'
 BG_AUDIT_ACTION_PILOT_LOGIN = 'pilot_login'
 BG_AUDIT_ACTION_PILOT_DISPLAY_NAME_UPDATE = 'pilot_display_name_update'
+BG_AUDIT_ACTION_PILOT_CERTHASH_CLEAR = 'pilot_certhash_clear'
 
 BG_AUDIT_ACTION_CHOICES = [
     (BG_AUDIT_ACTION_ACL_SYNC, 'ACL Sync'),
@@ -558,6 +559,7 @@ BG_AUDIT_ACTION_CHOICES = [
     (BG_AUDIT_ACTION_PILOT_PWRESET, 'Pilot Password Reset'),
     (BG_AUDIT_ACTION_PILOT_LOGIN, 'Pilot Authenticated'),
     (BG_AUDIT_ACTION_PILOT_DISPLAY_NAME_UPDATE, 'Pilot Display Name Updated'),
+    (BG_AUDIT_ACTION_PILOT_CERTHASH_CLEAR, 'Pilot Certhash Cleared'),
 ]
 
 

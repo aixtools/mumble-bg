@@ -17,6 +17,7 @@ urlpatterns = [
     path('v1/registrations/disable', control.registrations_disable),
     path('v1/admin-membership/sync', control.admin_membership_sync),
     path('v1/password-reset', control.password_reset),
+    path('v1/clear-certhash', control.clear_certhash),
     path('v1/temp-links/redeem', control.temp_links_redeem),
     path('v1/temp-links/revoke', control.temp_links_revoke),
     path('v1/control-key/bootstrap', control.control_key_bootstrap),

@@ -33,6 +33,7 @@ from bg.murmur_inventory import MurmurInventoryError, get_server_inventory_snaps
 from bg.state.models import (
     AccessRule,
     AccessRuleSyncAudit,
+    BG_AUDIT_ACTION_PILOT_CERTHASH_CLEAR,
     ENTITY_TYPE_ALLIANCE,
     ENTITY_TYPE_CORPORATION,
     ENTITY_TYPE_PILOT,
@@ -42,6 +43,7 @@ from bg.state.models import (
     MumbleServer,
     MumbleSession,
     MumbleUser,
+    append_bg_audit,
 )
 from fgbg_common.entity_types import CATEGORY_TO_TYPE, TYPE_TO_CATEGORY, VALID_CATEGORIES
 from fgbg_common.snapshot import PilotSnapshot
@@ -1043,6 +1045,64 @@ def password_reset(request):
         synced_servers=synced_servers,
         ice_failures=failures,
         ice_down_servers=down_servers,
+    )
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def clear_certhash(request):
+    """Clear a pilot's stored Murmur certhash on a specific server.
+
+    Murmur reads ``certhash`` lazily on next reconnect, so no ICE call is
+    needed — the next time the user connects with their cert, Murmur will
+    rebind it to the registered account. The companion FG view at
+    ``mumble:admin_clear_certhash`` is the only intended caller.
+    """
+    try:
+        auth_source, control_key_id = _require_control_auth(request)
+        payload, request_id, requested_by, _ = _sync_context(request)
+        _require_requested_by(requested_by)
+        server = _SERVER_RESOLVER.resolve(payload)
+        mumble_user = _MUMBLE_USER_RESOLVER.resolve(server=server, payload=payload)
+        del auth_source
+    except _BadRequest as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.BAD_REQUEST)
+    except _Unauthorized as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+    except _Forbidden as exc:
+        return _response('unknown', 'rejected', message=str(exc), code=HTTPStatus.FORBIDDEN)
+    except _NotFound as exc:
+        return _response('unknown', 'not_found', message=str(exc), code=HTTPStatus.NOT_FOUND)
+
+    had_certhash = bool(mumble_user.certhash)
+    if had_certhash:
+        mumble_user.certhash = ''
+        mumble_user.save(update_fields=['certhash', 'updated_at'])
+
+    append_bg_audit(
+        action=BG_AUDIT_ACTION_PILOT_CERTHASH_CLEAR,
+        request_id=request_id,
+        requested_by=requested_by or '',
+        source='fg_control',
+        user_id=mumble_user.user_id,
+        server_name=str(server.name),
+        metadata={
+            'mumble_userid': mumble_user.mumble_userid,
+            'username': mumble_user.username,
+            'had_certhash': had_certhash,
+        },
+    )
+
+    return _response_authed(
+        control_key_id,
+        request_id,
+        'completed',
+        message='Certhash cleared' if had_certhash else 'Certhash already empty',
+        user_id=mumble_user.user_id,
+        server_name=str(server.name),
+        mumble_userid=mumble_user.mumble_userid,
+        username=mumble_user.username,
+        had_certhash=had_certhash,
     )
 
 
