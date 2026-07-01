@@ -38,6 +38,18 @@ class ProbePayloadShapeTest(TestCase):
         self.assertEqual(registration.get('server_id'), self.server.pk)
         self.assertNotIn('user_id', registration)
 
+    def test_registrations_payload_includes_groups(self):
+        # The FG group-sync sweep compares its computed groups against this
+        # field; if the payload omits it (always ''), every registration looks
+        # changed on every run and gets re-pushed forever. Round-trip it.
+        self.mumble_user.groups = 'Alliance,Corp,Member'
+        self.mumble_user.save(update_fields=['groups'])
+
+        response = self.client.get('/v1/registrations')
+        self.assertEqual(response.status_code, 200)
+        registration = response.json()['registrations'][0]
+        self.assertEqual(registration.get('groups'), 'Alliance,Corp,Member')
+
     def test_registrations_payload_includes_pkid(self):
         response = self.client.get('/v1/registrations')
         self.assertEqual(response.status_code, 200)
