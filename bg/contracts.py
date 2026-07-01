@@ -188,6 +188,7 @@ class MurmurRegistrationSnapshot:
     hashfn: str
     active_session_ids: tuple[int, ...] = field(default_factory=tuple)
     has_priority_speaker: bool = False
+    groups: str = ""
     pw_lastchanged: str | None = None
     last_authenticated: str | None = None
     last_connected: str | None = None
@@ -235,6 +236,7 @@ class MurmurRegistrationSnapshot:
             hashfn=str(getattr(row, "hashfn", "") or ""),
             active_session_ids=session_ids,
             has_priority_speaker=bool(has_priority_speaker),
+            groups=str(getattr(row, "groups", "") or ""),
             pw_lastchanged=(
                 getattr(row, "updated_at").isoformat()
                 if getattr(row, "updated_at", None) is not None
@@ -282,6 +284,7 @@ class MurmurRegistrationSnapshot:
             "active_session_ids": list(self.active_session_ids),
             "active_session_count": self.active_session_count,
             "has_priority_speaker": self.has_priority_speaker,
+            "groups": self.groups,
             "pw_lastchanged": self.pw_lastchanged,
             "last_authenticated": self.last_authenticated,
             "last_connected": self.last_connected,
