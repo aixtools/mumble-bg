@@ -57,6 +57,9 @@ def classify_ice_connection_error(error: str) -> str:
         return "certificate_rejected"
     if "connection refused" in lowered:
         return "connect_refused"
+    if "invocation" in lowered and ("timeout" in lowered or "timed out" in lowered):
+        # Reachable server, stalled dispatch — not a network problem.
+        return "invocation_timeout"
     if "timeout" in lowered:
         return "connect_timeout"
     if any(token in lowered for token in ("no route to host", "network is unreachable", "host is down")):
@@ -73,18 +76,37 @@ def ice_connection_hint(*, attempts: tuple[IceMetaAttempt, ...]) -> str:
         return "remote ICE requires a client certificate; configure BG_ICE_CERT_PATH/BG_ICE_KEY_PATH and ensure the server trusts BG's CA"
     if ssl_attempt and ssl_attempt.category == "certificate_rejected":
         return "remote ICE rejected BG's client certificate; verify BG_ICE_CA_PATH and the server trust chain"
+    if any(attempt.category == "invocation_timeout" for attempt in attempts):
+        return "remote ICE accepted the connection but did not answer within the invocation timeout; the server's ICE dispatch may be stalled"
     if tcp_attempt and tcp_attempt.category in {"connect_timeout", "connect_refused", "unreachable"}:
         return "tcp fallback is not reachable; verify the remote ICE tcp listener, firewall, and bind address"
     return "verify BG ICE client TLS settings and the remote ICE ssl/tcp listener configuration"
 
 
+def _timeout_ms_prop(env_var: str, default_ms: int) -> int:
+    try:
+        value = int(os.environ.get(env_var, "").strip())
+    except ValueError:
+        return default_ms
+    return value if value > 0 else default_ms
+
+
 def build_ice_client_props(*, tls_cert: str = "", tls_key: str = "", tls_ca: str = "") -> list[str]:
+    # Every outgoing invocation must be bounded: Murmur's ICE dispatch is
+    # single-threaded, and an unbounded call (getRegisteredUsers/registerUser/
+    # ...) parked behind a stalled dispatch blocks its caller forever. In the
+    # control server that pinned one HTTP request thread per hung call — each
+    # holding an idle DB connection — until Postgres ran out of slots.
+    invocation_timeout_ms = _timeout_ms_prop("BG_ICE_INVOCATION_TIMEOUT_MS", 30000)
+    connect_timeout_ms = _timeout_ms_prop("BG_ICE_CONNECT_TIMEOUT_MS", 10000)
     props = [
         "--Ice.ImplicitContext=Shared",
         "--Ice.Default.EncodingVersion=1.0",
         "--Ice.Plugin.IceSSL=IceSSL:createIceSSL",
         "--IceSSL.VerifyPeer=0",
         "--Ice.ACM.Client.Heartbeat=3",
+        f"--Ice.Default.InvocationTimeout={invocation_timeout_ms}",
+        f"--Ice.Override.ConnectTimeout={connect_timeout_ms}",
     ]
     cert = (tls_cert or os.environ.get("BG_ICE_CERT_PATH", "")).strip()
     key = (tls_key or os.environ.get("BG_ICE_KEY_PATH", "")).strip()

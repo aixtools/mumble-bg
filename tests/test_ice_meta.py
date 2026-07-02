@@ -1,4 +1,7 @@
+import os
 import tempfile
+from unittest import mock
+
 from django.test import SimpleTestCase
 
 from bg.ice_meta import (
@@ -55,6 +58,53 @@ class IceMetaFallbackTest(SimpleTestCase):
 
         self.assertIn("--Ice.Plugin.IceSSL=IceSSL:createIceSSL", props)
         self.assertIn("--IceSSL.VerifyPeer=0", props)
+
+    def test_build_ice_client_props_bounds_invocations_by_default(self):
+        with mock.patch.dict(os.environ):
+            os.environ.pop("BG_ICE_INVOCATION_TIMEOUT_MS", None)
+            os.environ.pop("BG_ICE_CONNECT_TIMEOUT_MS", None)
+            props = build_ice_client_props()
+
+        self.assertIn("--Ice.Default.InvocationTimeout=30000", props)
+        self.assertIn("--Ice.Override.ConnectTimeout=10000", props)
+
+    def test_classify_invocation_timeout_is_not_a_connect_problem(self):
+        category = classify_ice_connection_error(
+            "Ice.InvocationTimeoutException: invocation timed out"
+        )
+
+        self.assertEqual(category, "invocation_timeout")
+
+    def test_connection_hint_flags_stalled_dispatch(self):
+        attempts = (
+            IceMetaAttempt(
+                protocol="ssl",
+                category="invocation_timeout",
+                error="invocation timed out",
+            ),
+        )
+
+        self.assertIn("dispatch may be stalled", ice_connection_hint(attempts=attempts))
+
+    def test_build_ice_client_props_timeout_env_overrides(self):
+        with mock.patch.dict(os.environ, {
+            "BG_ICE_INVOCATION_TIMEOUT_MS": "45000",
+            "BG_ICE_CONNECT_TIMEOUT_MS": "5000",
+        }):
+            props = build_ice_client_props()
+
+        self.assertIn("--Ice.Default.InvocationTimeout=45000", props)
+        self.assertIn("--Ice.Override.ConnectTimeout=5000", props)
+
+    def test_build_ice_client_props_timeout_env_invalid_falls_back(self):
+        with mock.patch.dict(os.environ, {
+            "BG_ICE_INVOCATION_TIMEOUT_MS": "not-a-number",
+            "BG_ICE_CONNECT_TIMEOUT_MS": "-1",
+        }):
+            props = build_ice_client_props()
+
+        self.assertIn("--Ice.Default.InvocationTimeout=30000", props)
+        self.assertIn("--Ice.Override.ConnectTimeout=10000", props)
 
     def test_connect_meta_with_fallback_tries_ssl_then_tcp(self):
         communicator = _FakeCommunicator()
