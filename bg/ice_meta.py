@@ -78,13 +78,33 @@ def ice_connection_hint(*, attempts: tuple[IceMetaAttempt, ...]) -> str:
     return "verify BG ICE client TLS settings and the remote ICE ssl/tcp listener configuration"
 
 
+def _timeout_ms_prop(env_var: str, default_ms: int) -> int:
+    raw = (os.environ.get(env_var) or "").strip()
+    if not raw:
+        return default_ms
+    try:
+        value = int(raw)
+    except ValueError:
+        return default_ms
+    return value if value > 0 else default_ms
+
+
 def build_ice_client_props(*, tls_cert: str = "", tls_key: str = "", tls_ca: str = "") -> list[str]:
+    # Every outgoing invocation must be bounded: Murmur's ICE dispatch is
+    # single-threaded, and an unbounded call (getRegisteredUsers/registerUser/
+    # ...) parked behind a stalled dispatch blocks its caller forever. In the
+    # control server that pinned one HTTP request thread per hung call — each
+    # holding an idle DB connection — until Postgres ran out of slots.
+    invocation_timeout_ms = _timeout_ms_prop("BG_ICE_INVOCATION_TIMEOUT_MS", 30000)
+    connect_timeout_ms = _timeout_ms_prop("BG_ICE_CONNECT_TIMEOUT_MS", 10000)
     props = [
         "--Ice.ImplicitContext=Shared",
         "--Ice.Default.EncodingVersion=1.0",
         "--Ice.Plugin.IceSSL=IceSSL:createIceSSL",
         "--IceSSL.VerifyPeer=0",
         "--Ice.ACM.Client.Heartbeat=3",
+        f"--Ice.Default.InvocationTimeout={invocation_timeout_ms}",
+        f"--Ice.Override.ConnectTimeout={connect_timeout_ms}",
     ]
     cert = (tls_cert or os.environ.get("BG_ICE_CERT_PATH", "")).strip()
     key = (tls_key or os.environ.get("BG_ICE_KEY_PATH", "")).strip()
