@@ -57,6 +57,9 @@ def classify_ice_connection_error(error: str) -> str:
         return "certificate_rejected"
     if "connection refused" in lowered:
         return "connect_refused"
+    if "invocation" in lowered and ("timeout" in lowered or "timed out" in lowered):
+        # Reachable server, stalled dispatch — not a network problem.
+        return "invocation_timeout"
     if "timeout" in lowered:
         return "connect_timeout"
     if any(token in lowered for token in ("no route to host", "network is unreachable", "host is down")):
@@ -73,17 +76,16 @@ def ice_connection_hint(*, attempts: tuple[IceMetaAttempt, ...]) -> str:
         return "remote ICE requires a client certificate; configure BG_ICE_CERT_PATH/BG_ICE_KEY_PATH and ensure the server trusts BG's CA"
     if ssl_attempt and ssl_attempt.category == "certificate_rejected":
         return "remote ICE rejected BG's client certificate; verify BG_ICE_CA_PATH and the server trust chain"
+    if any(attempt.category == "invocation_timeout" for attempt in attempts):
+        return "remote ICE accepted the connection but did not answer within the invocation timeout; the server's ICE dispatch may be stalled"
     if tcp_attempt and tcp_attempt.category in {"connect_timeout", "connect_refused", "unreachable"}:
         return "tcp fallback is not reachable; verify the remote ICE tcp listener, firewall, and bind address"
     return "verify BG ICE client TLS settings and the remote ICE ssl/tcp listener configuration"
 
 
 def _timeout_ms_prop(env_var: str, default_ms: int) -> int:
-    raw = (os.environ.get(env_var) or "").strip()
-    if not raw:
-        return default_ms
     try:
-        value = int(raw)
+        value = int(os.environ.get(env_var, "").strip())
     except ValueError:
         return default_ms
     return value if value > 0 else default_ms

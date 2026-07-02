@@ -622,11 +622,23 @@ def _validate_and_repair_registration(bg_row_id, mumble_userid, username, displa
         with _validated_lock:
             _validated_ids[mumble_userid] = time.time()
         return  # registration exists
-    except Exception:
+    except M.InvalidUserException:
+        # The only signal that actually proves the registration is gone.
         logger.warning(
             'mumble_userid=%d for user %s (bg_row_id=%s) is stale; clearing and re-provisioning',
             mumble_userid, username, bg_row_id,
         )
+    except Exception:
+        # Timeouts / transport / secret errors don't prove the registration is
+        # missing — a stalled Murmur dispatch surfaces here as a bounded
+        # invocation timeout. Clearing on those would create duplicate
+        # registrations and pile more ICE calls onto the stalled dispatch, so
+        # skip this cycle and let the next auth (past the TTL) retry.
+        logger.warning(
+            'Could not validate mumble_userid=%d for user %s (bg_row_id=%s); skipping this cycle',
+            mumble_userid, username, bg_row_id, exc_info=True,
+        )
+        return
     _clear_mumble_userid(bg_row_id)
     _provision_murmur_registration(bg_row_id, username, display_name, M, srv)
 
@@ -971,6 +983,10 @@ def _run_health_tick(communicator, adapter, M, ScopedAuthenticator, *,
 
     try:
         for srv, auth_proxy in pairs:
+            # Intentionally tighter than the communicator-wide default: the
+            # health tick runs every BG_AUTHD_HEALTH_INTERVAL (60s) across all
+            # servers, so a slow re-arm should fail fast into the reconnect
+            # path rather than eat half the tick budget.
             srv.ice_invocationTimeout(5000).setAuthenticator(auth_proxy)
         state['last_uptime'] = _snapshot_uptimes(pairs)
         state['failures'] = 0
