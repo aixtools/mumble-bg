@@ -29,7 +29,8 @@ from bg.pilot.registrations import (
 from bg.contracts import MurmurRegistrationContractPatch, MurmurRegistrationSnapshot
 from bg.pilot_snapshot import store_pilot_snapshot
 from bg import control_keyring
-from bg.murmur_inventory import MurmurInventoryError, get_server_inventory_snapshot, warm_other_server_inventories_async
+from bg.murmur_inventory import MurmurInventoryError, get_server_inventory_snapshot, warm_other_server_inventories_async, _select_target_server
+from bg.pulse.service import _normalize_user_state, _resolve_mumble_user
 from bg.state.models import (
     AccessRule,
     AccessRuleSyncAudit,
@@ -1448,6 +1449,88 @@ def servers(request):
             'request_id': now().strftime('%Y%m%dT%H%M%SZ'),
             'servers': rows,
         }
+    )
+
+
+def _mumble_channel_path(channels: dict[int, tuple[str, int]], channel_id) -> str:
+    """Build a ``Parent/Child`` path string from a {id: (name, parent)} map."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    cur = int(channel_id) if channel_id is not None else 0
+    while cur in channels and cur not in seen and cur != 0:
+        seen.add(cur)
+        name, parent = channels[cur]
+        if name:
+            parts.append(name)
+        cur = parent
+    return '/'.join(reversed(parts))
+
+
+@require_http_methods(['GET'])
+def connected_users(request):
+    """Return every user currently connected across all active Murmur servers.
+
+    Read-only, auth-gated (counter-intel data). Cert hash and client IP come
+    straight off the live ICE ``User`` struct; each session is resolved to a
+    Cube user pk via its Murmur registration when it is a registered member
+    (guests resolve to null). One unreachable server is reported in
+    ``server_errors`` rather than failing the whole scan.
+    """
+    request_id = now().strftime('%Y%m%dT%H%M%SZ')
+    try:
+        auth_source, control_key_id = _require_control_auth(request)
+        del auth_source
+    except _Unauthorized as exc:
+        return _response(request_id, 'rejected', message=str(exc), code=HTTPStatus.UNAUTHORIZED)
+
+    users_out: list[dict[str, Any]] = []
+    server_errors: list[dict[str, Any]] = []
+    servers = list(MumbleServer.objects.filter(is_active=True).order_by('display_order', 'name'))
+    for server in servers:
+        try:
+            communicator, _protocol, target = _select_target_server(server)
+        except Exception as exc:  # noqa: BLE001 - one unreachable server shouldn't sink the scan
+            server_errors.append({'server_key': server.server_key, 'error': str(exc)})
+            continue
+        try:
+            channel_map = target.getChannels() or {}
+            channels = {int(cid): (str(c.name or ''), int(c.parent)) for cid, c in channel_map.items()}
+            raw_users = target.getUsers() or {}
+            for state in raw_users.values():
+                norm = _normalize_user_state(state)
+                mumble_user = _resolve_mumble_user(server, norm)
+                users_out.append(
+                    {
+                        'server_key': server.server_key,
+                        'session': norm.session_id,
+                        'mumble_userid': norm.mumble_userid,
+                        'cube_user_pk': mumble_user.user_id if mumble_user else None,
+                        'name': norm.username,
+                        'cert_hash': norm.cert_hash,
+                        'ip': norm.address,
+                        'channel_path': _mumble_channel_path(channels, norm.channel_id),
+                        'online_secs': norm.onlinesecs,
+                        'idle_secs': norm.idlesecs,
+                        'self_mute': norm.self_mute,
+                        'self_deaf': norm.self_deaf,
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001
+            server_errors.append({'server_key': server.server_key, 'error': str(exc)})
+        finally:
+            try:
+                communicator.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+
+    return _response_authed(
+        control_key_id,
+        request_id,
+        'completed',
+        scanned_at=now().isoformat(),
+        server_count=len(servers),
+        server_errors=server_errors,
+        users=users_out,
     )
 
 

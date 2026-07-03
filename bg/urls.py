@@ -28,6 +28,7 @@ urlpatterns = [
     path('v1/registrations', control.registrations),
     path('v1/health', control.health),
     path('v1/servers', control.servers),
+    path('v1/connected-users', control.connected_users),
     path('v1/servers/<slug:server_key>/inventory', control.server_inventory),
     path('v1/access-rules/sync', control.access_rules_sync),
     path('v1/eve-objects/sync', control.eve_objects_sync),
