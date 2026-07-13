@@ -3,7 +3,7 @@
 from django.http import HttpResponse
 from django.urls import path
 
-from . import control
+from . import control, shitspeak
 
 
 def _health(_request):
@@ -36,4 +36,5 @@ urlpatterns = [
     path('v1/eve-objects', control.eve_objects),
     path('v1/provision', control.provision),
     path('v1/public-key', control.public_key),
+    path('shitspeak/authenticate', shitspeak.authenticate),
 ]

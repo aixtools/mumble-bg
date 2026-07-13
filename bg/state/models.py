@@ -26,8 +26,21 @@ def stable_server_key(
 
 
 class MumbleServer(models.Model):
+    DRIVER_ICE = 'ice'
+    DRIVER_SHITSPEAK = 'shitspeak'
+    DRIVER_CHOICES = (
+        (DRIVER_ICE, 'Murmur (ZeroC Ice)'),
+        (DRIVER_SHITSPEAK, 'ShitSpeak (HTTP control API)'),
+    )
+
     name = models.CharField(max_length=255, help_text='Display name (e.g. "Main Fleet Comms")')
     address = models.CharField(max_length=255, help_text='User-facing connection string (e.g. mumble.example.com:64738)')
+    driver = models.CharField(
+        max_length=16,
+        choices=DRIVER_CHOICES,
+        default=DRIVER_ICE,
+        help_text='How BG drives this server: Murmur over ZeroC Ice, or ShitSpeak over its HTTP control API.',
+    )
     ice_host = models.CharField(max_length=255, help_text='ICE endpoint hostname')
     ice_port = models.PositiveIntegerField(default=6502, help_text='ICE endpoint port')
     ice_secret = models.CharField(max_length=255, blank=True, null=True, default=None, help_text='ICE write secret (leave blank if none)')
@@ -56,6 +69,36 @@ class MumbleServer(models.Model):
         null=True,
         default=None,
         help_text='Optional CA certificate that BG should trust for this ICE endpoint.',
+    )
+    control_url = models.CharField(
+        max_length=1024,
+        blank=True,
+        default='',
+        help_text='ShitSpeak driver: base URL of the node-local admin control API (e.g. https://voice1.example.com:64750). mTLS is mandatory.',
+    )
+    control_tls_cert = models.CharField(
+        max_length=1024,
+        blank=True,
+        default='',
+        help_text='ShitSpeak driver: path to the client certificate BG presents to the admin control API.',
+    )
+    control_tls_key = models.CharField(
+        max_length=1024,
+        blank=True,
+        default='',
+        help_text='ShitSpeak driver: path to the private key for control_tls_cert.',
+    )
+    control_tls_ca = models.CharField(
+        max_length=1024,
+        blank=True,
+        default='',
+        help_text='ShitSpeak driver: path to the CA bundle used to verify the admin control API server certificate.',
+    )
+    auth_token = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text='ShitSpeak driver: bearer token the voice server must present to POST /shitspeak/authenticate. Empty disables the endpoint for this server.',
     )
     is_active = models.BooleanField(default=True)
     display_order = models.PositiveIntegerField(default=0, help_text='Ordering on the profile page (lower = first)')
