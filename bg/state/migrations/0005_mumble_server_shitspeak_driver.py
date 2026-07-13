@@ -1,5 +1,39 @@
 from django.db import migrations, models
 
+# Django drops the database-level DEFAULT after backfilling an AddField, but
+# bg/ice_inventory.py (run at authd startup) creates mumble_server rows with a
+# raw SQL INSERT that does not list these columns. Re-instate the defaults so
+# raw inserters keep working after this migration.
+_DB_DEFAULTS = (
+    ("driver", "ice"),
+    ("control_url", ""),
+    ("control_tls_cert", ""),
+    ("control_tls_key", ""),
+    ("control_tls_ca", ""),
+    ("auth_token", ""),
+)
+
+
+def _keep_db_defaults(apps, schema_editor):
+    if schema_editor.connection.vendor == "sqlite":
+        # sqlite's ADD COLUMN keeps the inline default; nothing to do.
+        return
+    with schema_editor.connection.cursor() as cursor:
+        for column, default in _DB_DEFAULTS:
+            cursor.execute(
+                f"ALTER TABLE mumble_server ALTER COLUMN {column} SET DEFAULT '{default}'"
+            )
+
+
+def _drop_db_defaults(apps, schema_editor):
+    if schema_editor.connection.vendor == "sqlite":
+        return
+    with schema_editor.connection.cursor() as cursor:
+        for column, _default in _DB_DEFAULTS:
+            cursor.execute(
+                f"ALTER TABLE mumble_server ALTER COLUMN {column} DROP DEFAULT"
+            )
+
 
 class Migration(migrations.Migration):
 
@@ -71,4 +105,5 @@ class Migration(migrations.Migration):
                 max_length=255,
             ),
         ),
+        migrations.RunPython(_keep_db_defaults, _drop_db_defaults),
     ]

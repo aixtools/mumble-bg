@@ -265,6 +265,100 @@ def list_current_ice_inventory() -> list[dict]:
         conn.close()
 
 
+# Post-0005 schema: the ShitSpeak columns are NOT NULL, and not every backend
+# retains a database-level default (sqlite rebuilds drop it), so name them
+# explicitly. Falls back to the pre-0005 column list while the migration has
+# not run yet.
+_INSERT_ICE_SERVER_QUERY = """
+    INSERT INTO mumble_server (
+        name,
+        address,
+        ice_host,
+        ice_port,
+        ice_secret,
+        virtual_server_id,
+        is_active,
+        display_order,
+        ice_tls_cert,
+        ice_tls_key,
+        ice_tls_ca,
+        driver,
+        control_url,
+        control_tls_cert,
+        control_tls_key,
+        control_tls_ca,
+        auth_token
+    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ice', '', '', '', '', '')
+"""
+
+_LEGACY_INSERT_ICE_SERVER_QUERY = """
+    INSERT INTO mumble_server (
+        name,
+        address,
+        ice_host,
+        ice_port,
+        ice_secret,
+        virtual_server_id,
+        is_active,
+        display_order,
+        ice_tls_cert,
+        ice_tls_key,
+        ice_tls_ca
+    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+
+def _is_missing_driver_column(exc) -> bool:
+    message = str(exc).lower()
+    if "driver" not in message:
+        return False
+    return (
+        "does not exist" in message
+        or "unknown column" in message
+        or "no such column" in message
+        or "has no column" in message
+        or getattr(exc, "pgcode", None) == "42703"
+    )
+
+
+def _select_insert_query(cur, conn) -> str:
+    """Pick the INSERT column list for the current schema.
+
+    Probed once, before any writes, so the failed probe statement can be
+    rolled back without discarding earlier sync work (PostgreSQL aborts the
+    transaction on any error until rollback).
+    """
+    try:
+        _execute(cur, conn, "SELECT driver FROM mumble_server LIMIT 1")
+        cur.fetchall()
+        return _INSERT_ICE_SERVER_QUERY
+    except Exception as exc:
+        if not _is_missing_driver_column(exc):
+            raise
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001 - sqlite/mysql may not need it here
+            pass
+        return _LEGACY_INSERT_ICE_SERVER_QUERY
+
+
+def _insert_ice_server_row(cur, conn, insert_query: str, entry, display_order: int) -> None:
+    params = (
+        entry.name,
+        entry.address,
+        entry.ice_host,
+        int(entry.ice_port),
+        entry.ice_secret,
+        entry.virtual_server_id,
+        bool(entry.is_active),
+        display_order,
+        entry.ice_tls_cert,
+        entry.ice_tls_key,
+        entry.ice_tls_ca,
+    )
+    _execute(cur, conn, insert_query, params)
+
+
 def sync_ice_inventory_from_env(*, additive: bool = True, dry_run: bool = False) -> dict:
     """
     Sync ICE env payload into mumble_server rows.
@@ -291,6 +385,7 @@ def sync_ice_inventory_from_env(*, additive: bool = True, dry_run: bool = False)
     conn = _get_bg_connection()
     try:
         cur = conn.cursor()
+        insert_query = _select_insert_query(cur, conn)
         _execute(
             cur,
             conn,
@@ -339,38 +434,7 @@ def sync_ice_inventory_from_env(*, additive: bool = True, dry_run: bool = False)
                 )
                 if dry_run:
                     continue
-                _execute(
-                    cur,
-                    conn,
-                    """
-                    INSERT INTO mumble_server (
-                        name,
-                        address,
-                        ice_host,
-                        ice_port,
-                        ice_secret,
-                        virtual_server_id,
-                        is_active,
-                        display_order,
-                        ice_tls_cert,
-                        ice_tls_key,
-                        ice_tls_ca
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        entry.name,
-                        entry.address,
-                        entry.ice_host,
-                        int(entry.ice_port),
-                        entry.ice_secret,
-                        entry.virtual_server_id,
-                        bool(entry.is_active),
-                        max_display_order,
-                        entry.ice_tls_cert,
-                        entry.ice_tls_key,
-                        entry.ice_tls_ca,
-                    ),
-                )
+                _insert_ice_server_row(cur, conn, insert_query, entry, max_display_order)
                 continue
 
             row_id = int(current[0])
@@ -413,6 +477,11 @@ def sync_ice_inventory_from_env(*, additive: bool = True, dry_run: bool = False)
 
         if not additive:
             for row in existing:
+                # Rows without an ICE host are not Ice-managed (e.g. ShitSpeak
+                # servers driven over the HTTP control API); replace mode must
+                # not disable servers this inventory does not own.
+                if not str(row[3] or "").strip():
+                    continue
                 key = (str(row[3]), int(row[4]), int(row[6]) if row[6] is not None else None)
                 if key in incoming_keys:
                     continue
