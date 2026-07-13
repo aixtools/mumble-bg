@@ -117,8 +117,12 @@ def authenticate(request):
         return JsonResponse(
             {'error': 'authentication endpoint not enabled for this server'}, status=403
         )
+    # Compare as bytes: compare_digest raises TypeError on non-ASCII str
+    # input, which a hostile caller could otherwise turn into a 500.
     provided = _bearer_token(request)
-    if not provided or not secrets.compare_digest(provided, server.auth_token):
+    if not provided or not secrets.compare_digest(
+        provided.encode('utf-8'), server.auth_token.encode('utf-8')
+    ):
         return JsonResponse({'error': 'invalid bearer token'}, status=401)
     if server.driver != MumbleServer.DRIVER_SHITSPEAK:
         return JsonResponse({'error': 'server is not shitspeak-driven'}, status=403)
