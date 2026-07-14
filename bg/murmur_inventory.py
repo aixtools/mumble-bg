@@ -246,6 +246,17 @@ def get_server_inventory_snapshot(
     freshness_seconds = inventory_freshness_seconds()
     snapshot, _created = MurmurServerInventorySnapshot.objects.get_or_create(server=server)
 
+    if getattr(server, 'driver', '') == 'shitspeak':
+        # Ice inventory does not apply to ShitSpeak servers; mark the snapshot
+        # skipped instead of dialing Ice (this also keeps the background
+        # cache-warming loop quiet for these rows). Mapping the admin API's
+        # GET /admin/v1/online into this payload is future work.
+        if snapshot.fetch_status != 'skipped':
+            snapshot.fetch_status = 'skipped'
+            snapshot.fetch_error = 'inventory is not supported for shitspeak-driven servers'
+            snapshot.save(update_fields=['fetch_status', 'fetch_error', 'updated_at'])
+        return InventoryEnvelope(snapshot=snapshot, source='skipped', freshness_seconds=freshness_seconds)
+
     fresh = False
     if snapshot.fetched_at is not None:
         age_seconds = (now() - snapshot.fetched_at).total_seconds()

@@ -21,7 +21,22 @@ def _load_slice():
         raise MurmurSyncError(str(exc)) from exc
 
 
+def _is_shitspeak(server_config) -> bool:
+    """True for MumbleServer rows driven over the ShitSpeak HTTP control API
+    instead of ZeroC Ice. Every public function in this module branches on
+    this before any Ice work."""
+    return str(getattr(server_config, 'driver', '') or '') == 'shitspeak'
+
+
 def _open_target_server(server_config):
+    if _is_shitspeak(server_config):
+        # Defensive: all public entry points branch on the driver before
+        # reaching the Ice funnel; a future call site that forgets must fail
+        # loudly instead of dialing Ice at a server that does not speak it.
+        raise MurmurSyncError(
+            f'{server_config.name}: shitspeak-driven servers have no Ice endpoint '
+            '(use bg.shitspeak_control.ShitSpeakControlClient)'
+        )
     try:
         import Ice
     except ImportError as exc:
@@ -135,6 +150,18 @@ def sync_murmur_registration(
     return_details=False,
     for_temporary=False,
 ):
+    if _is_shitspeak(mumble_user.server):
+        # No pre-registration exists for ShitSpeak servers: the MumbleUser row
+        # is the source of truth the authenticate endpoint reads at login.
+        # Mirrors the "ICE authenticator claims this name" skip path — None
+        # signals "no Murmur sync" and leaves mumble_userid unchanged.
+        logger.debug(
+            'sync_murmur_registration: no-op for shitspeak server %s (user %s)',
+            mumble_user.server.name, mumble_user.username,
+        )
+        if return_details:
+            return {'murmur_userid': None, 'created': False, 'reenabled': False}
+        return None
     try:
         communicator, M, server_proxy = _open_target_server(mumble_user.server)
         try:
@@ -218,6 +245,11 @@ def _disabled_password_for(mumble_user) -> str:
 
 def disable_murmur_registration(mumble_user):
     """Keep a Murmur registration row but move it to disabled state."""
+    if _is_shitspeak(mumble_user.server):
+        # There is no server-side registration to disable: deactivating the
+        # MumbleUser row (done by the caller) is what stops the authenticate
+        # endpoint from accepting the next login.
+        return {'changed': False, 'murmur_userid': None, 'already_disabled': False}
     try:
         communicator, M, server_proxy = _open_target_server(mumble_user.server)
         try:
@@ -264,6 +296,10 @@ def disable_murmur_registration(mumble_user):
 
 
 def unregister_murmur_registration(mumble_user):
+    if _is_shitspeak(mumble_user.server):
+        # Nothing to unregister server-side; deleting the MumbleUser row is
+        # the whole operation for a ShitSpeak server.
+        return False
     try:
         communicator, _, server_proxy = _open_target_server(mumble_user.server)
         try:
@@ -316,6 +352,26 @@ def disconnect_live_sessions(mumble_user, *, reason='Registration updated; recon
     reason_text = str(reason or '').strip() or 'Registration updated; reconnect required'
     kicked = 0
     errors: list[str] = []
+
+    if _is_shitspeak(mumble_user.server):
+        from bg.shitspeak_control import ShitSpeakControlClient, ShitSpeakControlError
+
+        try:
+            client = ShitSpeakControlClient(mumble_user.server)
+        except ShitSpeakControlError as exc:
+            raise MurmurSyncError(
+                f'Failed to disconnect live sessions for {mumble_user.username} '
+                f'on {mumble_user.server.name}: {exc}'
+            ) from exc
+        for session_id in session_ids:
+            try:
+                client.kick_user(int(session_id), reason_text)
+                kicked += 1
+                mark_session_disconnected(mumble_user.server, int(session_id))
+            except ShitSpeakControlError as exc:
+                errors.append(f'session {int(session_id)}: {exc}')
+        return {'requested': len(session_ids), 'kicked': kicked, 'errors': errors}
+
     try:
         communicator, _, server_proxy = _open_target_server(mumble_user.server)
         try:
@@ -353,6 +409,17 @@ def sync_live_admin_membership(mumble_user, *, session_ids=None, old_groups=None
         session_ids = _coerce_session_ids(session_ids)
 
     if not session_ids:
+        return 0
+
+    if _is_shitspeak(mumble_user.server):
+        # ShitSpeak has no live group-mutation API; groups come from the
+        # authenticate response and take effect on the pilot's next connect.
+        # Returning 0 reports honestly that no live session was mutated.
+        logger.debug(
+            'sync_live_admin_membership: no live group sync for shitspeak server %s (user %s); '
+            'groups apply at next login',
+            mumble_user.server.name, mumble_user.username,
+        )
         return 0
 
     new_group_set = {g.strip() for g in (mumble_user.groups or '').split(',') if g.strip()}
