@@ -152,6 +152,59 @@ class ShitSpeakAuthenticateViewTest(TestCase):
         assert response.status_code == 200
         stub.assert_called_once_with('pilot1', '', self.server.pk, certhash=expected_hex)
 
+    def test_shitspeak_native_request_shape(self):
+        """The real ShitSpeak `backend = "http"` request: no server selector in
+        the body (it lives in the query string) and the certhash nested under
+        auxiliary_data."""
+        raw = bytes(range(20))
+        with patch.object(
+            shitspeak,
+            'authd_authenticate',
+            return_value=_accept_tuple(self.registration.pk),
+        ) as stub:
+            response = self.client.post(
+                f'/shitspeak/authenticate?server_id={self.server.pk}',
+                data=json.dumps(
+                    {
+                        'username': 'pilot1',
+                        'password': None,
+                        'auxiliary_data': {
+                            'certificate_hash_base64': base64.b64encode(raw).decode(),
+                            'session_id': 42,
+                            'ip_address': '203.0.113.5',
+                            'tls_ja4': None,
+                        },
+                    }
+                ),
+                content_type='application/json',
+                HTTP_AUTHORIZATION=f'Bearer {TOKEN}',
+            )
+        assert response.status_code == 200
+        stub.assert_called_once_with('pilot1', '', self.server.pk, certhash=raw.hex())
+
+    def test_server_key_in_query_string(self):
+        with patch.object(
+            shitspeak,
+            'authd_authenticate',
+            return_value=_accept_tuple(self.registration.pk),
+        ):
+            response = self.client.post(
+                f'/shitspeak/authenticate?server_key={self.server.server_key}',
+                data=json.dumps({'username': 'pilot1', 'password': 'pw'}),
+                content_type='application/json',
+                HTTP_AUTHORIZATION=f'Bearer {TOKEN}',
+            )
+        assert response.status_code == 200
+
+    def test_bad_server_id_in_query_string_is_404(self):
+        response = self.client.post(
+            '/shitspeak/authenticate?server_id=not-a-number',
+            data=json.dumps({'username': 'pilot1', 'password': 'pw'}),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {TOKEN}',
+        )
+        assert response.status_code == 404
+
     def test_invalid_certhash_is_400(self):
         for payload_extra in (
             {'certificate_hash_base64': '!!!not-base64!!!'},

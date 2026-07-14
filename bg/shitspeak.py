@@ -31,15 +31,29 @@ logger = logging.getLogger(__name__)
 _HEX_DIGITS = frozenset('0123456789abcdef')
 
 
+def _auxiliary_data(payload: dict) -> dict:
+    """ShitSpeak's authenticator JSON nests connection context under
+    ``auxiliary_data``; a plain caller may send the same fields at the top
+    level. Merge with the nested values taking precedence."""
+    nested = payload.get('auxiliary_data')
+    if not isinstance(nested, dict):
+        return payload
+    merged = dict(payload)
+    merged.update(nested)
+    return merged
+
+
 def _normalized_certhash(payload: dict) -> str:
     """Return the client certhash as lowercase hex, or '' if absent.
 
     ShitSpeak's authenticator JSON carries ``certificate_hash_base64`` (base64
-    of the raw 20-byte SHA-1 over the DER leaf certificate); Murmur — and
-    therefore BG's stored ``MumbleUser.certhash`` — uses lowercase hex of the
-    same digest. ``certificate_hash_hex`` is also accepted. Raises ValueError
-    on malformed input.
+    of the raw 20-byte SHA-1 over the DER leaf certificate), nested under
+    ``auxiliary_data``; Murmur — and therefore BG's stored
+    ``MumbleUser.certhash`` — uses lowercase hex of the same digest.
+    ``certificate_hash_hex`` is also accepted. Raises ValueError on malformed
+    input.
     """
+    payload = _auxiliary_data(payload)
     b64 = payload.get('certificate_hash_base64')
     if isinstance(b64, str) and b64.strip():
         try:
@@ -56,14 +70,31 @@ def _normalized_certhash(payload: dict) -> str:
     return ''
 
 
-def _resolve_server(payload: dict) -> MumbleServer | None:
-    """Resolve the target server row from ``server_id`` (pk) or ``server_key``."""
+def _resolve_server(request, payload: dict) -> MumbleServer | None:
+    """Resolve the target server row from ``server_id`` (pk) or ``server_key``.
+
+    Both may arrive in the JSON body *or* in the query string. The query string
+    is the important one: ShitSpeak's authenticator JSON schema is fixed
+    (``username`` / ``password`` / ``auxiliary_data``) and carries no server
+    selector, so a ShitSpeak node identifies itself by pointing
+    ``[authenticator.http] url`` at ``…/shitspeak/authenticate?server_id=<pk>``.
+    """
     server_id = payload.get('server_id')
     if isinstance(server_id, bool):
-        return None
+        server_id = None
+    if server_id is None:
+        raw = (request.GET.get('server_id') or '').strip()
+        if raw:
+            try:
+                server_id = int(raw)
+            except ValueError:
+                return None
     if isinstance(server_id, int):
         return MumbleServer.objects.filter(pk=server_id, is_active=True).first()
+
     server_key = payload.get('server_key')
+    if not (isinstance(server_key, str) and server_key.strip()):
+        server_key = request.GET.get('server_key')
     if isinstance(server_key, str) and server_key.strip():
         wanted = server_key.strip()
         for candidate in MumbleServer.objects.filter(is_active=True):
@@ -88,13 +119,26 @@ def _rejected(code: str, reason: str) -> JsonResponse:
 def authenticate(request):
     """POST /shitspeak/authenticate — live login check for a ShitSpeak server.
 
-    Request:  ``{"username", "password"?, "server_id"|"server_key",
-                 "certificate_hash_base64"?|"certificate_hash_hex"?}``
+    Called by ShitSpeak's ``[authenticator] backend = "http"``, whose request
+    schema is fixed:
+
+        {"username", "password"|null,
+         "auxiliary_data": {"certificate_hash_base64"|null, "session_id",
+                            "ip_address", "tls_ja4", …}}
+
+    It carries no server selector, so the node identifies itself in the query
+    string: point its ``[authenticator.http] url`` at
+    ``…/shitspeak/authenticate?server_id=<pk>`` (``server_key`` also works).
+    Both selectors and the certhash fields are additionally accepted at the top
+    level of the body, for plain (non-ShitSpeak) callers and tests.
+
     Accept:   200 ``{"user_id", "display_name", "groups", "is_superuser",
-                     "auth_method"}``
+                     "auth_method"}`` — ShitSpeak's contract defaults a 200
+              without an ``accepted`` field to accepted.
     Reject:   403 ``{"rejected": true, "code": "user_not_found"|"bad_credentials"}``
-              (a dedicated ShitSpeak server chains no other authenticator, so
-              Murmur's "fall-through" is a reject here)
+              — ShitSpeak maps these markers to its NoSuchUser / WrongPassword
+              rejections. (A dedicated ShitSpeak server chains no other
+              authenticator, so Murmur's "fall-through" is a reject here.)
     """
     try:
         payload = json.loads(request.body.decode('utf-8'))
@@ -103,7 +147,7 @@ def authenticate(request):
     except (ValueError, UnicodeDecodeError):
         return JsonResponse({'error': 'invalid JSON body'}, status=400)
 
-    server = _resolve_server(payload)
+    server = _resolve_server(request, payload)
     if server is None:
         return JsonResponse({'error': 'unknown or inactive server'}, status=404)
 
