@@ -278,7 +278,11 @@ class MurmurRegistrationReconciler:
         self._server_id = server_id
 
     def _load_servers(self) -> list[MumbleServer]:
-        qs = MumbleServer.objects.filter(is_active=True).order_by("display_order", "name")
+        # Ice-only: shitspeak-driven servers have no Murmur/Ice endpoint and
+        # must never be reconciled over Ice (they authenticate live over HTTP).
+        qs = MumbleServer.objects.filter(
+            is_active=True, driver=MumbleServer.DRIVER_ICE
+        ).order_by("display_order", "name")
         if self._server_id is not None:
             qs = qs.filter(pk=self._server_id)
         return list(qs)

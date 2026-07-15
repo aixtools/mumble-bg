@@ -189,6 +189,28 @@ class ShitSpeakRegistrationFunnelTest(TestCase):
         with pytest.raises(MurmurSyncError, match='no Ice endpoint'):
             registrations._open_target_server(self.server)
 
+    def test_ice_only_loops_exclude_shitspeak_rows(self):
+        """The Ice-driving service loops (reconciler + pulse service) must skip
+        shitspeak-driven servers — they have no ice_host and would otherwise
+        fail every cycle trying to open an Ice connection to ':6502'."""
+        from bg.pulse.reconciler import MurmurRegistrationReconciler
+        from bg.pulse.service import MurmurPulseService
+
+        ice_server = MumbleServer.objects.create(
+            name='voice.example.com:64738',
+            address='voice.example.com:64738',
+            ice_host='127.0.0.1',
+            ice_port=6502,
+            driver=MumbleServer.DRIVER_ICE,
+            is_active=True,
+        )
+        recon_servers = MurmurRegistrationReconciler()._load_servers()
+        pulse_servers = MurmurPulseService()._load_server_configs()
+        assert recon_servers == [ice_server]
+        assert pulse_servers == [ice_server]
+        assert self.server not in recon_servers
+        assert self.server not in pulse_servers
+
     def test_sync_live_admin_membership_reports_zero_live_mutations(self):
         MumbleSession.objects.create(
             server=self.server,
