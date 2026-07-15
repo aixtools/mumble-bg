@@ -1436,6 +1436,7 @@ def servers(request):
                 'server_key': server.server_key,
                 'name': server.name,
                 'address': server.address,
+                'driver': server.driver,
                 'ice_host': server.ice_host,
                 'ice_port': server.ice_port,
                 'virtual_server_id': server.virtual_server_id,

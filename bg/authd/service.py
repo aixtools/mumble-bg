@@ -99,7 +99,18 @@ BG_DB_ADAPTER = MmblBgDBA(
     )
 )
 
+# authd only drives Murmur over Ice. Servers with driver='shitspeak'
+# authenticate via the HTTP endpoint (bg/shitspeak.py) instead of an Ice
+# authenticator callback, so they are excluded here.
 SERVERS_QUERY = """
+    SELECT id, ice_host, ice_port, ice_secret, virtual_server_id
+    FROM mumble_server
+    WHERE is_active = true AND driver = 'ice'
+"""
+
+# Fallback for databases that predate the driver column: every active server
+# is Ice-driven by definition.
+NO_DRIVER_COLUMN_SERVERS_QUERY = """
     SELECT id, ice_host, ice_port, ice_secret, virtual_server_id
     FROM mumble_server
     WHERE is_active = true
@@ -288,32 +299,66 @@ def get_db_connection():
 
 
 def get_active_servers():
-    """Fetch all active MumbleServer configs from the database."""
+    """Fetch the active MumbleServer configs that authd drives over Ice.
+
+    Falls back for schemas that predate the driver column, and further for
+    schemas that predate virtual_server_id.
+    """
     conn = get_db_connection()
     try:
         with _cursor(conn) as cur:
             try:
                 _execute(cur, conn, SERVERS_QUERY)
             except Exception as exc:
-                if not _is_missing_virtual_server_id_column(exc):
+                if _is_missing_column(exc, 'driver'):
+                    logger.warning(
+                        'mumble_server.driver is missing; '
+                        'treating every active server as Ice-driven'
+                    )
+                    _safe_rollback(conn)
+                    try:
+                        _execute(cur, conn, NO_DRIVER_COLUMN_SERVERS_QUERY)
+                    except Exception as inner_exc:
+                        if not _is_missing_column(inner_exc, 'virtual_server_id'):
+                            raise
+                        _log_legacy_servers_fallback()
+                        _safe_rollback(conn)
+                        _execute(cur, conn, LEGACY_SERVERS_QUERY)
+                elif _is_missing_column(exc, 'virtual_server_id'):
+                    _log_legacy_servers_fallback()
+                    _safe_rollback(conn)
+                    _execute(cur, conn, LEGACY_SERVERS_QUERY)
+                else:
                     raise
-                logger.warning(
-                    'mumble_server.virtual_server_id is missing; '
-                    'falling back to legacy compatibility mode with default virtual_server_id=1'
-                )
-                _execute(cur, conn, LEGACY_SERVERS_QUERY)
             return cur.fetchall()
     finally:
         conn.close()
 
 
-def _is_missing_virtual_server_id_column(exc):
+def _log_legacy_servers_fallback():
+    logger.warning(
+        'mumble_server.virtual_server_id is missing; '
+        'falling back to legacy compatibility mode with default virtual_server_id=1'
+    )
+
+
+def _safe_rollback(conn):
+    """Clear an aborted transaction so a fallback query can run (PostgreSQL
+    refuses further statements after an error until rollback)."""
+    try:
+        conn.rollback()
+    except Exception:  # noqa: BLE001 - sqlite/mysql may not need or support it here
+        pass
+
+
+def _is_missing_column(exc, column):
     message = str(exc).lower()
-    if 'virtual_server_id' not in message:
+    if column not in message:
         return False
     return (
         'does not exist' in message
         or 'unknown column' in message
+        or 'no such column' in message
         or getattr(exc, 'pgcode', None) == '42703'
     )
 
@@ -334,6 +379,10 @@ def select_target_servers(booted_servers, virtual_server_id):
 # Sentinel returned by authenticate() when the user has no record in the cube
 # DB.  Distinct from None, which means the user exists but the password failed.
 _USER_NOT_FOUND = object()
+
+# Public alias for callers outside authd (e.g. the ShitSpeak authenticate
+# endpoint) that need to distinguish "no such user" from "bad credentials".
+USER_NOT_FOUND = _USER_NOT_FOUND
 
 # Service accounts (FCRelay standing-bridge relay bots) connect under names with
 # this prefix. They must NOT be auto-provisioned/registered in Murmur: they keep
@@ -717,20 +766,25 @@ def wait_for_server_configs(retry_interval=30):
     This keeps authd non-fatal while bg runtime tables exist but have not yet been
     populated with the server inventory it needs to attach to Murmur over ICE.
     """
-    try:
-        server_configs = get_active_servers()
-    except Exception as exc:  # noqa: BLE001
-        result['errors'].append({'error': f'Failed to load active server configs: {exc}'})
-        return result
-    while not server_configs:
+    while True:
+        try:
+            server_configs = get_active_servers()
+        except Exception:  # noqa: BLE001
+            # A transient DB failure must not crash the wait loop (this path
+            # previously referenced an undefined variable and raised
+            # NameError); log and retry like the empty-inventory case.
+            logger.exception(
+                'Failed to load active server configs; retrying in %ds...', retry_interval
+            )
+            server_configs = []
+        if server_configs:
+            return server_configs
         logger.info(
-            'No active MumbleServer configs found; waiting for mumble-fg or provisioning '
-            'to populate mumble_server. Retrying in %ds...',
+            'No active Ice-driven MumbleServer configs found; waiting for mumble-fg or '
+            'provisioning to populate mumble_server. Retrying in %ds...',
             retry_interval,
         )
         time.sleep(retry_interval)
-        server_configs = get_active_servers()
-    return server_configs
 
 
 def probe_authenticator_registration():

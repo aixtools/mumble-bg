@@ -158,6 +158,68 @@ def test_get_active_servers_falls_back_when_virtual_server_id_column_is_missing(
     assert conn.closed is True
 
 
+def test_get_active_servers_falls_back_when_driver_column_is_missing(monkeypatch):
+    class MissingDriver(Exception):
+        pgcode = "42703"
+
+    class _NoDriverCursor(_Cursor):
+        def __init__(self, rows):
+            super().__init__(rows)
+            self.calls = 0
+
+        def execute(self, query, *_args, **_kwargs):
+            self.executed.append(query)
+            self.calls += 1
+            if self.calls == 1:
+                raise MissingDriver('column "driver" does not exist')
+            return None
+
+    class _NoDriverConn(_Conn):
+        def __init__(self, rows):
+            super().__init__(rows)
+            self.cursor_obj = _NoDriverCursor(self._rows)
+
+    conn = _NoDriverConn([
+        (1, "127.0.0.1", 6502, "secret", 7),
+    ])
+
+    monkeypatch.setattr(authd, "get_db_connection", lambda: conn)
+
+    servers = authd.get_active_servers()
+
+    assert servers == [(1, "127.0.0.1", 6502, "secret", 7)]
+    assert conn.cursor_obj.executed == [
+        authd.SERVERS_QUERY,
+        authd.NO_DRIVER_COLUMN_SERVERS_QUERY,
+    ]
+    assert conn.closed is True
+
+
+def test_servers_query_excludes_shitspeak_driver():
+    assert "driver = 'ice'" in authd.SERVERS_QUERY
+    assert "driver" not in authd.NO_DRIVER_COLUMN_SERVERS_QUERY.split('WHERE')[1]
+
+
+def test_wait_for_server_configs_survives_db_errors(monkeypatch):
+    calls = []
+    sleep_calls = []
+
+    def flaky_get_active_servers():
+        calls.append(True)
+        if len(calls) == 1:
+            raise RuntimeError("db down")
+        return [(1, "127.0.0.1", 6502, "secret", 1)]
+
+    monkeypatch.setattr(authd, "get_active_servers", flaky_get_active_servers)
+    monkeypatch.setattr(authd.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    servers = authd.wait_for_server_configs(retry_interval=3)
+
+    assert servers == [(1, "127.0.0.1", 6502, "secret", 1)]
+    assert len(calls) == 2
+    assert sleep_calls == [3]
+
+
 def test_wait_for_server_configs_sleeps_until_data_exists(monkeypatch):
     calls = []
     sleep_calls = []
