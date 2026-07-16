@@ -118,18 +118,37 @@ class MumbleServer(models.Model):
         return self.name
 
     @property
-    def endpoint_list(self) -> list[str]:
-        """Cluster connect endpoints as ``host:port`` strings, one per region.
+    def endpoint_entries(self) -> list[dict]:
+        """Parsed cluster connect endpoints, one per region.
 
-        Parsed from the newline/comma-separated ``endpoints`` field; falls back
-        to ``address`` when unset so single-endpoint servers still work.
+        Each ``endpoints`` line is either ``host:port`` or ``Label | host:port``
+        (an optional friendly region label). Returns
+        ``[{label, host, port, address}, ...]``; ``label`` defaults to the host
+        when not given. Falls back to ``address`` when ``endpoints`` is empty.
         """
         raw = (self.endpoints or '').replace(',', '\n')
-        items = [line.strip() for line in raw.splitlines() if line.strip()]
-        if items:
-            return items
-        addr = (self.address or '').strip()
-        return [addr] if addr else []
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        if not lines:
+            addr = (self.address or '').strip()
+            lines = [addr] if addr else []
+        entries = []
+        for line in lines:
+            if '|' in line:
+                label, _, hostport = line.partition('|')
+                label, hostport = label.strip(), hostport.strip()
+            else:
+                label, hostport = '', line
+            host, sep, port = hostport.rpartition(':')
+            if sep and port.isdigit():
+                entries.append({'label': label or host, 'host': host, 'port': port, 'address': hostport})
+            else:
+                entries.append({'label': label or hostport, 'host': hostport, 'port': '', 'address': hostport})
+        return entries
+
+    @property
+    def endpoint_list(self) -> list[str]:
+        """Cluster connect endpoints as ``host:port`` strings, one per region."""
+        return [e['address'] for e in self.endpoint_entries]
 
     @property
     def server_key(self) -> str:
