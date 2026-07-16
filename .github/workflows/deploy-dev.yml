@@ -18,6 +18,7 @@ jobs:
         env:
           TARGETHOST: ${{ secrets.TARGETHOST }}
           TARGETUSER: ${{ secrets.TARGETUSER }}
+          TARGETPORT: ${{ secrets.TARGETPORT }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -54,6 +55,7 @@ jobs:
           venv_dir = str(payload.get("venv_dir", "")).strip()
           service_units = payload.get("service_units", [])
           service_name = str(payload.get("service_name", "")).strip()
+          port = str(os.environ.get("TARGETPORT", "")).strip() or "22"
 
           if not user:
               raise SystemExit("TARGETUSER missing required field: user")
@@ -86,6 +88,7 @@ jobs:
           with github_env.open("a", encoding="utf-8") as fh:
               fh.write(f"DEPLOY_TARGET_HOST={host}\n")
               fh.write(f"DEPLOY_TARGET_USER={user}\n")
+              fh.write(f"DEPLOY_TARGET_PORT={port}\n")
               fh.write(f"DEPLOY_HOME_DIR={home_dir}\n")
               fh.write(f"DEPLOY_PROJECT_DIR={project_dir}\n")
               fh.write(f"DEPLOY_ENV_FILE={env_file}\n")
@@ -96,7 +99,7 @@ jobs:
       - name: Set up SSH known hosts
         run: |
           set -euo pipefail
-          ssh-keyscan -H "${DEPLOY_TARGET_HOST}" >> ~/.ssh/known_hosts
+          ssh-keyscan -p "${DEPLOY_TARGET_PORT}" -H "${DEPLOY_TARGET_HOST}" >> ~/.ssh/known_hosts
 
       - name: Deploy code via rsync
         run: |
@@ -108,14 +111,14 @@ jobs:
             --exclude '.pytest_cache/' \
             --exclude '.env' \
             --exclude '.venv/' \
-            -e "ssh -i ~/.ssh/deploy_key" \
+            -e "ssh -p ${DEPLOY_TARGET_PORT} -i ~/.ssh/deploy_key" \
             ./ "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}:${DEPLOY_PROJECT_DIR%/}/"
 
       - name: Write environment file
         run: |
           set -euo pipefail
           DEPLOY_ENV_DIR="$(dirname "${DEPLOY_ENV_FILE}")"
-          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+          ssh -p "${DEPLOY_TARGET_PORT}" -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
             "DEPLOY_ENV_DIR='${DEPLOY_ENV_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' bash -s" <<'EOF'
           mkdir -p "${DEPLOY_ENV_DIR}"
           cat > "${DEPLOY_ENV_FILE}" <<'ENVFILE'
@@ -131,7 +134,7 @@ jobs:
       - name: Install runtime dependencies
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+          ssh -p "${DEPLOY_TARGET_PORT}" -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
             "DEPLOY_VENV_DIR='${DEPLOY_VENV_DIR}' DEPLOY_PROJECT_DIR='${DEPLOY_PROJECT_DIR}' DEPLOY_ENV_FILE='${DEPLOY_ENV_FILE}' bash -s" <<'EOF'
           set -euo pipefail
           mkdir -p "$(dirname "${DEPLOY_VENV_DIR}")"
@@ -276,7 +279,7 @@ jobs:
             echo "No service_units configured; skipping restarts."
             exit 0
           fi
-          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+          ssh -p "${DEPLOY_TARGET_PORT}" -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
             "DEPLOY_SERVICE_UNITS_CSV='${DEPLOY_SERVICE_UNITS_CSV}' bash -s" <<'EOF'
           set -euo pipefail
           IFS=',' read -r -a service_units <<< "${DEPLOY_SERVICE_UNITS_CSV}"
@@ -296,7 +299,7 @@ jobs:
             echo "No service_units configured; skipping health check."
             exit 0
           fi
-          ssh -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
+          ssh -p "${DEPLOY_TARGET_PORT}" -i ~/.ssh/deploy_key "${DEPLOY_TARGET_USER}@${DEPLOY_TARGET_HOST}" \
             "DEPLOY_SERVICE_UNITS_CSV='${DEPLOY_SERVICE_UNITS_CSV}' bash -s" <<'EOF'
           set -euo pipefail
           IFS=',' read -r -a service_units <<< "${DEPLOY_SERVICE_UNITS_CSV}"
