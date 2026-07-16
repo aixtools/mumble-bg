@@ -1437,6 +1437,7 @@ def servers(request):
                 'name': server.name,
                 'address': server.address,
                 'endpoints': server.endpoint_list,
+                'endpoint_details': server.endpoint_entries,
                 'driver': server.driver,
                 'ice_host': server.ice_host,
                 'ice_port': server.ice_port,
