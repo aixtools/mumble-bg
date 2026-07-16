@@ -188,6 +188,47 @@ class ProvisionerSnapshotTest(TestCase):
         self.assertEqual(result.deactivated, 1)
         self.assertFalse(MumbleUser.objects.get(user_id=42, server=self.server).is_active)
 
+    def test_provision_deactivates_registration_matching_no_rule(self):
+        """A pilot who matches NO allow rule (e.g. their corp left the alliance
+        for one that isn't on the allow-list) must be deactivated, not just
+        pilots hit by an explicit deny. Regression for ex-members keeping an
+        active Murmur registration indefinitely."""
+        # Only an allow rule for a DIFFERENT alliance; the pilot below is in
+        # alliance 7777, which is neither allowed nor denied.
+        AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
+        self._seed_snapshot(
+            pkid=42,
+            character_id=9001,
+            character_name='Pilot One',
+            account_username='pilot_login',
+            alliance_id=7777,
+            alliance_name='Departed Alliance',
+            corporation_id=8801,
+            corporation_name='Corp One',
+        )
+
+        user = User.objects.create(pk=42, username='pilot_login')
+        password_record = build_murmur_password_record('temporary-pass')
+        MumbleUser.objects.create(
+            user=user,
+            server=self.server,
+            evepilot_id=9001,
+            corporation_id=8801,
+            alliance_id=7777,
+            username='pilot_login',
+            display_name='Pilot One',
+            pwhash=password_record['pwhash'],
+            hashfn=password_record['hashfn'],
+            pw_salt=password_record['pw_salt'],
+            kdf_iterations=password_record['kdf_iterations'],
+            is_active=True,
+        )
+
+        result = provision_registrations(dry_run=False)
+
+        self.assertEqual(result.deactivated, 1)
+        self.assertFalse(MumbleUser.objects.get(user_id=42, server=self.server).is_active)
+
     def test_provision_updates_existing_display_name_from_snapshot(self):
         AccessRule.objects.create(entity_id=9901, entity_type='alliance', deny=False)
         self._seed_snapshot(
