@@ -100,6 +100,13 @@ class MumbleServer(models.Model):
         default='',
         help_text='ShitSpeak driver: bearer token the voice server must present to POST /shitspeak/authenticate. Empty disables the endpoint for this server.',
     )
+    endpoints = models.TextField(
+        blank=True,
+        default='',
+        help_text='ShitSpeak driver: newline-separated host:port connect endpoints, one per cluster region '
+                  '(e.g. us-voice.undock.wtf:64738). The user-facing region selector is built from these; '
+                  'when empty the profile panel falls back to `address`.',
+    )
     is_active = models.BooleanField(default=True)
     display_order = models.PositiveIntegerField(default=0, help_text='Ordering on the profile page (lower = first)')
 
@@ -109,6 +116,20 @@ class MumbleServer(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def endpoint_list(self) -> list[str]:
+        """Cluster connect endpoints as ``host:port`` strings, one per region.
+
+        Parsed from the newline/comma-separated ``endpoints`` field; falls back
+        to ``address`` when unset so single-endpoint servers still work.
+        """
+        raw = (self.endpoints or '').replace(',', '\n')
+        items = [line.strip() for line in raw.splitlines() if line.strip()]
+        if items:
+            return items
+        addr = (self.address or '').strip()
+        return [addr] if addr else []
 
     @property
     def server_key(self) -> str:
