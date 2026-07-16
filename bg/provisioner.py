@@ -219,6 +219,14 @@ def provision_registrations(
     else:
         accounts_by_pkid = {int(account.pkid): account for account in snapshot.accounts}
 
+    # Every pilot present in the snapshot who is NOT eligible must be
+    # deactivated — this covers both explicitly denied pilots (``blocked``) and
+    # pilots who match no allow rule at all. The latter case (e.g. a member
+    # whose corp left the alliance for one that isn't on the allow-list) was
+    # previously ignored, because deactivation only iterated ``blocked_user_ids``.
+    # An ex-member therefore kept an active Murmur registration indefinitely.
+    ineligible_user_ids = set(accounts_by_pkid) - eligible_user_ids
+
     character_ids: set[int] = set()
     corporation_ids: set[int] = set()
     alliance_ids: set[int] = set()
@@ -427,12 +435,13 @@ def provision_registrations(
             result.created += 1
             logger.info('Created %s on %s (pkid=%d)', username, target_server.name, user_id)
 
-        for user_id in sorted(blocked_user_ids):
+        for user_id in sorted(ineligible_user_ids):
             existing_row = existing.get((server_id, user_id))
             if existing_row is None:
                 continue
             if not (existing_row.is_active or existing_row.is_mumble_admin):
                 continue
+            denied_by_rule = user_id in blocked_user_ids
             if not dry_run:
                 update_fields = []
                 if existing_row.is_active:
@@ -447,16 +456,24 @@ def provision_registrations(
                     disable_murmur_registration(existing_row)
                     disconnect_live_sessions(
                         existing_row,
-                        reason='Access denied by ACL; reconnect denied',
+                        reason=(
+                            'Access denied by ACL; reconnect denied'
+                            if denied_by_rule
+                            else 'No longer eligible; reconnect denied'
+                        ),
                     )
                 except MurmurSyncError as exc:
                     issue = (
-                        f'Failed to disable/evict denied pilot pkid={user_id} '
+                        f'Failed to disable/evict ineligible pilot pkid={user_id} '
                         f'on {target_server.name}: {exc}'
                     )
                     logger.warning(issue)
                     result.errors.append(issue)
             result.deactivated += 1
-            logger.info('Deactivated %s on %s (pkid=%d)', existing_row.username, target_server.name, user_id)
+            logger.info(
+                'Deactivated %s on %s (pkid=%d, reason=%s)',
+                existing_row.username, target_server.name, user_id,
+                'denied' if denied_by_rule else 'no_allow_rule',
+            )
 
     return result
