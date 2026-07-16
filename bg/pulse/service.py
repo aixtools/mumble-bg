@@ -542,7 +542,11 @@ class MurmurPulseService:
         self._server_id = server_id
 
     def _load_server_configs(self):
-        qs = MumbleServer.objects.filter(is_active=True).order_by('display_order', 'name')
+        # Ice-only: the pulse service opens Ice meta callbacks per server;
+        # shitspeak-driven rows have no ice_host and must be excluded.
+        qs = MumbleServer.objects.filter(
+            is_active=True, driver=MumbleServer.DRIVER_ICE
+        ).order_by('display_order', 'name')
         if self._server_id is not None:
             qs = qs.filter(pk=self._server_id)
         return list(qs)
