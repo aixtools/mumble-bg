@@ -15,6 +15,7 @@ import time
 import logging
 import json
 import sqlite3
+import hashlib
 import threading
 import uuid
 from contextlib import contextmanager
@@ -506,9 +507,32 @@ def id_to_name(user_id, server_id):
 
 UPDATE_CONNECTION_QUERY = """
     UPDATE mumble_user
-    SET certhash = %s, last_authenticated = %s, updated_at = %s
+    SET certhash = %s, certhash_fake = %s, last_authenticated = %s, updated_at = %s
     WHERE id = %s
 """
+
+# Domain separator for the ShitSpeak "Randomized" privacy fake. MUST stay
+# byte-for-byte identical to shitspeak_runtime::privacy::CERTIFICATE_HASH_FAKE_CONTEXT
+# so the fake BG stores equals the one clients are shown (see the shared test
+# vector in test_certhash_fake.py and the Rust privacy tests).
+_CERTHASH_FAKE_DOMAIN = b'shitspeak-rs/privacy/certificate-hash/fake/v1'
+
+
+def derive_fake_certhash(certhash):
+    """Return the derived fake certhash for ``certhash`` (lowercase hex).
+
+    Mirrors ShitSpeak's Randomized mode: ``sha256(domain || real_bytes)``
+    truncated to 20 bytes. Returns ``''`` when the input is not a 20-byte hex
+    certificate hash, so a malformed value is never persisted as a fake.
+    """
+    value = (certhash or '').strip().lower()
+    if len(value) != 40:
+        return ''
+    try:
+        raw = bytes.fromhex(value)
+    except ValueError:
+        return ''
+    return hashlib.sha256(_CERTHASH_FAKE_DOMAIN + raw).digest()[:20].hex()
 
 UPDATE_MUMBLE_USERID_QUERY = """
     UPDATE mumble_user
@@ -693,13 +717,19 @@ def _validate_and_repair_registration(bg_row_id, mumble_userid, username, displa
 
 
 def update_connection_info(bg_row_id, certhash):
-    """Store the client certificate hash and last successful auth time."""
+    """Store the client certificate hash, its derived fake, and last auth time."""
     now = datetime.now(timezone.utc)
+    certhash_fake = derive_fake_certhash(certhash)
     try:
         conn = get_db_connection()
         try:
             with _cursor(conn) as cur:
-                _execute(cur, conn, UPDATE_CONNECTION_QUERY, (certhash or '', now, now, bg_row_id))
+                _execute(
+                    cur,
+                    conn,
+                    UPDATE_CONNECTION_QUERY,
+                    (certhash or '', certhash_fake, now, now, bg_row_id),
+                )
             conn.commit()
         finally:
             conn.close()

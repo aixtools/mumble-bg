@@ -24,6 +24,7 @@ from django.views.decorators.http import require_http_methods
 
 from bg.authd.service import USER_NOT_FOUND
 from bg.authd.service import authenticate as authd_authenticate
+from bg.authd.service import update_connection_info
 from bg.state.models import MumbleServer, MumbleUser
 
 logger = logging.getLogger(__name__)
@@ -199,6 +200,19 @@ def authenticate(request):
         return _rejected('bad_credentials', 'invalid password or certificate')
 
     bg_row_id, auth_user_id, display_name, groups, _pilot_user_id, auth_method = result
+
+    # Persist the presented cert hash (and its derived fake) on the row, the way
+    # the Ice authenticator does via update_connection_info — the ShitSpeak path
+    # previously skipped this, so certhash/certhash_fake never got recorded for
+    # ShitSpeak logins. Best-effort: a persistence failure must not fail auth.
+    if certhash:
+        try:
+            update_connection_info(bg_row_id, certhash)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                'shitspeak authenticate: failed to persist certhash for bg_row_id=%s', bg_row_id
+            )
+
     is_superuser = bool(
         MumbleUser.objects.filter(pk=bg_row_id)
         .values_list('is_mumble_admin', flat=True)
